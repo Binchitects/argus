@@ -7242,6 +7242,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateOnly?>("DueOn")
                         .HasColumnType("date");
 
+                    b.Property<decimal?>("HumanHours")
+                        .HasColumnType("numeric");
+
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
@@ -7385,6 +7388,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<Guid?>("GoalId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("HumanHours")
+                        .HasColumnType("numeric");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");

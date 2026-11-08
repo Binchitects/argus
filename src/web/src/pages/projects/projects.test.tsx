@@ -30,6 +30,7 @@ const report = {
   budget: null,
   merged: [{ repository: 'payments/api', iid: 7, title: 'Refund in one call', author: 'ann', mergedAt: '2026-11-02T10:00:00Z', url: 'https://gitlab.example.test/payments/api/-/merge_requests/7' }],
   mergedError: null,
+  human: { estimated: 2, notEstimated: 1, byHandHours: 12, peopleHours: 1.5, modelHours: 0.17, hourlyRate: 50, byHandCost: 600, actualCost: 78.25, faster: 8, savedHours: 10.5, savedCost: 521.75 },
 }
 
 describe('projects', () => {
@@ -75,6 +76,10 @@ describe('projects', () => {
     expect(screen.getAllByText('$3.25').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: /Refund in one call/ })).toHaveAttribute('href', report.merged[0]!.url)
     expect(screen.getByText('Your own share. Each person’s is for the project’s owners.')).toBeInTheDocument()
+    // Against doing it by hand: 12 hours by hand, done in 1.5, 8 times faster, $521.75 saved.
+    expect(screen.getByText('12 h')).toBeInTheDocument()
+    expect(screen.getByText('8×')).toBeInTheDocument()
+    expect(screen.getByText('$521.75')).toBeInTheDocument()
     const asked = new URL(calls.find((c) => c.path.startsWith('/api/projects/p1/report'))!.path, 'https://x').searchParams
     expect(Math.round((Date.parse(asked.get('to')!) - Date.parse(asked.get('from')!)) / 86_400_000)).toBe(7)
 
@@ -109,6 +114,11 @@ describe('projects', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'State of Refunds in a day' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Done' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ status: 'done' }))
+    // The hours it would take by hand, saved when the field is left.
+    const hours = screen.getByRole('spinbutton', { name: 'Hours by hand for Refunds in a day' })
+    await userEvent.type(hours, '16')
+    await userEvent.tab()
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH').at(-1)?.body).toEqual({ humanHours: 16 }))
 
     await userEvent.type(screen.getByRole('textbox', { name: 'New task' }), 'Write the runbook{Enter}')
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/projects/p1/tasks')?.body).toEqual({ title: 'Write the runbook' }))

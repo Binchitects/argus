@@ -33,10 +33,10 @@ public sealed record ProjectItemRequest(string Kind, Guid ItemId);
 public sealed record ChatProjectRequest(Guid? ProjectId);
 
 /// <summary>Only what is sent changes. DueOn: "" clears it.</summary>
-public sealed record ProjectGoalRequest(string? Title = null, string? Description = null, string? Status = null, string? DueOn = null, int? Position = null);
+public sealed record ProjectGoalRequest(string? Title = null, string? Description = null, string? Status = null, string? DueOn = null, int? Position = null, decimal? HumanHours = null);
 
 /// <summary>Only what is sent changes. GoalId and AssigneeId: Guid.Empty clears them.</summary>
-public sealed record ProjectTaskRequest(string? Title = null, Guid? GoalId = null, Guid? AssigneeId = null, bool? Done = null);
+public sealed record ProjectTaskRequest(string? Title = null, Guid? GoalId = null, Guid? AssigneeId = null, bool? Done = null, decimal? HumanHours = null);
 
 /// <summary>
 /// Projects in Argus Arena and Code Arena: made by anyone who may (feature.projects; a global one, everyone's to see and add
@@ -334,8 +334,8 @@ public static class ProjectEndpoints
             role, ownerId = p.OwnerId, owner = owner is null ? null : Name(owner), isOwner = p.OwnerId == me.Id,
             members, repositories, items = things, chats = shown,
             otherChats = otherOwners.Select(o => new { person = otherNames.GetValueOrDefault(o.Key) ?? "(a former person)", count = o.Count() }),
-            goals = goals.Select(x => new { x.Id, x.Title, x.Description, x.Status, x.DueOn, x.DoneAt, x.Position }),
-            tasks = tasks.Select(t => new { t.Id, t.Title, t.GoalId, t.AssigneeId, assignee = t.AssigneeId is { } a ? assigneeNames.GetValueOrDefault(a) : null, t.Done, t.DoneAt, t.CreatedAt }),
+            goals = goals.Select(x => new { x.Id, x.Title, x.Description, x.Status, x.DueOn, x.DoneAt, x.Position, x.HumanHours }),
+            tasks = tasks.Select(t => new { t.Id, t.Title, t.GoalId, t.AssigneeId, assignee = t.AssigneeId is { } a ? assigneeNames.GetValueOrDefault(a) : null, t.Done, t.DoneAt, t.HumanHours, t.CreatedAt }),
         });
     }
 
@@ -742,7 +742,13 @@ public static class ProjectEndpoints
         : body.Description is { Length: > 2000 } ? AuthEndpoints.Problem(400, "description", "A goal's description has at most 2,000 characters.")
         : body.Status is { } s && !ProjectGoal.States.Contains(s) ? AuthEndpoints.Problem(400, "status", "A goal is planned, doing, done or dropped.")
         : body.DueOn is { Length: > 0 } d && !DateOnly.TryParse(d, CultureInfo.InvariantCulture, out _) ? AuthEndpoints.Problem(400, "date", "Dates are written 2026-12-31.")
-        : null;
+        : HoursProblem(body.HumanHours);
+
+    /// <summary>The hours by hand: 0 to 100,000 (0 takes the estimate away).</summary>
+    private static IResult? HoursProblem(decimal? hours) =>
+        hours is < 0 or > 100_000 ? AuthEndpoints.Problem(400, "hours", "The hours by hand are 0 to 100,000 (0 takes the estimate away).") : null;
+
+    private static decimal? Hours(decimal hours) => hours == 0 ? null : Math.Round(hours, 2);
 
     private static void Apply(ProjectGoal goal, ProjectGoalRequest body)
     {
@@ -766,6 +772,10 @@ public static class ProjectEndpoints
         if (body.Position is { } position)
         {
             goal.Position = position;
+        }
+        if (body.HumanHours is { } hours)
+        {
+            goal.HumanHours = Hours(hours);
         }
     }
 
@@ -818,7 +828,7 @@ public static class ProjectEndpoints
         {
             return AuthEndpoints.Problem(400, "assignee", "That person is not there.");
         }
-        return null;
+        return HoursProblem(body.HumanHours);
     }
 
     private static void Apply(ProjectTask task, ProjectTaskRequest body)
@@ -839,6 +849,10 @@ public static class ProjectEndpoints
         {
             task.Done = done;
             task.DoneAt = done ? DateTimeOffset.UtcNow : null;
+        }
+        if (body.HumanHours is { } hours)
+        {
+            task.HumanHours = Hours(hours);
         }
     }
 
@@ -917,7 +931,7 @@ public static class ProjectEndpoints
     /// person's share is for its owners (others see their own row, and that it is so).
     /// </summary>
     private static async Task<IResult> ReportAsync(Guid id, DateTimeOffset from, DateTimeOffset to, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db,
-        AccessService access, LedgerSql sql, ArgusMcp argus, CancellationToken ct)
+        AccessService access, LedgerSql sql, ArgusMcp argus, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
     {
         var me = await Me(principal, users);
         var (p, role, refused) = await FindAsync(db, id, me, await access.MembershipAsync(me, ct), ProjectMember.Viewer, ct);
@@ -932,7 +946,7 @@ public static class ProjectEndpoints
         ProjectNumbers n;
         try
         {
-            n = await ProjectReport.ReadAsync(sql, db, p, from, to, ProjectReport.IntervalFor(from, to), ct);
+            n = await ProjectReport.ReadAsync(sql, db, p, from, to, ProjectReport.IntervalFor(from, to), costs.CurrentValue.PersonHourly, ct);
         }
         catch (Npgsql.NpgsqlException ex)
         {
@@ -943,6 +957,7 @@ public static class ProjectEndpoints
         return Results.Ok(new
         {
             from = n.From, to = n.To, intervalMs = (long)n.Interval.TotalMilliseconds, n.Totals, n.Progress, n.Models, n.Surfaces,
+            human = new { n.Human.Estimated, n.Human.NotEstimated, n.Human.ByHandHours, n.Human.PeopleHours, n.Human.ModelHours, n.Human.HourlyRate, n.Human.ByHandCost, n.Human.ActualCost, n.Human.Faster, n.Human.SavedHours, n.Human.SavedCost },
             series = n.Series, people = everyone ? n.People : [.. n.People.Where(x => x.Id == me.Id)], peopleHidden = !everyone,
             budget = p.MonthlyBudget is { } b ? new { monthly = b, spent = n.SpentThisMonth, percent = b > 0 ? Math.Round(100 * n.SpentThisMonth / b, 1) : 0, p.AlertPercent, p.StopAtBudget } : null,
             merged = merged.Select(x => new { repository = x.Repository, iid = x.Iid, title = x.Title, author = x.Author, mergedAt = x.MergedAt, url = x.Url }), mergedError,
@@ -950,7 +965,7 @@ public static class ProjectEndpoints
     }
 
     private static async Task<IResult> ExportAsync(Guid id, DateTimeOffset from, DateTimeOffset to, string? format, ClaimsPrincipal principal, UserManager<AppUser> users,
-        AppDbContext db, AccessService access, LedgerSql sql, ArgusMcp argus, Audit audit, TimeProvider clock, CancellationToken ct)
+        AppDbContext db, AccessService access, LedgerSql sql, ArgusMcp argus, Audit audit, TimeProvider clock, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
     {
         var me = await Me(principal, users);
         var (p, role, refused) = await FindAsync(db, id, me, await access.MembershipAsync(me, ct), ProjectMember.Viewer, ct);
@@ -969,7 +984,7 @@ public static class ProjectEndpoints
         ProjectNumbers n;
         try
         {
-            n = await ProjectReport.ReadAsync(sql, db, p, from, to, ProjectReport.IntervalFor(from, to), ct);
+            n = await ProjectReport.ReadAsync(sql, db, p, from, to, ProjectReport.IntervalFor(from, to), costs.CurrentValue.PersonHourly, ct);
         }
         catch (Npgsql.NpgsqlException ex)
         {

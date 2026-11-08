@@ -43,6 +43,8 @@ export interface ProjectGoal {
   dueOn: string | null
   doneAt: string | null
   position: number
+  /** The hours a person would take for it by hand; null: not estimated. */
+  humanHours: number | null
 }
 
 export interface ProjectTask {
@@ -53,6 +55,8 @@ export interface ProjectTask {
   assignee: string | null
   done: boolean
   doneAt: string | null
+  /** The hours a person would take for it by hand; null: not estimated. */
+  humanHours: number | null
   createdAt: string
 }
 
@@ -109,6 +113,20 @@ export interface ProjectReport {
   budget: { monthly: number; spent: number; percent: number; alertPercent: number; stopAtBudget: boolean } | null
   merged: { repository: string; iid: number; title: string; author: string | null; mergedAt: string | null; url: string | null }[]
   mergedError: string | null
+  /** The work done in the time against doing it by hand (Settings → Costs → A person's hour). */
+  human: {
+    estimated: number
+    notEstimated: number
+    byHandHours: number
+    peopleHours: number
+    modelHours: number
+    hourlyRate: number
+    byHandCost: number
+    actualCost: number
+    faster: number | null
+    savedHours: number
+    savedCost: number
+  }
 }
 
 /**

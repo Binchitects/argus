@@ -18,9 +18,24 @@ public sealed record ProjectUse(string Name, long Requests, long Tokens, decimal
 
 public sealed record ProjectProgress(int Goals, int GoalsDone, int Tasks, int TasksDone, int TasksDoneInRange, int Steps, int StepsDone, int Chats, int Rooms, int Sessions);
 
+/// <summary>
+/// The work done in a time against doing it by hand: the hours a person would have taken (the estimates of the tasks done,
+/// and of the goals done with no estimated task), the hours people spent (their active time in the project's chats) and
+/// the model's, and both at a person's hour (Settings → Costs) with the project's spend added to the done way.
+/// </summary>
+public sealed record ProjectHuman(int Estimated, int NotEstimated, double ByHandHours, double PeopleHours, double ModelHours, decimal HourlyRate, decimal ByHandCost, decimal ActualCost)
+{
+    /// <summary>How many times faster than by hand; null with nothing estimated or no one's time.</summary>
+    public double? Faster => ByHandHours > 0 && PeopleHours > 0 ? Math.Round(ByHandHours / PeopleHours, 1) : null;
+
+    public double SavedHours => Math.Round(ByHandHours - PeopleHours, 1);
+
+    public decimal SavedCost => ByHandCost - ActualCost;
+}
+
 /// <summary>What a project used and did over a time: every number its page and its exports show.</summary>
 public sealed record ProjectNumbers(DateTimeOffset From, DateTimeOffset To, TimeSpan Interval, ProjectTotals Totals, List<ProjectBucket> Series, List<ProjectPerson> People,
-    List<ProjectUse> Models, List<ProjectUse> Surfaces, ProjectProgress Progress, decimal SpentThisMonth);
+    List<ProjectUse> Models, List<ProjectUse> Surfaces, ProjectProgress Progress, decimal SpentThisMonth, ProjectHuman Human);
 
 /// <summary>
 /// A project's accounting over a time, from the ledger (gateway.requests tagged with it: tokens in and out, cost, requests,
@@ -37,7 +52,7 @@ public static class ProjectReport
     public static TimeSpan IntervalFor(DateTimeOffset from, DateTimeOffset to) =>
         to - from <= TimeSpan.FromDays(2) ? TimeSpan.FromHours(1) : to - from <= TimeSpan.FromDays(92) ? TimeSpan.FromDays(1) : TimeSpan.FromDays(7);
 
-    public static async Task<ProjectNumbers> ReadAsync(LedgerSql sql, AppDbContext db, Project project, DateTimeOffset from, DateTimeOffset to, TimeSpan interval, CancellationToken ct)
+    public static async Task<ProjectNumbers> ReadAsync(LedgerSql sql, AppDbContext db, Project project, DateTimeOffset from, DateTimeOffset to, TimeSpan interval, decimal hourly, CancellationToken ct)
     {
         var p = new Dictionary<string, object>
         {
@@ -103,8 +118,9 @@ public static class ProjectReport
             series.Add(new ProjectBucket(DateTimeOffset.FromUnixTimeSeconds(at), v.Input, v.Output, v.Cost));
         }
 
-        var goals = await db.ProjectGoals.AsNoTracking().Where(g => g.ProjectId == project.Id).Select(g => g.Status).ToListAsync(ct);
-        var tasks = await db.ProjectTasks.AsNoTracking().Where(t => t.ProjectId == project.Id).Select(t => new { t.Done, t.DoneAt }).ToListAsync(ct);
+        var goalRows = await db.ProjectGoals.AsNoTracking().Where(g => g.ProjectId == project.Id).Select(g => new { g.Id, g.Status, g.DoneAt, g.HumanHours }).ToListAsync(ct);
+        var goals = goalRows.Select(g => g.Status).ToList();
+        var tasks = await db.ProjectTasks.AsNoTracking().Where(t => t.ProjectId == project.Id).Select(t => new { t.GoalId, t.Done, t.DoneAt, t.HumanHours }).ToListAsync(ct);
         var chats = await db.Conversations.AsNoTracking().Where(c => c.WorkProjectId == project.Id).Select(c => new { c.Id, c.Kind, c.Origin }).ToListAsync(ct);
         var chatIds = chats.Select(c => c.Id).ToList();
         var steps = await db.PlanSteps.AsNoTracking().Where(s => db.Plans.Any(pl => pl.Id == s.PlanId && pl.ConversationId != null && chatIds.Contains(pl.ConversationId.Value)))
@@ -116,10 +132,21 @@ public static class ProjectReport
         var month = (await ProjectBudgets.SpentAsync(db, [project.Id], DateTimeOffset.UtcNow, ct)).GetValueOrDefault(project.Id);
         var total = new ProjectTotals(Num(totals[0]), Num(totals[1]), Num(totals[2]), Num(totals[3]), Dec(totals[4]), Num(totals[5]) / 1000.0,
             seconds.Values.Sum(s => s.Seconds), people.Count(x => x.Requests > 0 || x.Messages > 0), seconds.Values.Sum(s => s.Messages));
+        // The work done in the time, by hand: each task's estimate; a goal's own only when none of its tasks has one.
+        bool InRange(DateTimeOffset? at) => at >= from && at < to;
+        var estimatedGoals = tasks.Where(t => t.HumanHours is not null && t.GoalId is not null).Select(t => t.GoalId!.Value).ToHashSet();
+        var doneTasks = tasks.Where(t => t.Done && InRange(t.DoneAt)).ToList();
+        var doneGoals = goalRows.Where(g => g.Status == ProjectGoal.Done && InRange(g.DoneAt) && !estimatedGoals.Contains(g.Id)).ToList();
+        var byHand = (double)(doneTasks.Sum(t => t.HumanHours ?? 0) + doneGoals.Sum(g => g.HumanHours ?? 0));
+        var peopleHours = total.ActiveSeconds / 3600;
+        var human = new ProjectHuman(doneTasks.Count(t => t.HumanHours is not null) + doneGoals.Count(g => g.HumanHours is not null),
+            doneTasks.Count(t => t.HumanHours is null) + doneGoals.Count(g => g.HumanHours is null),
+            Math.Round(byHand, 2), Math.Round(peopleHours, 2), Math.Round(total.AgentSeconds / 3600, 2), hourly,
+            Math.Round((decimal)byHand * hourly, 2), Math.Round(total.Cost + (decimal)peopleHours * hourly, 2));
         return new ProjectNumbers(from, to, interval, total, series, people,
             [.. byModel.Rows.Select(r => new ProjectUse((string?)r[0] ?? "", Num(r[1]), Num(r[2]), Dec(r[3])))],
             [.. bySurface.Rows.Select(r => new ProjectUse(Surface((string?)r[0]), Num(r[1]), Num(r[2]), Dec(r[3])))],
-            progress, month);
+            progress, month, human);
     }
 
     /// <summary>Where requests came from, as people say it.</summary>
@@ -153,6 +180,12 @@ public static class ProjectReport
             new("Goals done", $"{progress.GoalsDone} of {progress.Goals}", progress.Goals == 0 ? "No goals yet" : $"{100 * progress.GoalsDone / progress.Goals}%"),
             new("Tasks done", $"{progress.TasksDone + progress.StepsDone} of {progress.Tasks + progress.Steps}", $"{progress.TasksDoneInRange} in this time; {merged.Count} change{(merged.Count == 1 ? "" : "s")} merged"),
         };
+        if (n.Human.Estimated > 0)
+        {
+            var h = n.Human;
+            figures.Add(new("By hand", ReportFiles.Hours(h.ByHandHours * 3600), $"{h.Estimated} estimated piece{(h.Estimated == 1 ? "" : "s")} of work done; {ReportFiles.Money(h.ByHandCost)} at {ReportFiles.Money(h.HourlyRate)} an hour"));
+            figures.Add(new("Done in", ReportFiles.Hours(h.PeopleHours * 3600), h.Faster is { } x ? $"{x.ToString("0.0", CultureInfo.InvariantCulture)}× faster; {ReportFiles.Money(h.ActualCost)} with the models' cost" : $"{ReportFiles.Money(h.ActualCost)} with the models' cost"));
+        }
         var charts = new List<ReportChart>
         {
             new("Tokens", ["Input", "Output"], [.. n.Series.Select(s => (s.At, new double[] { s.Input, s.Output }))]),

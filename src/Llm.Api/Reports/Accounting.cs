@@ -35,6 +35,9 @@ public sealed class CostOptions
     /// <summary>Support, licences, hosting or rack space, the people who run it: a month.</summary>
     public decimal ServicePerMonth { get; set; }
 
+    /// <summary>What an hour of a person's work costs (salary and overheads), for a project's work against doing it by hand.</summary>
+    public decimal PersonHourly { get; set; } = 50m;
+
     /// <summary>How the running cost is shared out: "spend" (the prices of Settings → Prices), "tokens" or "time" (the model's).</summary>
     public string ShareBy { get; set; } = "spend";
 }

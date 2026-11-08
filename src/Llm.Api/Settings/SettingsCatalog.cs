@@ -273,6 +273,8 @@ public static class SettingsCatalog
             { Default = "36", Unit = "months", Min = 1, Max = 240, Optional = false },
         new("Costs:ServicePerMonth", CostsGroup, "Service, a month", "Everything else running it costs a month: support contracts, licences, hosting or rack space, the people who look after it.", SettingType.Number, SettingScope.Live)
             { Default = "0", Unit = "$ per month", Min = 0, Max = 1000000000, Optional = false },
+        new("Costs:PersonHourly", CostsGroup, "A person's hour", "What an hour of a person's work costs, salary and overheads: a project's work done is set against the hours it would take by hand (each task's and goal's estimate) at this rate.", SettingType.Number, SettingScope.Live)
+            { Default = "50", Unit = "$ per hour", Min = 0, Max = 100000, Optional = false },
         new("Costs:ShareBy", CostsGroup, "Share the cost out by", "How Admin → Accounting shares the running cost among people, groups and projects: spend (their use at the prices above, so output, pictures and video weigh more), tokens, or time (the model's time on their requests).", SettingType.Choice, SettingScope.Live)
             { Default = "spend", Options = ["spend", "tokens", "time"], Optional = false },
 

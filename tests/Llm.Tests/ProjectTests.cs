@@ -241,6 +241,47 @@ public sealed class ProjectTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_work_done_is_set_against_doing_it_by_hand_from_each_tasks_estimate_and_a_goals_own_when_its_tasks_have_none()
+    {
+        var admin = await AdminAsync();
+        var (_, ann, _, _) = await PersonAsync(admin);
+        var id = await ProjectAsync(ann, new { name = "By hand" });
+        async Task<Guid> Add(string what, object body) => (await ann.JsonAsync(await ann.PostAsync($"/api/projects/{id}/{what}", body))).GetProperty("id").GetGuid();
+        // Goal one: 20 hours by hand, but its tasks have their own (3 and 5): those count. Goal two: 4 hours, no tasks.
+        var one = await Add("goals", new { title = "Search", humanHours = 20 });
+        var two = await Add("goals", new { title = "Docs", humanHours = 4 });
+        var a = await Add("tasks", new { title = "Index", goalId = one, humanHours = 3 });
+        var b = await Add("tasks", new { title = "Rank", goalId = one, humanHours = 5 });
+        var c = await Add("tasks", new { title = "Unestimated" });
+        await Add("tasks", new { title = "Not done yet", humanHours = 2 });
+        foreach (var t in new[] { a, b, c })
+        {
+            await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(ann, $"/api/projects/{id}/tasks/{t}", new { done = true }));
+        }
+        foreach (var g in new[] { one, two })
+        {
+            await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(ann, $"/api/projects/{id}/goals/{g}", new { status = "done" }));
+        }
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await PatchAsync(ann, $"/api/projects/{id}/tasks/{c}", new { humanHours = -1 }));
+        var page = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}"));
+        Assert.Equal(3m, page.GetProperty("tasks").EnumerateArray().Single(t => t.GetProperty("id").GetGuid() == a).GetProperty("humanHours").GetDecimal());
+        Assert.Equal(20m, page.GetProperty("goals").EnumerateArray().Single(g => g.GetProperty("id").GetGuid() == one).GetProperty("humanHours").GetDecimal());
+
+        var report = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}/report?{Window(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow.AddMinutes(1))}"));
+        var human = report.GetProperty("human");
+        Assert.Equal((3, 1, 12d), (human.GetProperty("estimated").GetInt32(), human.GetProperty("notEstimated").GetInt32(), human.GetProperty("byHandHours").GetDouble()));
+        // At $50 an hour (Settings → Costs) by default.
+        Assert.Equal((50m, 600m), (human.GetProperty("hourlyRate").GetDecimal(), human.GetProperty("byHandCost").GetDecimal()));
+        Assert.Equal(human.GetProperty("byHandCost").GetDecimal() - human.GetProperty("actualCost").GetDecimal(), human.GetProperty("savedCost").GetDecimal());
+
+        // An estimate taken away (0): that task is no longer estimated.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(ann, $"/api/projects/{id}/tasks/{a}", new { humanHours = 0 }));
+        report = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}/report?{Window(DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow.AddMinutes(1))}"));
+        Assert.Equal((2, 2, 9d), (report.GetProperty("human").GetProperty("estimated").GetInt32(), report.GetProperty("human").GetProperty("notEstimated").GetInt32(),
+            report.GetProperty("human").GetProperty("byHandHours").GetDouble()));
+    }
+
+    [Fact]
     [Trait("Control", "DAT-09")]
     public async Task Each_persons_share_is_for_the_owners_and_a_viewer_sees_their_own()
     {

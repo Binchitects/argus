@@ -1008,6 +1008,8 @@ What a project holds:
 - **Goals** (milestones with a state: planned, doing, done or dropped, and a
   due date) and **tasks** (done or not, of a goal or not, with who does
   them). The plans of the project's chats count too: their steps are tasks.
+  Each goal and task can have its **hours by hand**: what a person would take
+  for it without the models (empty or 0: not estimated).
 
 An archived project is read only: nothing goes in, its chats answer as
 before. Deleting one leaves its chats their owners', in no project.
@@ -1023,6 +1025,14 @@ a minute more) and the **agent time** (the models' time answering for it),
 by day, by person, by model and by where it came from (the chat, API keys and
 Code Arena, the app's own work). Owners see each person's row; others see
 their own.
+
+**Against doing it by hand** sets the work done in the time against its
+estimates: the hours by hand of the tasks done (and of the goals done when
+none of their tasks has an estimate), against the people's active time, and
+both at a person's hour (Settings → Costs → A person's hour, $50 by default),
+the done way with the project's cost added. It says how many times faster and
+what was saved, and how many done had no estimate. The PDF and Excel reports
+carry it too.
 
 Every number comes from the usage log, the same as Usage & cost. A request
 counts to a project when it was for one of the project's chats (its requests

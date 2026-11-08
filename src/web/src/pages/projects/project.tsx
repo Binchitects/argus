@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AppWindow, Bot, Clock, Coins, ExternalLink, FolderGit2, GitMerge, Globe2, Hash, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
+import { AppWindow, Bot, Clock, Coins, ExternalLink, Gauge, FolderGit2, GitMerge, Globe2, Hash, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -267,6 +267,7 @@ function Overview({ project: p, time }: { project: Project; time: TimeWindowStat
               </CardContent>
             </Card>
           </div>
+          <ByHand human={r.human} />
           <Merged report={r} hasRepositories={p.repositories.length > 0} />
         </>
       )}
@@ -345,6 +346,71 @@ function useProjectChange(id: string) {
   })
 }
 
+/** The hours a goal or task would take by hand: saved when the field is left with a new value; empty takes it away. Keyed by its value, so a saved one shows. */
+function HoursByHand({ value, title, disabled, onSave }: { value: number | null; title: string; disabled: boolean; onSave: (hours: number) => void }) {
+  const [text, setText] = useState(value === null ? '' : String(value))
+  const save = () => {
+    const hours = text.trim() === '' ? 0 : Number(text)
+    if (!Number.isFinite(hours) || hours < 0 || hours === (value ?? 0)) return setText(value === null ? '' : String(value))
+    onSave(hours)
+  }
+  return (
+    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <Input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step={0.5}
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+        placeholder="–"
+        aria-label={`Hours by hand for ${title}`}
+        className="h-8 w-16 px-2 text-right tabular-nums"
+      />
+      h
+    </span>
+  )
+}
+
+/** The work done in the time against doing it by hand: hours and cost, and how much faster. */
+function ByHand({ human: h }: { human: ProjectReport['human'] }) {
+  if (h.estimated === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Against doing it by hand</CardTitle>
+          <CardDescription>
+            Give the goals and tasks the hours they would take by hand (Work): the work done is then set against the hours people spent and what it cost.
+            {h.notEstimated > 0 && ` ${h.notEstimated} done in this time without an estimate.`}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Against doing it by hand</CardTitle>
+        <CardDescription>
+          The {h.estimated} estimated piece{h.estimated === 1 ? '' : 's'} of work done in this time{h.notEstimated > 0 ? ` (${h.notEstimated} more without an estimate)` : ''}, at {money(h.hourlyRate)} a person&apos;s hour
+          (Settings → Costs). The done way is people&apos;s own time in the project&apos;s chats and sessions, with the models&apos; cost.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <StatGrid>
+          <Stat icon={Clock} label="By hand" value={`${h.byHandHours} h`} hint={money(h.byHandCost)} />
+          <Stat icon={Timer} label="Done in" value={`${h.peopleHours} h`} hint={`${money(h.actualCost)}; the models worked ${h.modelHours} h`} />
+          <Stat icon={Gauge} label="Faster" value={h.faster === null ? '–' : `${h.faster}×`} hint={h.savedHours >= 0 ? `${h.savedHours} h saved` : `${-h.savedHours} h more`} />
+          <Stat icon={Coins} label={h.savedCost >= 0 ? 'Saved' : 'Cost more'} value={money(Math.abs(h.savedCost))} hint={h.byHandCost > 0 ? `${Math.round((100 * h.actualCost) / h.byHandCost)}% of by hand` : undefined} />
+        </StatGrid>
+      </CardContent>
+    </Card>
+  )
+}
+
 /** Goals (milestones with a state and a due day) and tasks, for contributors to keep. */
 function Work({ project: p }: { project: Project }) {
   const change = useProjectChange(p.id)
@@ -367,7 +433,9 @@ function Work({ project: p }: { project: Project }) {
       <Card>
         <CardHeader>
           <CardTitle>Goals</CardTitle>
-          <CardDescription>Milestones, each planned, doing, done or dropped. Done goals make the project&apos;s progress.</CardDescription>
+          <CardDescription>
+            Milestones, each planned, doing, done or dropped. Done goals make the project&apos;s progress. The hours are what it would take by hand: a goal&apos;s count when none of its tasks has its own.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {p.goals.length === 0 && <p className="text-sm text-muted-foreground">No goals yet.</p>}
@@ -381,6 +449,7 @@ function Work({ project: p }: { project: Project }) {
                     {g.doneAt ? ` · done ${new Date(g.doneAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : ''}
                   </p>
                 </div>
+                <HoursByHand key={`${g.id}-${g.humanHours}`} value={g.humanHours} title={g.title} disabled={!may} onSave={(humanHours) => change.mutate({ path: `/goals/${g.id}`, method: 'PATCH', body: { humanHours } })} />
                 <Select value={g.status} disabled={!may} onValueChange={(status) => change.mutate({ path: `/goals/${g.id}`, method: 'PATCH', body: { status } })}>
                   <SelectTrigger className="h-8 w-32" aria-label={`State of ${g.title}`}>
                     <SelectValue />
@@ -415,7 +484,7 @@ function Work({ project: p }: { project: Project }) {
       <Card>
         <CardHeader>
           <CardTitle>Tasks</CardTitle>
-          <CardDescription>What is to be done, of a goal or not, and who does it. The plans of its chats count as tasks too.</CardDescription>
+          <CardDescription>What is to be done, of a goal or not, who does it, and the hours it would take by hand. The plans of its chats count as tasks too.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {p.tasks.length === 0 && <p className="text-sm text-muted-foreground">No tasks yet.</p>}
@@ -433,6 +502,7 @@ function Work({ project: p }: { project: Project }) {
                   <bdi>{t.title}</bdi>
                   {t.goalId && <span className="ms-2 text-xs text-muted-foreground">{p.goals.find((g) => g.id === t.goalId)?.title}</span>}
                 </label>
+                <HoursByHand key={`${t.id}-${t.humanHours}`} value={t.humanHours} title={t.title} disabled={!may} onSave={(humanHours) => change.mutate({ path: `/tasks/${t.id}`, method: 'PATCH', body: { humanHours } })} />
                 <Select
                   value={t.assigneeId ?? 'none'}
                   disabled={!may}

@@ -34,6 +34,7 @@ const report = {
   budget: { monthly: 20, spent: 3.25, percent: 16, alertPercent: 80, stopAtBudget: false },
   merged: [],
   mergedError: null,
+  human: { estimated: 2, notEstimated: 1, byHandHours: 12, peopleHours: 1.5, modelHours: 0.17, hourlyRate: 50, byHandCost: 600, actualCost: 78.25, faster: 8, savedHours: 10.5, savedCost: 521.75 },
 }
 
 const state = (more: object = {}) => ({ manual: 'https://arena.example.test/help/code-arena', workProject: null, chat: 'c9', busy: false, ...more })

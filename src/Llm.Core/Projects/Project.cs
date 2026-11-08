@@ -103,6 +103,8 @@ public sealed class ProjectGoal
     public string Status { get; set; } = Planned;
     public DateOnly? DueOn { get; set; }
     public DateTimeOffset? DoneAt { get; set; }
+    /// <summary>The hours a person would take for it by hand, without the models (counted when none of its tasks has its own); null: not estimated.</summary>
+    public decimal? HumanHours { get; set; }
     /// <summary>Its place in the list.</summary>
     public int Position { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -118,6 +120,8 @@ public sealed class ProjectTask
     public Guid? AssigneeId { get; set; }
     public bool Done { get; set; }
     public DateTimeOffset? DoneAt { get; set; }
+    /// <summary>The hours a person would take for it by hand, without the models; null: not estimated.</summary>
+    public decimal? HumanHours { get; set; }
     public Guid? CreatedById { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
