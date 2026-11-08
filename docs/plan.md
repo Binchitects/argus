@@ -83,7 +83,9 @@ program, and Edge or Chrome 109.
 4. **Code Arena's extensions.** An extension host for VS Code extensions that
    need their own code (ESLint, GitLens, Pylance).
 5. **Flaky tests to fix at their cause:** `ConcurrencyTests.A_model_asked_for_at_the_engines_limit_unloads_an_idle_one_not_kept_never_the_big_one`,
-   `StdioChildTests.A_child_that_listens_is_reached_on_its_port_and_one_that_ends_first_says_why`
+   `StdioChildTests.A_child_that_listens_is_reached_on_its_port_and_one_that_ends_first_says_why`,
+   `DebugSessionTests.Each_response_goes_to_the_page_that_asked_with_its_own_number_and_events_go_to_every_page`
+   (the stop took 8.7 s on CI, past the 5 s its waits add up to: something else waits)
    (each failed once under a full suite's load, and passes alone).
 
 ## Groundwork, in between

@@ -126,7 +126,7 @@ jobs:
           until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
           docker exec postgres psql -U app -d postgres -qc "create database litellm"
           docker exec -i postgres psql -U app -d litellm -q < tests/Llm.Tests/Resources/litellm-schema.sql
-          docker run -d --name app --network e2e --read-only --tmpfs /tmp \
+          docker run -d --name app --network e2e --read-only --tmpfs /tmp --tmpfs /audit:uid=1000,gid=1000 \
             -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
             -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
             -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 -e Gateway__ConnectWaitSeconds=0 -e Gateway__KeyWaitSeconds=0 llm-app:ci
@@ -180,6 +180,10 @@ jobs:
           docker build -t ws-e2e -f deploy/services/workspaces/Dockerfile .
           docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/Llm.Api/Dockerfile .
           docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/web/Dockerfile .
+      # Ubuntu 24.04 lets AppArmor refuse unprivileged user namespaces, which bubblewrap (the workspace's sandbox for
+      # the agent's commands) needs; a host of Arena's allows them. This runner is made to, as such a host is.
+      - name: Let the sandbox make its user namespace
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: A workspace end to end through the API
         env: { STUDIO_E2E_IMAGE: ws-e2e }
         run: dotnet test tests/Llm.Tests -c Release --filter "FullyQualifiedName~RealWorkspaceTests" --logger "console;verbosity=normal"
