@@ -307,6 +307,18 @@ class BundleTests(unittest.TestCase):
         left = cmd[cmd.index("--without") + 1].split(",")
         self.assertTrue({"argus", "scanners", "lean"} <= set(left), left)
 
+    def test_packs_asked_for_where_there_are_none_stop_the_bundle(self):
+        arenactl, made, args = self.bundle(set())
+        with tempfile.TemporaryDirectory() as d:
+            arenactl.ROOT = Path(d)
+            (Path(d) / "packs").mkdir()
+            args.packs = True
+            with self.assertRaises(arenactl.Stop):
+                arenactl.cmd_bundle(args)
+            (Path(d) / "packs" / "cpp.arguspack").write_bytes(b"x")
+            arenactl.DIST = Path(d) / "dist"
+            self.assertEqual(arenactl.cmd_bundle(args), 0)
+
     def test_a_core_image_that_failed_stops_the_bundle(self):
         arenactl, made, args = self.bundle({"app"})
         with self.assertRaises(arenactl.Stop):

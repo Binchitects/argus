@@ -843,6 +843,10 @@ def cmd_bundle(a) -> int:
     if missing and not a.dry_run:
         raise Stop("the bundle needs:\n  " + "\n  ".join(missing) + "\n(./arenactl doctor --for bundle)", 3)
     linux_only("Making the bundle")
+    # Packs are built, not kept in git: a fresh checkout has none, and a bundle "with the packs" would have none.
+    if a.packs and not list((ROOT / "packs").glob("*.arguspack")):
+        raise Stop(f"--packs: {ROOT / 'packs'} holds no knowledge packs (*.arguspack): they are built, not in git. Copy them in "
+                   "(or argus pack install them there) first, or make the bundle without --packs", 2)
     profiles = choose_features(None, a.without, all_=True)
     if not a.no_build and not a.dry_run:
         # Every feature's image, each that can be built or pulled here. An optional feature whose image cannot be (the
