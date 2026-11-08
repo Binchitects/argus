@@ -127,6 +127,8 @@ describe('code', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/code/reviews/w2'))
     expect(calls.find((c) => c.path === '/api/code/reviews' && c.method === 'POST')?.body).toEqual({ project: 'g/lib', scope: 'repository', ref: 'develop' })
 
+    // The review's page shows first (the form gone with its fields), then back to a fresh form.
+    expect(await screen.findByText(/Listing its files/)).toBeInTheDocument()
     await router.navigate('/code?tab=review')
     await userEvent.click(await screen.findByRole('radio', { name: 'Several repositories' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Repositories' }), 'g/app{Enter}g/lib')

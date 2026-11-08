@@ -23,7 +23,8 @@ export function Stat({ label, value, hint, icon: Icon, tone, className, text }: 
       >
         {value}
       </div>
-      {hint && <div className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</div>}
+      {/* Two lines at most: a hint is cut only when it is longer than that. */}
+      {hint && <div className="mt-0.5 line-clamp-2 text-xs break-words text-muted-foreground">{hint}</div>}
     </div>
   )
 }

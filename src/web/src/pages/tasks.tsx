@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, meQuery } from '@/lib/api'
 import { configQuery } from './chat/api'
 import { blankSchedule, cronOf, describe, scheduleOf, weekdays, type Repeat, type Schedule } from './tasks-schedule'
 import { gitlabEvents as studioGitlabEvents } from './studio/studio-api'
@@ -159,6 +159,7 @@ export function TasksPage() {
   const [editing, setEditing] = useState<Task | 'new' | null>(null)
   const [starting, setStarting] = useState<TaskTemplate | null>(null)
   const templates = useQuery({ queryKey: ['tasks', 'templates'], queryFn: ({ signal }) => api<TaskTemplate[]>('/api/tasks/templates', { signal }) })
+  const me = useQuery(meQuery)
   const [connect, setConnect] = useState<{ name: string; url: string; secret: string; gitlab: boolean } | null>(null)
   const rotate = useMutation({
     mutationFn: (t: Task) => api<{ hookToken: string }>(`/api/tasks/${t.id}/secret`, { method: 'POST' }),
@@ -198,7 +199,18 @@ export function TasksPage() {
           </Button>
         }
       />
-      {!view.enabled && <Alert className="mb-4">Scheduled tasks are off here. An admin turns them on under Settings → Scheduled tasks.</Alert>}
+      {!view.enabled && (
+        <Alert className="mb-4">
+          Scheduled tasks are off here.{' '}
+          {me.data?.isAdmin || me.data?.permissions?.includes('settings.write') ? (
+            <Link to="/admin/settings#scheduled-tasks" className="font-medium underline underline-offset-2">
+              Turn them on in Settings → Scheduled tasks
+            </Link>
+          ) : (
+            'An admin turns them on under Settings → Scheduled tasks.'
+          )}
+        </Alert>
+      )}
       {view.tasks.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center">

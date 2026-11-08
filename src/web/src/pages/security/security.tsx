@@ -103,6 +103,8 @@ export function SecurityPage() {
         description="Where data from outside reaches a query, a command, a path, a fetch, a deserialiser or HTML, traced and judged by the model, with the security scanners, the packages' known vulnerabilities and the secrets in the history. One repository or several at once, looked at across for what they share. Read with your own access; nothing is written to the code host."
       />
       <div className="grid gap-6">
+        {/* Nothing reviewed yet: the form comes first, not a row of noughts. */}
+        {(latest.size > 0 || running > 0) && (
         <section aria-label="What is open">
           <StatGrid className="xl:grid-cols-6">
             {severities.map((v) => (
@@ -112,6 +114,7 @@ export function SecurityPage() {
             <Stat icon={ScanSearch} label="Running" value={String(running)} hint={`${batches.data?.length ?? 0} reviews of several`} />
           </StatGrid>
         </section>
+        )}
 
         {mayStart && (
           <Card>
