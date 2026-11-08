@@ -2195,7 +2195,25 @@ instructions) and the files beside it (references, templates, scripts).
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
-you: a morning digest, a weekly report on a repository with Argus.
+you: a morning digest, a weekly report on a repository with Argus. Or, with
+**What it does**, a task starts a review as you instead of asking: **Review a
+whole repository**, **Review several repositories** (looked at across),
+**Security review of a repository** or **of several**, each of the
+repositories you name at a branch, tag or commit (or each one's default
+branch). The run waits for the review to end (at most six hours) and
+delivers its summary (or the look across the repositories, with what is
+open) as an answer is delivered, with a link to the review; the task's card
+says **Open the review**. Starting one needs `review.run`; a review of
+several waits for one of yours still running (the run is skipped, and says
+so).
+
+**For developers** has ready-made tasks to add and fill in: **Merge requests
+waiting** (each weekday morning, the open merge requests of your projects,
+the old ones and those waiting on you first), **Failed pipelines** (each
+weekday, what failed since yesterday and the log lines that say why),
+**Release notes** (each Friday, what was merged that week), **Weekly
+repository review**, **Weekly product review** (several repositories),
+**Nightly security review** and **Weekly security review of a product**.
 
 - **The schedule** is chosen in words (every day, weekdays, once a week or a
   month, every few hours, at a time) or written as cron (five fields), in a

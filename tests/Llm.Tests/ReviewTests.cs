@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -176,6 +177,79 @@ public sealed class ReviewTests(AppFixture app)
         Assert.Equal((2, 2, "Counting"), (listed.GetProperty("done").GetInt32(), listed.GetProperty("changes").GetInt32(), listed.GetProperty("batch").GetProperty("title").GetString()));
         await StatusAssert.Is(HttpStatusCode.NoContent, await me.Http.DeleteAsync(new Uri($"/api/code/reviews/batches/{id}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NotFound, await me.GetAsync($"/api/code/reviews/{batch.GetProperty("reviews")[0].GetProperty("id").GetGuid()}"));
+    }
+
+    [Fact]
+    public async Task A_scheduled_task_reviews_a_whole_repository_as_its_owner_and_delivers_its_summary_with_a_link()
+    {
+        Repository();
+        Llm.Api.Code.ReviewLauncher.Poll = TimeSpan.FromMilliseconds(50);
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, email, me) = await PersonAsync(admin);
+        // A review action names its repositories; one repository for a review of one.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await me.PostAsync("/api/tasks", new { name = "Weekly lib review", action = "review-repository", cron = "0 6 * * 1", timeZone = "UTC" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await me.PostAsync("/api/tasks", new { name = "Weekly", action = "review-repositories", repositories = new[] { "g/lib" }, cron = "0 6 * * 1" }));
+        var made = await me.PostAsync("/api/tasks", new { name = "Weekly lib review", action = "review-repository", repositories = new[] { "g/lib" }, @ref = "develop", cron = "0 6 * * 1", timeZone = "UTC" });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var task = await me.JsonAsync(made);
+        Assert.Equal(("review-repository", "develop"), (task.GetProperty("action").GetString(), task.GetProperty("ref").GetString()));
+        var id = task.GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.Accepted, await me.PostAsync($"/api/tasks/{id}/run"));
+        JsonElement run = default;
+        for (var i = 0; i < 400; i++)
+        {
+            var runs = (await me.JsonAsync(await me.GetAsync($"/api/tasks/{id}/runs"))).EnumerateArray().ToList();
+            if (runs.Count > 0 && runs[0].GetProperty("status").GetString() != "running")
+            {
+                run = runs[0];
+                break;
+            }
+            await Task.Delay(50);
+        }
+        Assert.Equal("done", run.GetProperty("status").GetString());
+        var link = run.GetProperty("link").GetString()!;
+        Assert.StartsWith("/code/reviews/", link, StringComparison.Ordinal);
+        // The review is the owner's, of the repository at the ref, and done; the notification has its verdict and summary.
+        var review = await me.JsonAsync(await me.GetAsync($"/api/code/reviews/{link["/code/reviews/".Length..]}"));
+        Assert.Equal(("done", "g/lib @ develop", "repository"), (review.GetProperty("review").GetProperty("status").GetString(), review.GetProperty("review").GetProperty("title").GetString(),
+            review.GetProperty("review").GetProperty("scope").GetString()));
+        var bell = await me.JsonAsync(await me.GetAsync("/api/notifications"));
+        var told = bell.GetProperty("items").EnumerateArray().First(n => n.GetProperty("title").GetString() == "Weekly lib review");
+        Assert.Equal(link, told.GetProperty("link").GetString());
+        Assert.Contains("Verdict: changes suggested", told.GetProperty("body").GetString(), StringComparison.Ordinal);
+        Assert.Contains(app.Argus.McpCalls, c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "files_at");
+    }
+
+    [Fact]
+    public async Task An_agent_studio_step_reviews_a_whole_repository_and_hands_its_summary_to_the_next_step()
+    {
+        Repository();
+        Llm.Api.Code.ReviewLauncher.Poll = TimeSpan.FromMilliseconds(50);
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, _, me) = await PersonAsync(admin);
+        // A review step names what it reviews and the repositories.
+        var bad = await me.PostAsync("/api/studio", new { name = "Bad", flow = new { trigger = new { kind = "manual" }, steps = new object[] { new { id = "health", kind = "review", review = "review-repository" } } } });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, bad);
+        var flow = new
+        {
+            trigger = new { kind = "manual" },
+            steps = new object[]
+            {
+                new { id = "health", kind = "review", review = "review-repository", repositories = "g/lib", @ref = "develop" },
+                new { id = "said", kind = "text", text = "Health: {{health.text}}" },
+            },
+        };
+        var made = await me.JsonAsync(await me.PostAsync("/api/studio", new { name = "Lib health", flow }));
+        var id = made.GetProperty("workflow").GetProperty("id").GetGuid();
+        var started = await me.JsonAsync(await me.PostAsync($"/api/studio/{id}/run", new { text = "" }));
+        var runId = started.GetProperty("id").GetGuid();
+        await app.Factory.Services.GetRequiredService<Llm.Api.Studio.StudioRuns>().Finished(runId).WaitAsync(TimeSpan.FromSeconds(60));
+        var run = await me.JsonAsync(await me.GetAsync($"/api/studio/runs/{runId}"));
+        Assert.True(run.GetProperty("status").GetString() == "done", run.ToString());
+        var steps = run.GetProperty("steps").EnumerateArray().ToList();
+        Assert.StartsWith("/code/reviews/", steps[0].GetProperty("link").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Verdict: changes suggested", steps[0].GetProperty("output").GetString(), StringComparison.Ordinal);
+        Assert.StartsWith("Health: g/lib @ develop. Verdict: changes suggested", steps[1].GetProperty("output").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

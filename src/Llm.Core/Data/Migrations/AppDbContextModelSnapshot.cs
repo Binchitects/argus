@@ -2558,6 +2558,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Link")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
                     b.Property<bool>("Manual")
                         .HasColumnType("boolean");
 
@@ -2585,6 +2589,13 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("ask");
+
                     b.Property<Guid?>("ConversationId")
                         .HasColumnType("uuid");
 
@@ -2595,6 +2606,11 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("Cross")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("Email")
                         .HasColumnType("boolean");
@@ -2627,8 +2643,18 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Ref")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
                     b.Property<bool>("ReplyInGitLab")
                         .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<string>>("Repositories")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<string>("RunningOn")
                         .HasMaxLength(100)

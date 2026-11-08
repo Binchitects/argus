@@ -2,7 +2,7 @@ import { api } from '@/lib/api'
 
 export type TriggerKind = 'manual' | 'schedule' | 'webhook' | 'gitlab' | 'room' | 'form'
 export type StepKind =
-  | 'ask' | 'agent' | 'tool' | 'code' | 'data' | 'knowledge' | 'http' | 'condition' | 'loop' | 'approval' | 'wait' | 'stop' | 'text' | 'room' | 'email' | 'notify' | 'comment' | 'gitlab' | 'file'
+  | 'ask' | 'agent' | 'tool' | 'code' | 'data' | 'knowledge' | 'http' | 'condition' | 'loop' | 'approval' | 'wait' | 'stop' | 'text' | 'room' | 'email' | 'notify' | 'comment' | 'gitlab' | 'file' | 'review'
 
 export interface FlowField {
   name: string
@@ -53,6 +53,14 @@ export interface FlowStep {
   fileName?: string | null
   /** gitlab: comment, label or issue. */
   action?: 'comment' | 'label' | 'issue' | null
+  /** review: what it reviews. */
+  review?: ReviewKind | null
+  /** review: the repositories, one a line. */
+  repositories?: string | null
+  /** review: the branch, tag or commit; empty: the default. */
+  ref?: string | null
+  /** review of several: look across them. */
+  cross?: boolean | null
   project?: string | null
   target?: string | null
   labels?: string | null
@@ -247,7 +255,19 @@ export const stepLabels: Record<StepKind, string> = {
   comment: 'Comment in GitLab',
   gitlab: 'Act in GitLab',
   file: 'Save a file',
+  review: 'Review code',
 }
+
+export type ReviewKind = 'merge-request' | 'review-repository' | 'review-repositories' | 'security' | 'security-several'
+
+/** What a review step reviews, in words; several: it reads 2 or more repositories. */
+export const reviewKinds: { value: ReviewKind; label: string; several?: boolean }[] = [
+  { value: 'merge-request', label: 'A merge request' },
+  { value: 'review-repository', label: 'A whole repository' },
+  { value: 'review-repositories', label: 'Several repositories', several: true },
+  { value: 'security', label: 'A repository’s security' },
+  { value: 'security-several', label: 'Several repositories’ security', several: true },
+]
 
 /** GitLab's events a trigger takes, in words. */
 export const gitlabEvents: [string, string][] = [

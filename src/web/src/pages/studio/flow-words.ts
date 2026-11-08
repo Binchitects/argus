@@ -1,8 +1,8 @@
 import {
   Bell, Bot, ClipboardList, Clock, Database, FileText, GitBranch, GitMerge, GitPullRequest, Globe, Hand, Hourglass, Library, Mail, MessageSquare, MessageSquareCode, MessagesSquare, OctagonX, Play,
-  Repeat, SquareTerminal, Type, Webhook, Wrench, type LucideIcon,
+  Repeat, ScanSearch, SquareTerminal, Type, Webhook, Wrench, type LucideIcon,
 } from 'lucide-react'
-import { opLabels, type FlowStep, type FlowTrigger, type StepKind, type TriggerKind } from './studio-api'
+import { opLabels, reviewKinds, type FlowStep, type FlowTrigger, type StepKind, type TriggerKind } from './studio-api'
 
 export const stepIcons: Record<StepKind, LucideIcon> = {
   ask: MessageSquare,
@@ -24,13 +24,14 @@ export const stepIcons: Record<StepKind, LucideIcon> = {
   comment: MessageSquareCode,
   gitlab: GitPullRequest,
   file: FileText,
+  review: ScanSearch,
 }
 
 export const triggerIcons: Record<TriggerKind, LucideIcon> = { manual: Play, schedule: Clock, webhook: Webhook, gitlab: GitMerge, room: MessagesSquare, form: ClipboardList }
 
 export const groups: { label: string; kinds: StepKind[] }[] = [
   { label: 'Think', kinds: ['ask', 'agent', 'tool', 'code'] },
-  { label: 'Find', kinds: ['knowledge', 'data', 'http'] },
+  { label: 'Find', kinds: ['knowledge', 'data', 'http', 'review'] },
   { label: 'Decide', kinds: ['condition', 'loop', 'approval', 'wait', 'stop'] },
   { label: 'Give out', kinds: ['text', 'room', 'email', 'notify', 'comment', 'gitlab', 'file'] },
 ]
@@ -59,6 +60,10 @@ export function summary(s: FlowStep): string {
       return s.action === 'label' ? `Label ${s.target || 'it'}: ${cut(s.labels, 40)}` : s.action === 'issue' ? `Open an issue: ${cut(s.subject, 50)}` : `Comment on ${s.target || 'it'}: ${cut(s.text, 40)}`
     case 'notify':
       return cut(s.subject || s.text)
+    case 'review': {
+      const what = reviewKinds.find((k) => k.value === s.review)?.label ?? 'Choose what to review'
+      return s.review === 'merge-request' ? `${what}${s.project ? `: ${s.project} ${s.target ?? ''}` : ': the event’s'}` : `${what}: ${cut(s.repositories?.split('\n').join(', '), 50)}${s.ref ? ` @ ${s.ref}` : ''}`
+    }
     case 'tool':
       return s.tool ? `${s.tool}${s.function ? ` → ${s.function}` : ''}` : 'Choose a tool'
     case 'condition':

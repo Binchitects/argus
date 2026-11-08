@@ -20,8 +20,12 @@ namespace Llm.Api.Schedules;
 /// a webhook post.
 /// </summary>
 public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer mailer, Webhooks webhooks, GitLabBot gitlab, Audit audit, TimeProvider clock,
-    IOptions<AuthOptions> auth, ILogger<TaskRunner> logger)
+    IOptions<AuthOptions> auth, ILogger<TaskRunner> logger, Code.ReviewLauncher launcher)
 {
+    /// <summary>The longest a review a task started is waited for; past it, the run says where to read it when it ends.</summary>
+    public static readonly TimeSpan LongestReview = TimeSpan.FromHours(6);
+
+
     /// <summary>Longest an answer of a task is kept for a notification and a webhook post.</summary>
     private const int Excerpt = 3000;
 
@@ -39,6 +43,10 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
         }
         var (zone, _) = Models.Hours.Zone(task.TimeZone);
         var local = TimeZoneInfo.ConvertTime(run.StartedAt, zone);
+        if (task.Action != ScheduledTask.Ask)
+        {
+            return await ReviewAsync(task, owner, run, local, trigger, ct);
+        }
 
         // The chat: the task's own, carried on, or a new one for this run.
         var c = task.SameChat && task.ConversationId is { } kept
@@ -95,13 +103,21 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
         {
             UserId = owner.Id, Kind = "task", Title = title, Body = Cut(summary, 400), Link = $"/chat/{c.Id}", CreatedAt = clock.GetUtcNow(),
         });
+        run.Delivery = await DeliverAsync(task, owner, run, local, title, summary, text, link, failed, trigger, ct);
+        return await EndAsync(run, failed ? "failed" : "done", error, ct);
+    }
+
+    /// <summary>What a run sends, besides its notification: the email, the webhook post, the GitLab comment; what was sent where.</summary>
+    private async Task<string?> DeliverAsync(ScheduledTask task, AppUser owner, ScheduledRun run, DateTimeOffset local, string title, string summary, string? text, string link, bool failed,
+        TriggerEvent? trigger, CancellationToken ct)
+    {
         var delivered = new List<string>();
         if (task.Email && owner.Email is { Length: > 0 } email)
         {
             try
             {
                 await mailer.SendAsync(email, $"{title} · {local.ToString("d MMM yyyy HH:mm", CultureInfo.InvariantCulture)}",
-                    $"{summary}\n\n--\nOpen the chat: {link}\nThe scheduled task \"{task.Name}\" sent this; change it under Scheduled tasks.", ct);
+                    $"{summary}\n\n--\nOpen it: {link}\nThe scheduled task \"{task.Name}\" sent this; change it under Scheduled tasks.", ct);
                 delivered.Add("email sent");
             }
             catch (Exception ex) when (ex is System.Net.Mail.SmtpException or InvalidOperationException or IOException or FormatException)
@@ -120,7 +136,7 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
             {
                 try
                 {
-                    await webhooks.PostAsync(url, $"{title}\n\n{Cut(summary, Excerpt)}\n\nOpen the chat: {link}", new JsonObject
+                    await webhooks.PostAsync(url, $"{title}\n\n{Cut(summary, Excerpt)}\n\nOpen it: {link}", new JsonObject
                     {
                         ["task"] = task.Name, ["status"] = failed ? "failed" : "done", ["url"] = link, ["at"] = run.StartedAt.ToString("o", CultureInfo.InvariantCulture),
                     }, ct);
@@ -147,8 +163,33 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
                 delivered.Add($"GitLab comment failed: {ex.Message}");
             }
         }
-        run.Delivery = delivered.Count > 0 ? Cut(string.Join("; ", delivered), 1000) : null;
-        return await EndAsync(run, failed ? "failed" : "done", error, ct);
+        return delivered.Count > 0 ? Cut(string.Join("; ", delivered), 1000) : null;
+    }
+
+    /// <summary>
+    /// A run that starts a review as the task's owner (a whole repository, several, or their security), waits for it to end
+    /// (at most <see cref="LongestReview"/>), and delivers what it found: its summary or its look across the repositories,
+    /// with a link to the review.
+    /// </summary>
+    private async Task<ScheduledRun> ReviewAsync(ScheduledTask task, AppUser owner, ScheduledRun run, DateTimeOffset local, TriggerEvent? trigger, CancellationToken ct)
+    {
+        var (started, refused) = await launcher.StartAsync(owner, task.Action, task.Repositories, task.Ref, task.Cross, task.Name, null, "schedule", ct);
+        if (started is null)
+        {
+            return await EndAsync(run, "skipped", refused, ct);
+        }
+        run.Link = started.Path;
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync("task.review", task.Name, detail: $"{task.Action}: {string.Join(", ", task.Repositories)}{(task.Ref is null ? "" : $" at {task.Ref}")}", actor: owner);
+        var seen = await launcher.WaitAsync(started, clock.GetUtcNow() + LongestReview, ct);
+        var link = $"https://{auth.Value.Domain}{started.Path}";
+        var failed = seen.Done && seen.Failed;
+        var text = seen.Done ? seen.Text?.Trim() : $"Still running after {LongestReview.TotalHours:0} hours: read it when it ends.";
+        var title = failed ? $"{task.Name} failed" : task.Name;
+        var summary = text ?? "";
+        db.Notifications.Add(new Notification { UserId = owner.Id, Kind = "task", Title = title, Body = Cut(summary, 400), Link = started.Path, CreatedAt = clock.GetUtcNow() });
+        run.Delivery = await DeliverAsync(task, owner, run, local, title, summary, failed ? null : text, link, failed, trigger, ct);
+        return await EndAsync(run, failed ? "failed" : "done", failed ? text : null, ct);
     }
 
     private async Task<ScheduledRun> EndAsync(ScheduledRun run, string status, string? error, CancellationToken ct)

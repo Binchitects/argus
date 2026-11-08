@@ -10,7 +10,12 @@ step as it went, to read and to replay.
 **Workspace → Agent Studio.** Press **New workflow**, start from a template,
 or turn one of your scheduled tasks into a workflow with **From a scheduled
 task**. A new workflow starts **Off**: it runs only by hand until you switch
-it **On**.
+it **On**. For code review the templates are **Review each merge request**
+(GitLab's merge request event, Code Studio's review of it as a comment),
+**Weekly repository health** (a whole repository reviewed each Monday, its
+summary by email when it needs changes) and **Weekly security of a
+product** (several repositories' security looked at across, under your
+bell).
 
 The canvas shows the workflow from the top down: the trigger, then the
 steps in order. Choose the trigger or a step to change it in the panel
@@ -80,6 +85,7 @@ beside the canvas. Press **+** between two steps to add one there.
 | **Comment in GitLab** | A comment on the merge request or issue that started the run (a GitLab trigger). |
 | **Act in GitLab** | With the app's GitLab bot: comment on a merge request (`!12`) or an issue (`#34`), add labels to one, or open an issue in a project. The project and the merge request or issue are the event's when left empty. Each act is in the audit log (`workflow.gitlab_comment`, `workflow.gitlab_label`, `workflow.gitlab_issue`). |
 | **Save a file** | A file of yours, to download from the run. |
+| **Review code** | A review as you, waited for (at most six hours): a merge request (its project and `!number`, or the one whose GitLab event started the run), a whole repository, several (looked at across), one repository's security or several's, at a branch, tag or commit or each one's default. The review's summary (or its look across the repositories, with what is open) is the step's answer, its page the link. Needs `review.run`; each is in the audit log (`workflow.review`). |
 
 Any text in a step may hold values. Press **{}** to put one in where the
 cursor is:

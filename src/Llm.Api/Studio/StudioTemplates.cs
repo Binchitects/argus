@@ -17,13 +17,35 @@ public static class StudioTemplates
                 new FlowStep { Id = "mail", Kind = "email", Name = "Email it", Subject = "Your digest, {{now}}", Text = "{{news.text}}" },
             ],
         }),
-        new("review", "Review each merge request", "When a merge request opens or changes in GitLab: a review of its changes, as a comment on it.", new Flow
+        new("review", "Review each merge request", "When a merge request opens or changes in GitLab: Code Studio's review of it (each finding checked by a second reviewer), as a comment on it.", new Flow
         {
             Trigger = new FlowTrigger { Kind = "gitlab", Events = ["merge_request"] },
             Steps =
             [
-                new FlowStep { Id = "review", Kind = "ask", Name = "Review it", Prompt = "Review this merge request: bugs first, then what is unclear. Short, with the lines.\n\n{{input.text}}" },
+                new FlowStep { Id = "review", Kind = "review", Name = "Review it", Review = Code.ReviewLauncher.MergeRequest },
                 new FlowStep { Id = "comment", Kind = "comment", Name = "Comment in GitLab", Text = "{{review.text}}" },
+            ],
+        }),
+        new("repo-health", "Weekly repository health", "Every Monday: a whole repository reviewed; when it needs changes, the summary by email.", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "schedule", Cron = "0 6 * * 1", TimeZone = "UTC" },
+            Steps =
+            [
+                new FlowStep { Id = "health", Kind = "review", Name = "Review the repository", Review = Code.ReviewLauncher.Repository, Repositories = "group/project" },
+                new FlowStep
+                {
+                    Id = "needs", Kind = "condition", Name = "Needs changes?", Left = "{{health.text}}", Op = "contains", Right = "changes suggested",
+                    Then = [new FlowStep { Id = "mail", Kind = "email", Name = "Email it", Subject = "The repository needs changes", Text = "{{health.text}}" }],
+                },
+            ],
+        }),
+        new("security-weekly", "Weekly security of a product", "Every Monday: several repositories' security reviewed and looked at across, what they share and what to fix first, under your bell.", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "schedule", Cron = "0 4 * * 1", TimeZone = "UTC" },
+            Steps =
+            [
+                new FlowStep { Id = "security", Kind = "review", Name = "Review their security", Review = Code.ReviewLauncher.SecuritySeveral, Repositories = "group/api\ngroup/web" },
+                new FlowStep { Id = "tell", Kind = "notify", Name = "Tell me", Subject = "Security this week", Text = "{{security.text}}" },
             ],
         }),
         new("triage", "Triage a room's questions", "A message in a room that starts with #triage: sorted, and answered there, or raised to you when it is urgent.", new Flow

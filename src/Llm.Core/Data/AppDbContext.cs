@@ -1175,6 +1175,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Trigger).HasMaxLength(20).HasDefaultValue("schedule");
             e.Property(x => x.TriggerSecretHash).HasMaxLength(64);
             e.Property(x => x.Events).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Action).HasMaxLength(32).HasDefaultValue(ScheduledTask.Ask);
+            e.Property(x => x.Repositories).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Ref).HasMaxLength(300);
+            e.Property(x => x.Cross).HasDefaultValue(true);
             e.Property(x => x.Cron).HasMaxLength(200);
             e.Property(x => x.TimeZone).HasMaxLength(100);
             e.Property(x => x.Model).HasMaxLength(200);
@@ -1187,6 +1191,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         builder.Entity<ScheduledRun>(e =>
         {
+            e.Property(x => x.Link).HasMaxLength(300);
             e.ToTable("scheduled_runs");
             e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.Error).HasMaxLength(2000);

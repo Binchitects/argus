@@ -11,6 +11,24 @@ public sealed class ScheduledTask
     public Guid UserId { get; set; }
     public required string Name { get; set; }
     public required string Prompt { get; set; }
+    /// <summary>
+    /// What a run does: ask (its prompt in a chat), or start a review as its owner and deliver what it found:
+    /// review-repository (a whole repository), review-repositories (several, looked at across), security (one
+    /// repository's security), security-several (several, looked at across).
+    /// </summary>
+    public string Action { get; set; } = Ask;
+    public const string Ask = "ask";
+    public const string ReviewRepository = "review-repository";
+    public const string ReviewRepositories = "review-repositories";
+    public const string Security = "security";
+    public const string SecuritySeveral = "security-several";
+    public static readonly string[] Actions = [Ask, ReviewRepository, ReviewRepositories, Security, SecuritySeveral];
+    /// <summary>The repositories a review action reads (paths as the code host has them).</summary>
+    public List<string> Repositories { get; set; } = [];
+    /// <summary>The branch, tag or commit they are read at; null: each one's default branch.</summary>
+    public string? Ref { get; set; }
+    /// <summary>A review of several repositories looks across them too.</summary>
+    public bool Cross { get; set; } = true;
     /// <summary>Five-field cron, in <see cref="TimeZone"/>'s wall clock.</summary>
     public required string Cron { get; set; }
     /// <summary>An IANA zone.</summary>
@@ -93,6 +111,8 @@ public sealed class ScheduledRun
     /// <summary>running, done, failed, skipped.</summary>
     public string Status { get; set; } = "running";
     public Guid? ConversationId { get; set; }
+    /// <summary>The review it started (an app path such as /code/reviews/{id}); null: it asked in a chat.</summary>
+    public string? Link { get; set; }
     public string? Error { get; set; }
     /// <summary>Run by its owner's "Run now", not by the clock.</summary>
     public bool Manual { get; set; }

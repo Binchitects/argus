@@ -113,6 +113,8 @@ export function newStep(kind: StepKind, steps: FlowStep[]): FlowStep {
       return { id, kind, action: 'comment', text: '' }
     case 'notify':
       return { id, kind, subject: '', text: '' }
+    case 'review':
+      return { id, kind, review: 'review-repository', repositories: '', ref: '' }
     default:
       return { id, kind, text: '' }
   }

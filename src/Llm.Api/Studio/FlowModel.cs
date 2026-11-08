@@ -76,6 +76,14 @@ public sealed class FlowStep
     public string? FileName { get; set; }
     /// <summary>gitlab: comment, label or issue.</summary>
     public string? Action { get; set; }
+    /// <summary>review: what it reviews (<see cref="Code.ReviewLauncher.Kinds"/>): merge-request, review-repository, review-repositories, security, security-several.</summary>
+    public string? Review { get; set; }
+    /// <summary>review: the repositories, one a line or comma separated (templates filled); a merge request's is <see cref="Project"/>, else the one whose event started the run.</summary>
+    public string? Repositories { get; set; }
+    /// <summary>review: the branch, tag or commit; empty: each repository's default branch.</summary>
+    public string? Ref { get; set; }
+    /// <summary>review of several: look across them (default on).</summary>
+    public bool? Cross { get; set; }
     /// <summary>gitlab: the project (its path or ID); empty: the one whose event started the run.</summary>
     public string? Project { get; set; }
     /// <summary>gitlab: the merge request (!12) or issue (#34); empty: the one whose event started the run.</summary>
@@ -105,7 +113,7 @@ public static partial class FlowModel
 {
     public static readonly string[] Triggers = ["manual", "schedule", "webhook", "gitlab", "room", "form"];
     public static readonly string[] Kinds =
-        ["ask", "agent", "tool", "code", "data", "knowledge", "http", "condition", "loop", "approval", "wait", "stop", "text", "room", "email", "notify", "comment", "gitlab", "file"];
+        ["ask", "agent", "tool", "code", "data", "knowledge", "http", "condition", "loop", "approval", "wait", "stop", "text", "room", "email", "notify", "comment", "gitlab", "file", "review"];
     public static readonly string[] GitLabActions = ["comment", "label", "issue"];
     public static readonly string[] Methods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
     /// <summary>The longest a wait step waits: a week.</summary>
@@ -195,6 +203,8 @@ public static partial class FlowModel
                 "http" when string.IsNullOrWhiteSpace(s.Url) || !Methods.Contains(s.Method ?? "GET") => $"it needs an address, and a method of: {string.Join(", ", Methods)}",
                 "wait" when s.Minutes is not (>= 1 and <= MostMinutes) => $"it waits 1 to {MostMinutes} minutes",
                 "stop" when s.Outcome is not (null or "done" or "failed") => "it ends the run done or failed",
+                "review" when !Code.ReviewLauncher.Kinds.Contains(s.Review) => $"it reviews one of: {string.Join(", ", Code.ReviewLauncher.Kinds)}",
+                "review" when s.Review != Code.ReviewLauncher.MergeRequest && string.IsNullOrWhiteSpace(s.Repositories) => "it needs the repositories it reviews",
                 "gitlab" when !GitLabActions.Contains(s.Action) => $"its action is one of: {string.Join(", ", GitLabActions)}",
                 "gitlab" when s.Action == "comment" && string.IsNullOrWhiteSpace(s.Text) => "it needs what to comment",
                 "gitlab" when s.Action == "label" && string.IsNullOrWhiteSpace(s.Labels) => "it needs the labels to add",

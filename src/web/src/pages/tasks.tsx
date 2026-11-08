@@ -11,6 +11,7 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
@@ -31,6 +32,8 @@ interface Run {
   finishedAt: string | null
   status: 'running' | 'done' | 'failed' | 'skipped'
   conversationId: string | null
+  /** The review it started (an app path); null: it asked in a chat. */
+  link?: string | null
   error: string | null
   manual: boolean
   delivery: string | null
@@ -60,7 +63,22 @@ interface Task {
   hookUrl: string | null
   /** Only in the answer that made it. */
   hookToken?: string | null
+  action: Action
+  repositories: string[]
+  ref: string | null
+  cross: boolean
 }
+
+type Action = 'ask' | 'review-repository' | 'review-repositories' | 'security' | 'security-several'
+
+/** What a task does, as its form offers it: one repository or several for each review. */
+const actions: { value: Action; label: string; several?: boolean; hint: string }[] = [
+  { value: 'ask', label: 'Ask a question', hint: 'Its question in a chat, with your model and tools.' },
+  { value: 'review-repository', label: 'Review a whole repository', hint: 'Its product’s code read file by file, then a summary of its health and a verdict.' },
+  { value: 'review-repositories', label: 'Review several repositories', several: true, hint: 'Each reviewed whole, then looked at across: their links, boundaries and what to fix first.' },
+  { value: 'security', label: 'Security review of a repository', hint: 'Its weaknesses, vulnerable packages and secrets, with what is new since the last review.' },
+  { value: 'security-several', label: 'Security review of several', several: true, hint: 'Each repository’s security, then what they share and the paths from one to another.' },
+]
 
 type Trigger = 'schedule' | 'webhook' | 'gitlab'
 
@@ -73,7 +91,7 @@ function runsOn(t: Task) {
   return `${describe(t.cron)} · ${t.timeZone}`
 }
 
-/** A scheduled task a plugin offers, to add to one's own. */
+/** A scheduled task a plugin offers (or one of the ready-made ones for developers), to add to one's own. */
 interface TaskTemplate {
   id: string
   name: string
@@ -83,7 +101,36 @@ interface TaskTemplate {
   tools: string[]
   plugin: string
   pluginTitle: string | null
+  action?: Action
 }
+
+/** Ready-made tasks for developers and code review: the repositories are the person's to fill in. */
+const forDevelopers: TaskTemplate[] = [
+  {
+    id: 'dev-mrs', name: 'Merge requests waiting', description: 'Each morning: the open merge requests of your projects, the oldest and those waiting on you first.', cron: '0 9 * * 1-5', tools: [], plugin: '', pluginTitle: null,
+    prompt: 'List the open merge requests in my projects (use mr_list for each project I work on). For each: title, author, age, whether CI passes, and whether it waits on a review. Put those older than three days and those waiting on me first, then a one-line summary.',
+  },
+  {
+    id: 'dev-ci', name: 'Failed pipelines', description: 'Each morning: the pipelines that failed since yesterday, each with the job and the lines that say why.', cron: '30 8 * * 1-5', tools: [], plugin: '', pluginTitle: null,
+    prompt: 'Find the pipelines in my projects that failed since yesterday (ci_status). For each: the project, the branch or merge request, the job that failed, and from its log (job_log) the few lines that say why. Group the same cause together and say which look flaky.',
+  },
+  {
+    id: 'dev-release', name: 'Release notes', description: 'Each Friday: what was merged this week, written as release notes.', cron: '0 15 * * 5', tools: [], plugin: '', pluginTitle: null,
+    prompt: 'Write release notes for what was merged this week in my projects (mr_list with state merged since Monday). Group them as New, Improved and Fixed, one line each in plain words for users, with the merge request number; leave out internal changes.',
+  },
+  {
+    id: 'dev-repo-review', name: 'Weekly repository review', description: 'Each Monday: a whole repository reviewed, its health and what to fix first.', cron: '0 6 * * 1', tools: [], plugin: '', pluginTitle: null, action: 'review-repository', prompt: '',
+  },
+  {
+    id: 'dev-product-review', name: 'Weekly product review', description: 'Each Monday: several repositories reviewed, then looked at across.', cron: '0 5 * * 1', tools: [], plugin: '', pluginTitle: null, action: 'review-repositories', prompt: '',
+  },
+  {
+    id: 'dev-security', name: 'Nightly security review', description: 'Each night: a repository’s security, with what is new since the night before.', cron: '0 2 * * *', tools: [], plugin: '', pluginTitle: null, action: 'security', prompt: '',
+  },
+  {
+    id: 'dev-security-several', name: 'Weekly security review of a product', description: 'Each Monday: several repositories’ security, what they share and what to fix first.', cron: '0 4 * * 1', tools: [], plugin: '', pluginTitle: null, action: 'security-several', prompt: '',
+  },
+]
 
 interface TasksView {
   enabled: boolean
@@ -193,9 +240,17 @@ export function TasksPage() {
                 <Switch checked={t.enabled} disabled={toggle.isPending} onCheckedChange={() => toggle.mutate(t)} aria-label={`${t.name} on`} />
               </CardHeader>
               <CardContent className="grid gap-3 text-sm">
-                <p dir="auto" className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
-                  {t.prompt}
-                </p>
+                {t.action === 'ask' ? (
+                  <p dir="auto" className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+                    {t.prompt}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    <span className="font-medium text-foreground">{actions.find((a) => a.value === t.action)?.label}</span>: {t.repositories.join(', ')}
+                    {t.ref ? ` @ ${t.ref}` : ''}
+                    {actions.find((a) => a.value === t.action)?.several && !t.cross ? ' (not looked at across)' : ''}
+                  </p>
+                )}
                 {t.enabled && t.nextRuns.length > 0 && (
                   <p className="text-xs text-muted-foreground">
                     Next: {t.nextRuns.map((r) => when(r, t.timeZone)).join(' · ')}
@@ -236,6 +291,27 @@ export function TasksPage() {
             </Card>
           ))}
         </div>
+      )}
+      {view.enabled && (
+        <section className="mt-8 grid gap-3" aria-label="For developers">
+          <h2 className="text-lg font-semibold">For developers</h2>
+          <ul className="grid gap-2 xl:grid-cols-2">
+            {forDevelopers.map((t) => (
+              <li key={t.id} className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="font-medium">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {actions.find((a) => a.value === (t.action ?? 'ask'))!.label} · {describe(t.cron)}
+                  </span>
+                  {t.description && <span className="text-muted-foreground">{t.description}</span>}
+                </span>
+                <Button size="sm" variant="outline" disabled={view.tasks.length >= view.perPerson} onClick={() => setStarting(t)} aria-label={`Add ${t.name}`}>
+                  <Plus /> Add
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {!!templates.data?.length && view.enabled && (
         <section className="mt-8 grid gap-3" aria-label="From plugins">
@@ -331,6 +407,11 @@ function LastRun({ run }: { run: Run }) {
             Open the chat
           </Link>
         )}
+        {run.link && (
+          <Link to={run.link} className="ml-auto text-primary-ink underline underline-offset-2">
+            Open the review
+          </Link>
+        )}
       </p>
       {run.error && <p className="text-destructive-ink">{run.error}</p>}
       {run.delivery && <p className="text-muted-foreground">{run.delivery}</p>}
@@ -354,14 +435,20 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
     trigger: saved?.trigger ?? ('schedule' as Trigger),
     events: saved?.events ?? ['merge_request'],
     replyInGitLab: saved?.replyInGitLab ?? false,
+    action: saved?.action ?? start?.action ?? ('ask' as Action),
+    repositories: (saved?.repositories ?? []).join('\n'),
+    ref: saved?.ref ?? '',
+    cross: saved?.cross ?? true,
   })
+  const action = actions.find((a) => a.value === form.action)!
   const [schedule, setSchedule] = useState<Schedule>(saved ? scheduleOf(saved.cron) : start ? scheduleOf(start.cron) : blankSchedule)
   const [error, setError] = useState<string | null>(null)
   const tools = config.data?.tools ?? []
   const toolsOn = form.tools ?? tools.filter((t) => t.onByDefault).map((t) => t.id)
   const save = useMutation({
     mutationFn: () => {
-      const body = { ...form, cron: form.trigger === 'schedule' ? cronOf(schedule) : '', webhook: form.webhook || (saved ? null : '') }
+      const repositories = form.repositories.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean)
+      const body = { ...form, repositories, cron: form.trigger === 'schedule' ? cronOf(schedule) : '', webhook: form.webhook || (saved ? null : '') }
       return saved ? api<Task>(`/api/tasks/${saved.id}`, { method: 'PATCH', body }) : api<Task>('/api/tasks', { body })
     },
     onSuccess: async (made) => {
@@ -392,9 +479,46 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
         <Field label="Name" hint="e.g. Morning digest.">
           <Input required maxLength={100} autoComplete="off" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-        <Field label="What to ask" hint="As you would write it in the chat. With Argus on, it can read your repositories.">
-          <Textarea dir="auto" required maxLength={20000} className="min-h-28" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
+        <Field label="What it does" hint={action.hint}>
+          <Select value={form.action} onValueChange={(v) => setForm({ ...form, action: v as Action })}>
+            <SelectTrigger className="min-w-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {actions.map((a) => (
+                <SelectItem key={a.value} value={a.value}>
+                  {a.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
+        {form.action === 'ask' ? (
+          <Field label="What to ask" hint="As you would write it in the chat. With Argus on, it can read your repositories.">
+            <Textarea dir="auto" required maxLength={20000} className="min-h-28" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
+          </Field>
+        ) : (
+          <>
+            {action.several ? (
+              <Field label="Repositories" hint="One a line, as group/project.">
+                <Textarea required rows={3} value={form.repositories} onChange={(e) => setForm({ ...form, repositories: e.target.value })} placeholder={'payments/api\npayments/web'} />
+              </Field>
+            ) : (
+              <Field label="Repository">
+                <Input required value={form.repositories} onChange={(e) => setForm({ ...form, repositories: e.target.value })} placeholder="group/project" />
+              </Field>
+            )}
+            <Field label="Branch, tag or commit" hint="Empty: each repository’s default branch.">
+              <Input value={form.ref} maxLength={300} onChange={(e) => setForm({ ...form, ref: e.target.value })} placeholder="the default branch" />
+            </Field>
+            {action.several && (
+              <div className="flex items-center gap-2 text-sm">
+                <Checkbox id="task-cross" checked={form.cross} onCheckedChange={(v) => setForm({ ...form, cross: v === true })} />
+                <label htmlFor="task-cross">Look across them</label>
+              </div>
+            )}
+          </>
+        )}
         <Tabs value={form.trigger} onValueChange={(v) => setForm({ ...form, trigger: v as Trigger })}>
           <TabsList aria-label="Runs">
             <TabsTrigger value="schedule">On a schedule</TabsTrigger>
@@ -495,6 +619,7 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
           <Field label="Time zone">
             <TimeZonePicker value={form.timeZone} onChange={(timeZone) => setForm({ ...form, timeZone })} />
           </Field>
+          {form.action === 'ask' && (
           <Field label="Model">
             <Select value={form.model || DEFAULT} onValueChange={(v) => setForm({ ...form, model: v === DEFAULT ? '' : v })}>
               <SelectTrigger className="min-w-0 [&>span]:truncate">
@@ -510,8 +635,9 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
               </SelectContent>
             </Select>
           </Field>
+          )}
         </div>
-        {tools.length > 0 && (
+        {form.action === 'ask' && tools.length > 0 && (
           <fieldset className="grid gap-2">
             <legend className="mb-1 text-sm font-medium">Tools</legend>
             <div className="flex flex-wrap gap-1.5">
@@ -531,7 +657,7 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
         )}
         <div className="grid gap-3">
           <div className="flex items-start gap-2">
-            <Switch id="task-same" checked={form.sameChat} onCheckedChange={(sameChat) => setForm({ ...form, sameChat })} />
+            <Switch id="task-same" checked={form.sameChat} disabled={form.action !== 'ask'} onCheckedChange={(sameChat) => setForm({ ...form, sameChat })} />
             <div className="grid gap-0.5">
               <Label htmlFor="task-same">One chat for every run</Label>
               <p className="text-xs text-muted-foreground">Each run reads the ones before (what changed since yesterday). Off: a new chat each time.</p>

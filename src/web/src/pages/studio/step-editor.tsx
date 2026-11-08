@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { listQuery } from '../chat/api'
 import { sourcesQuery } from '../data/data-api'
-import { functionsQuery, gitlabEvents, opLabels, stepLabels, toolsQuery, triggerLabels, type FlowField, type FlowStep, type FlowTrigger, type TriggerKind } from './studio-api'
+import { functionsQuery, gitlabEvents, opLabels, reviewKinds, stepLabels, toolsQuery, triggerLabels, type FlowField, type FlowStep, type FlowTrigger, type ReviewKind, type TriggerKind } from './studio-api'
 
 /** A field whose text may hold values of the run ({{s1.text}}): a menu puts one in where the cursor is. */
 function Template({ label, value, onChange, values, rows = 3, hint }: { label: string; value: string; onChange: (v: string) => void; values: { label: string; value: string }[]; rows?: number; hint?: string }) {
@@ -322,6 +322,49 @@ export function StepEditor({ step, values, onChange, onRemove }: { step: FlowSte
         <>
           <Template label="Title" value={step.subject ?? ''} onChange={(v) => set({ subject: v })} values={values} rows={1} />
           <Template label="Text" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} hint="To you, in the bell (and on your phone, where you turned that on)." />
+        </>
+      )}
+      {step.kind === 'review' && (
+        <>
+          <Field label="What it reviews">
+            <Select value={step.review ?? 'review-repository'} onValueChange={(v) => set({ review: v as ReviewKind })}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {reviewKinds.map((k) => (
+                  <SelectItem key={k.value} value={k.value}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {step.review === 'merge-request' ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Template label="Project (optional)" value={step.project ?? ''} onChange={(v) => set({ project: v })} values={values} rows={1} hint="Its path; empty: the event's." />
+              <Template label="Merge request (optional)" value={step.target ?? ''} onChange={(v) => set({ target: v })} values={values} rows={1} hint="!12; empty: the event's." />
+            </div>
+          ) : (
+            <>
+              <Template
+                label={reviewKinds.find((k) => k.value === step.review)?.several ? 'Repositories' : 'Repository'}
+                value={step.repositories ?? ''}
+                onChange={(v) => set({ repositories: v })}
+                values={values}
+                rows={reviewKinds.find((k) => k.value === step.review)?.several ? 3 : 1}
+                hint={reviewKinds.find((k) => k.value === step.review)?.several ? 'One a line, as group/project.' : 'As group/project.'}
+              />
+              <Template label="Branch, tag or commit (optional)" value={step.ref ?? ''} onChange={(v) => set({ ref: v })} values={values} rows={1} hint="Empty: each one's default branch." />
+              {reviewKinds.find((k) => k.value === step.review)?.several && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Checkbox id={`${step.id}-cross`} checked={step.cross ?? true} onCheckedChange={(on) => set({ cross: on === true })} />
+                  <label htmlFor={`${step.id}-cross`}>Look across them</label>
+                </div>
+              )}
+            </>
+          )}
+          <p className="text-xs text-muted-foreground">As you, with your access; it waits for the review to end, and its summary is the step&apos;s answer, its page the link. Needs Reviews (review.run).</p>
         </>
       )}
       {step.kind === 'gitlab' && (

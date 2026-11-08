@@ -22,9 +22,13 @@ namespace Llm.Api.Schedules;
 /// <param name="Webhook">A URL to post the answer to; "": none; null: unchanged.</param>
 /// <param name="Trigger">"schedule" (Cron), "webhook" (any system posting to its address) or "gitlab" (GitLab's events, <paramref name="Events"/>).</param>
 /// <param name="ReplyInGitLab">Its answer goes back to GitLab as a comment (by the GitLab bot).</param>
+/// <param name="Action">ask (its prompt in a chat), or a review it starts: review-repository, review-repositories, security, security-several.</param>
+/// <param name="Repositories">The repositories a review reads.</param>
+/// <param name="Ref">The branch, tag or commit they are read at; "": each one's default branch; null: unchanged.</param>
+/// <param name="Cross">A review of several repositories looks across them too.</param>
 public sealed record TaskRequest(string? Name = null, string? Prompt = null, string? Cron = null, string? TimeZone = null, string? Model = null, string? Thinking = null,
     List<string>? Tools = null, bool? SameChat = null, bool? Email = null, string? Webhook = null, bool? Enabled = null,
-    string? Trigger = null, List<string>? Events = null, bool? ReplyInGitLab = null);
+    string? Trigger = null, List<string>? Events = null, bool? ReplyInGitLab = null, string? Action = null, List<string>? Repositories = null, string? Ref = null, bool? Cross = null);
 
 /// <summary>Scheduled tasks: questions asked on a schedule, as their owner. Each person sees and changes only their own.</summary>
 public static class TaskEndpoints
@@ -88,7 +92,7 @@ public static class TaskEndpoints
         t.Enabled, t.NextRunAt, t.LastRunAt, running,
         nextRuns = t.Enabled && t.Trigger == Triggers.Schedule && Cron.Parse(t.Cron).Cron is { } cron ? cron.NextRuns(now, Hours.Zone(t.TimeZone).Zone, 3) : [],
         lastRun = last is null ? null : RunView(last),
-        t.Trigger, t.Events, t.ReplyInGitLab,
+        t.Trigger, t.Events, t.ReplyInGitLab, t.Action, t.Repositories, t.Ref, t.Cross,
         hookUrl = t.Trigger == Triggers.Schedule ? null : $"{origin}/api/hooks/{t.Id}",
         // Only in the answer that made it.
         hookToken = secret,
@@ -102,7 +106,7 @@ public static class TaskEndpoints
         return secret;
     }
 
-    private static object RunView(ScheduledRun r) => new { r.Id, r.StartedAt, r.FinishedAt, r.Status, r.ConversationId, r.Error, r.Manual, r.Delivery };
+    private static object RunView(ScheduledRun r) => new { r.Id, r.StartedAt, r.FinishedAt, r.Status, r.ConversationId, r.Link, r.Error, r.Manual, r.Delivery };
 
     private static async Task<IResult> AddAsync(TaskRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TaskContext context, Audit audit, CancellationToken ct)
     {
@@ -258,7 +262,38 @@ public static class TaskEndpoints
         {
             return AuthEndpoints.Problem(400, "name", "A task needs a name of up to 100 characters, e.g. Morning digest.");
         }
+        var action = body.Action?.Trim() ?? task.Action;
+        if (!ScheduledTask.Actions.Contains(action))
+        {
+            return AuthEndpoints.Problem(400, "action", "A task asks its question, or reviews a repository, several, or their security.");
+        }
+        var repositories = (body.Repositories ?? task.Repositories).Select(r => (r ?? "").Trim().Trim('/')).Where(r => r.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var (fewest, most) = action switch
+        {
+            ScheduledTask.ReviewRepository or ScheduledTask.Security => (1, 1),
+            ScheduledTask.ReviewRepositories => (2, Code.CodeReviewBatches.MostRepositories),
+            ScheduledTask.SecuritySeveral => (2, Code.SecurityBatches.MostRepositories),
+            _ => (0, 0),
+        };
+        if (action != ScheduledTask.Ask && (repositories.Count < fewest || repositories.Count > most || repositories.Any(r => r.Length > 500)))
+        {
+            return AuthEndpoints.Problem(400, "repositories", fewest == most ? "Name the repository it reviews, by its path (group/project)." : $"Name {fewest} to {most} repositories, each by its path (group/project).");
+        }
+        if (action != ScheduledTask.Ask && !await x.Access.MayAsync(me, Llm.Core.Access.Permissions.ReviewRun, ct))
+        {
+            return AuthEndpoints.Problem(403, "review", "Reviews are not among what you may do (review.run).");
+        }
+        var reference = body.Ref is null ? task.Ref : body.Ref.Trim() is { Length: > 0 } r ? r : null;
+        if (reference is { Length: > 300 })
+        {
+            return AuthEndpoints.Problem(400, "ref", "A branch, tag or commit has at most 300 characters.");
+        }
+        // A review needs no question: what it is says it.
         var prompt = body.Prompt?.Trim() ?? task.Prompt;
+        if (action != ScheduledTask.Ask && prompt.Length == 0)
+        {
+            prompt = $"{action} {string.Join(", ", repositories)}";
+        }
         if (prompt.Length is 0 or > 20_000)
         {
             return AuthEndpoints.Problem(400, "prompt", "Write what to ask (up to 20,000 characters).");
@@ -358,6 +393,10 @@ public static class TaskEndpoints
         }
         task.Name = name;
         task.Prompt = prompt;
+        task.Action = action;
+        task.Repositories = action == ScheduledTask.Ask ? [] : repositories;
+        task.Ref = action == ScheduledTask.Ask ? null : reference;
+        task.Cross = body.Cross ?? task.Cross;
         task.Cron = cron?.Expression ?? "";
         task.Trigger = trigger;
         task.Events = trigger == Triggers.GitLab ? events : [];

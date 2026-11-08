@@ -30,8 +30,10 @@ public sealed class FlowEndException(string message, bool stopped = false, bool 
 /// </summary>
 public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs, ToolRegistry registry, AccessService access, Mailer mailer, GitLabBot gitlab,
     QueuedMessages queue, StudioRuns runs, Audit audit, TimeProvider clock, Insights.DataQuestions questions, Knowledge.KnowledgeSearch knowledge, SandboxClient sandbox,
-    WebFetcher web, IHttpClientFactory http)
+    WebFetcher web, IHttpClientFactory http, Code.ReviewLauncher reviews)
 {
+    /// <summary>The longest a review step waits for its review.</summary>
+    public static readonly TimeSpan LongestReview = TimeSpan.FromHours(6);
     private const int MostBody = 1024 * 1024;
     /// <summary>The most steps one run takes (each turn of a loop counts).</summary>
     public const int MostTaken = 300;
@@ -253,6 +255,7 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
             "issue" => $"{FlowModel.Fill(step.Subject, values)}\n\n{FlowModel.Fill(step.Text, values)}".Trim(),
             _ => FlowModel.Fill(step.Text, values),
         },
+        "review" => $"{step.Review}: {FlowModel.Fill(step.Repositories, values)}{FlowModel.Fill(step.Project, values)} {FlowModel.Fill(step.Target, values)} {FlowModel.Fill(step.Ref, values)}".Trim(),
         "tool" => new JsonObject((step.Arguments ?? []).Select(a => KeyValuePair.Create(a.Key, Argument(FlowModel.Fill(a.Value, values))))).ToJsonString(FlowModel.Json),
         "email" => $"{FlowModel.Fill(step.Subject, values)}\n\n{FlowModel.Fill(step.Text, values)}".Trim(),
         _ => FlowModel.Fill(step.Text, values),
@@ -380,6 +383,8 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
                 await audit.WriteAsync("workflow.gitlab_comment", _workflow.Name, detail: $"project {target.Project}, {target.Kind} {target.Id}", actor: _owner);
                 return ("Commented in GitLab.", null, null);
             }
+            case "review":
+                return await ReviewAsync(step, values, ct);
             case "file":
             {
                 var name = FlowModel.Fill(step.FileName, values).Trim() is { Length: > 0 } n ? string.Concat(n.Where(c => !Path.GetInvalidFileNameChars().Contains(c))) : "result.md";
@@ -632,6 +637,55 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
     /// Acts in GitLab with the app's bot: a comment, labels added, an issue opened. The project and merge request or issue
     /// are the step's, or else those of the event that started the run.
     /// </summary>
+    /// <summary>
+    /// A review as the flow's owner (who may run reviews), waited for: its summary or its look across the repositories is the
+    /// step's output, its page the link. A merge request is the step's project and !number, or the one whose event started the run.
+    /// </summary>
+    private async Task<(string, JsonNode?, string?)> ReviewAsync(FlowStep step, Dictionary<string, JsonNode?> values, CancellationToken ct)
+    {
+        if (!await access.MayAsync(_owner, Core.Access.Permissions.ReviewRun, ct))
+        {
+            throw new FlowEndException("Its owner may not run reviews (review.run).");
+        }
+        var kind = step.Review!;
+        List<string> repositories = [.. FlowModel.Fill(step.Repositories, values).Split(['\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(r => r.Trim('/')).Where(r => r.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
+        int? iid = null;
+        if (kind == Code.ReviewLauncher.MergeRequest)
+        {
+            var target = _run.Reply is null ? null : JsonSerializer.Deserialize<GitLabTarget>(_run.Reply, FlowModel.Json);
+            var project = FlowModel.Fill(step.Project, values).Trim() is { Length: > 0 } named ? named : target?.Project.ToString(CultureInfo.InvariantCulture);
+            var number = FlowModel.Fill(step.Target, values).Trim().TrimStart('!') is { Length: > 0 } t ? t : target is { Kind: "merge_request" } ? target.Id : null;
+            if (project is null || !int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+            {
+                throw new FlowEndException("It reviews a merge request: name its project and !number, or start the run from GitLab's merge request event.");
+            }
+            (repositories, iid) = ([project], n);
+        }
+        var (fewest, most) = Code.ReviewLauncher.Bounds(kind);
+        if (repositories.Count < fewest || repositories.Count > most)
+        {
+            throw new FlowEndException(fewest == most ? "It reviews one repository." : $"It reviews {fewest} to {most} repositories.");
+        }
+        var at = FlowModel.Fill(step.Ref, values).Trim() is { Length: > 0 } r ? r : null;
+        var (started, refused) = await reviews.StartAsync(_owner, kind, repositories, at, step.Cross ?? true, step.Name ?? _workflow.Name, iid, "workflow", ct);
+        if (started is null)
+        {
+            throw new FlowEndException(refused!);
+        }
+        await audit.WriteAsync("workflow.review", _workflow.Name, detail: $"{kind}: {string.Join(", ", repositories)}{(iid is { } i ? $" !{i}" : "")}{(at is null ? "" : $" at {at}")}", actor: _owner);
+        var seen = await reviews.WaitAsync(started, clock.GetUtcNow() + LongestReview, ct);
+        if (!seen.Done)
+        {
+            throw new FlowEndException($"The review was still running after {LongestReview.TotalHours:0} hours: read it at {started.Path}.");
+        }
+        if (seen.Failed)
+        {
+            throw new FlowEndException($"The review failed: {seen.Text}");
+        }
+        return (seen.Text ?? "", null, started.Path);
+    }
+
     private async Task<(string, JsonNode?, string?)> GitLabAsync(FlowStep step, Dictionary<string, JsonNode?> values, CancellationToken ct)
     {
         var reply = _run.Reply is null ? null : JsonSerializer.Deserialize<GitLabTarget>(_run.Reply, FlowModel.Json);

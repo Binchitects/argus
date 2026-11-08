@@ -31,3 +31,14 @@ describe('editing a flow', () => {
     expect(values).toEqual(['{{input.text}}', '{{input.by}}', '{{input.topic}}', '{{a.text}}', '{{item}}', '{{index}}'])
   })
 })
+
+describe('a review step', () => {
+  it('starts as a whole repository to name, and says what it reviews in a line', async () => {
+    const { summary } = await import('./flow-words')
+    const made = newStep('review', flow)
+    expect(made).toMatchObject({ kind: 'review', review: 'review-repository', repositories: '' })
+    expect(summary({ ...made, repositories: 'g/app\ng/lib', review: 'review-repositories', ref: 'main' })).toBe('Several repositories: g/app, g/lib @ main')
+    expect(summary({ ...made, review: 'merge-request' })).toBe('A merge request: the event’s')
+    expect(summary({ ...made, review: 'merge-request', project: 'g/app', target: '!7' })).toBe('A merge request: g/app !7')
+  })
+})

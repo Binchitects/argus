@@ -500,6 +500,7 @@ public static class IdentityWiring
         services.AddSingleton<Schedules.Mailer>();
         services.AddSingleton<Schedules.Webhooks>();
         services.AddHttpClient(Schedules.Webhooks.Client, c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<Code.ReviewLauncher>();
         services.AddScoped<Schedules.TaskRunner>();
         services.AddScoped<Schedules.TaskEndpoints.TaskContext>();
         services.AddSingleton<Schedules.Scheduler>();
