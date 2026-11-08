@@ -1069,7 +1069,7 @@ Arena's and API keys' requests are not stopped by it.
 
 A viewer's export holds their own row of the people, as the page does. Usage
 & cost exports the same way (your own, and everyone's for admins), and so
-does Usage by group. Each export is audited.
+does Admin → Accounting. Each export is audited.
 
 ### Time windows
 

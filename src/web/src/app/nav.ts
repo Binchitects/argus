@@ -1,4 +1,4 @@
-import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, PieChart, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon, Calculator } from 'lucide-react'
+import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon, Calculator } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -88,7 +88,6 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'], permission: 'monitoring.read' },
-      { title: 'Usage by group', path: '/admin/usage-groups', icon: PieChart, keywords: ['groups', 'teams', 'departments', 'spend', 'tokens', 'cost', 'usage', 'chargeback'], permission: 'usage.read' },
       { title: 'Accounting', path: '/admin/accounting', icon: Calculator, keywords: ['accountant', 'finance', 'cost', 'power', 'electricity', 'kwh', 'hardware', 'depreciation', 'chargeback', 'cost centre', 'budget', 'report'], permission: 'billing.read' },
       { title: 'Line', path: '/admin/line', icon: ListOrdered, keywords: ['queue', 'waiting', 'busy', 'running', 'who waits', 'at once', 'remove', 'kick out', 'stop a request'], permission: 'usage.read' },
       { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts', 'hardware', 'system', 'users'], anyOf: ['usage.read', 'monitoring.read', 'hardware.read'], feature: 'monitoring' },

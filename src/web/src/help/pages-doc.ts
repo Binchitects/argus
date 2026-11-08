@@ -7,7 +7,7 @@ const order: { title: string; ids: TopicId[] }[] = [
   { title: 'Workspace', ids: ['home', 'chat', 'projects', 'project', 'assistants', 'assistant', 'shared', 'skills', 'memory', 'checklists', 'meetings', 'meeting', 'plans', 'plan', 'lab', 'lab-notebook', 'apps', 'app-page', 'wiki', 'data', 'boards', 'board', 'decks', 'deck', 'media', 'studio', 'workflow', 'room-join', 'code', 'workspace', 'business', 'review', 'security-review', 'fixes', 'fix', 'tasks', 'usage', 'leaderboard', 'setup', 'account', 'ask'] },
   { title: 'Administration', ids: ['overview', 'people', 'person', 'access', 'safeguards', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'data-sources', 'storage', 'settings', 'audit', 'compliance', 'access-review', 'incident', 'admin-security', 'prompts', 'feedback', 'quality'] },
   { title: 'Argus', ids: ['indexing', 'packs', 'explore'] },
-  { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'line', 'usage-groups', 'accounting', 'logs', 'alerts', 'traces'] },
+  { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'line', 'accounting', 'logs', 'alerts', 'traces'] },
   { title: 'Other pages', ids: ['login', 'design'] },
 ]
 

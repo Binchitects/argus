@@ -239,54 +239,30 @@ public sealed class GroupCreditTests(AppFixture app)
         // By tokens instead: every share still adds up to the whole.
         var byTokens = await admin.JsonAsync(await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&basis=tokens"));
         Assert.Equal(1d, byTokens.GetProperty("people").EnumerateArray().Sum(p => p.GetProperty("share").GetDouble()), 3);
-        var csv = await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&format=csv");
+        // Each group's members under it; the time before compared; a month at this rate (730.5 hours).
+        var g = groups.Single(g => g.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetGuid() == data);
+        Assert.Equal([benEmail, annEmail], g.GetProperty("members").EnumerateArray().Select(m => m.GetProperty("email").GetString()));
+        Assert.Equal(0m, report.GetProperty("before").GetProperty("used").GetProperty("charged").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, report.GetProperty("before").GetProperty("chargedChange").ValueKind);
+        Assert.Equal(1095.75m, report.GetProperty("health").GetProperty("monthlyRunning").GetDecimal());
+        Assert.Equal(5d, report.GetProperty("health").GetProperty("recovered").GetDouble());
+        Assert.Equal(3.00m, report.GetProperty("series").EnumerateArray().Sum(b => b.GetProperty("total").GetDecimal()));
+        Assert.Contains(report.GetProperty("kinds").EnumerateArray(), k => k.GetProperty("name").GetString() == "API keys and Code Arena");
+        Assert.NotEmpty(report.GetProperty("models").EnumerateArray());
+        Assert.NotEmpty(report.GetProperty("sources").EnumerateArray());
+        var csv = await admin.GetAsync($"/api/admin/accounting/export?from={from}&to={to}&format=csv");
         await StatusAssert.Is(HttpStatusCode.OK, csv);
-        Assert.Contains("running,total,,,,,,,,,3.00", await csv.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        var text = System.Text.Encoding.UTF8.GetString(await csv.Content.ReadAsByteArrayAsync());
+        Assert.Contains("Running cost,$3.00", text, StringComparison.Ordinal);
+        Assert.Contains("(in no group)", text, StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync($"/api/admin/accounting/export?from={from}&to={to}&format=pdf"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/admin/accounting/export?from={from}&to={to}&format=docx"));
 
         // For billing.read only.
         var (person, _, _) = await PersonAsync(f, admin);
         await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync($"/api/admin/accounting?from={from}&to={to}"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync($"/api/admin/accounting/export?from={from}&to={to}&format=csv"));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&basis=moon"));
-    }
-
-    [Fact]
-    public async Task Usage_by_group_has_each_groups_requests_tokens_and_spend_with_each_member_and_the_people_in_no_group()
-    {
-        await using var f = NewApp(new FakeGateway());
-        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var (_, annId, annEmail) = await PersonAsync(f, admin);
-        var (_, benId, benEmail) = await PersonAsync(f, admin);
-        var (_, _, cyEmail) = await PersonAsync(f, admin);
-        var (_, quietId, _) = await PersonAsync(f, admin);
-        var data = await GroupAsync(admin, new { }, annId, benId, quietId);
-        var other = await GroupAsync(admin, new { }, annId);
-        // A window of its own, so other tests' requests are not in it.
-        var at = new DateTimeOffset(2023, 7, 14, 10, 0, 0, TimeSpan.Zero);
-        await app.SpendAsync(annEmail, 1m, at);
-        await app.SpendAsync(annEmail, 2m, at.AddMinutes(1), apiKey: true);
-        await app.SpendAsync(benEmail, 4m, at.AddMinutes(2));
-        await app.SpendAsync(cyEmail, 8m, at.AddMinutes(3));
-        await app.SpendAsync(benEmail, 16m, at.AddDays(2));
-
-        var from = Uri.EscapeDataString(at.AddHours(-1).ToString("O"));
-        var to = Uri.EscapeDataString(at.AddHours(1).ToString("O"));
-        var usage = await admin.JsonAsync(await admin.GetAsync($"/api/admin/usage/groups?from={from}&to={to}"));
-        var groups = usage.GetProperty("groups").EnumerateArray().ToDictionary(g => g.GetProperty("id").GetGuid());
-        var d = groups[data];
-        Assert.Equal((3, 2), (d.GetProperty("members").GetInt32(), d.GetProperty("active").GetInt32()));
-        Assert.Equal((3L, 7m), (d.GetProperty("used").GetProperty("requests").GetInt64(), d.GetProperty("used").GetProperty("cost").GetDecimal()));
-        Assert.True(d.GetProperty("used").GetProperty("tokens").GetInt64() > 0);
-        // The members who used it, the most spent first; Ann in both groups, counted in each.
-        Assert.Equal([benEmail, annEmail], d.GetProperty("people").EnumerateArray().Select(p => p.GetProperty("email").GetString()));
-        Assert.Equal(3m, groups[other].GetProperty("used").GetProperty("cost").GetDecimal());
-        var none = usage.GetProperty("none");
-        Assert.Contains(none.GetProperty("people").EnumerateArray(), p => p.GetProperty("email").GetString() == cyEmail && p.GetProperty("used").GetProperty("cost").GetDecimal() == 8m);
-        Assert.Equal(15m, usage.GetProperty("total").GetProperty("cost").GetDecimal());
-
-        // For those who may see the usage dashboards.
-        var (person, _, _) = await PersonAsync(f, admin);
-        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync($"/api/admin/usage/groups?from={from}&to={to}"));
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/admin/usage/groups?from={to}&to={from}"));
     }
 
     [Fact]

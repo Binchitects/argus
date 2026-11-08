@@ -13,7 +13,7 @@ namespace Llm.Api.Reports;
 
 /// <summary>
 /// The usage pages as files people can read and pass on (PDF, Excel, CSV) over any time: a person's own usage (Usage &amp;
-/// cost → Mine), everyone's by person (usage.read), and by group (Usage by group, usage.read). All from the app's own ledger
+/// cost → Mine), and everyone's by person (usage.read); by group and cost centre is Admin → Accounting's. All from the app's own ledger
 /// as the pages read it, refusals left out. Each export is audited.
 /// </summary>
 public static class UsageReports
@@ -22,7 +22,6 @@ public static class UsageReports
     {
         app.MapGet("/api/usage/me/export", MineAsync).PersonOnly();
         app.MapGet("/api/admin/usage/export", EveryoneAsync).RequirePermission(Core.Access.Permissions.UsageRead);
-        app.MapGet("/api/admin/usage/groups/export", GroupsAsync).RequirePermission(Core.Access.Permissions.UsageRead);
     }
 
     private const string Ledger = " from gateway.requests r where r.started_at >= @from and r.started_at < @to and r.status <> 'refused' ";
@@ -146,51 +145,6 @@ public static class UsageReports
         {
             return AuthEndpoints.Problem(503, "usage", "Usage cannot be read right now: " + ex.Message);
         }
-    }
-
-    private static async Task<IResult> GroupsAsync(DateTimeOffset from, DateTimeOffset to, string? format, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db,
-        LedgerSql sql, Credit credit, Audit audit, TimeProvider clock, CancellationToken ct)
-    {
-        if (Problem(from, to, format) is { } problem)
-        {
-            return problem;
-        }
-        var me = (await users.GetUserAsync(principal))!;
-        var p = Window(from, to);
-        try
-        {
-            var (figures, charts, tables) = await CommonAsync(sql, "", p, from, to, ct);
-            var byPerson = (await sql.QueryAsync($"""
-                select r.person, count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0) {Ledger} and r.person is not null group by 1
-                """, p, ct)).Rows.ToDictionary(r => ((string)r[0]!).ToLowerInvariant(), r => (Requests: D(r[1]), Tokens: D(r[2]), Cost: (decimal)D(r[3])));
-            var rows = new List<object?[]>();
-            var grouped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var g in await db.Groups.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct))
-            {
-                var members = (await credit.MembersAsync(g, ct)).Select(e => e.ToLowerInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                grouped.UnionWith(members);
-                rows.Add(GroupRow(g.Name, g.CostCentre, members, byPerson));
-            }
-            rows.Add(GroupRow("(in no group)", null, byPerson.Keys.Where(k => !grouped.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase), byPerson));
-            tables.Insert(0, new ReportTable("Groups",
-                [new("Group", Width: 2.2), new("Cost centre", Width: 1.4), new("Members", ReportKind.Number, 0.8), new("Active", ReportKind.Number, 0.8), new("Requests", ReportKind.Number),
-                    new("Tokens", ReportKind.Number), new("Cost", ReportKind.Money)],
-                [.. rows.OrderByDescending(r => (decimal)r[6]!)],
-                "A person in two groups counts in both, so the groups can add up to more than everyone's together."));
-            var doc = new ReportDocument("Usage by group", "Each group's requests, tokens and spend, chat and API keys together.", from, to, clock.GetUtcNow(), figures, charts, tables, Name(me));
-            await audit.WriteAsync("usage.export", "groups", detail: Detail(format, from, to));
-            return ReportFiles.Result(doc, format, "usage-by-group")!;
-        }
-        catch (Npgsql.NpgsqlException ex)
-        {
-            return AuthEndpoints.Problem(503, "usage", "Usage cannot be read right now: " + ex.Message);
-        }
-    }
-
-    private static object?[] GroupRow(string name, string? centre, HashSet<string> members, Dictionary<string, (double Requests, double Tokens, decimal Cost)> byPerson)
-    {
-        var used = members.Where(byPerson.ContainsKey).Select(m => byPerson[m]).ToList();
-        return [name, centre, members.Count, used.Count, used.Sum(u => u.Requests), used.Sum(u => u.Tokens), used.Sum(u => u.Cost)];
     }
 
     private static async Task<Dictionary<string, string>> Names(AppDbContext db, CancellationToken ct) =>

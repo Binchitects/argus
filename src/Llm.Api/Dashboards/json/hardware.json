@@ -1622,7 +1622,7 @@
         "hideWhenEmpty": true,
         "textMode": "value"
       },
-      "description": "What the GPUs drew in the window. The cost of it is on Admin → Usage by group's accountant view, at the power price set there.",
+      "description": "What the GPUs drew in the window. Its cost is on Admin → Accounting, at the power price of Settings → Costs.",
       "gridPos": {
         "h": 5,
         "w": 4,

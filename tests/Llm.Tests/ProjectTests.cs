@@ -513,7 +513,7 @@ public sealed class ProjectTests(AppFixture app)
         Assert.Equal("", lines[at + 3]);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ann.GetAsync($"/api/projects/{id}/report/export?format=docx&{window}"));
 
-        // The usage reports: one's own for everyone, everyone's and the groups' with usage.read.
+        // The usage reports: one's own for everyone, everyone's with usage.read; the groups' in Accounting's (billing.read).
         var mine = await ann.GetAsync($"/api/usage/me/export?format=csv&{window}");
         await StatusAssert.Is(HttpStatusCode.OK, mine);
         Assert.Contains("Cost,$1.50", System.Text.Encoding.UTF8.GetString(await mine.Content.ReadAsByteArrayAsync()), StringComparison.Ordinal);
@@ -522,7 +522,7 @@ public sealed class ProjectTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, everyone);
         Assert.Contains(Llm.Api.Insights.TabularFiles.Read("u.xlsx", await everyone.Content.ReadAsByteArrayAsync()).Single(s => s.Name == "u People").Rows,
             r => (string?)r[1] == annEmail);
-        var groups = await admin.GetAsync($"/api/admin/usage/groups/export?format=pdf&{window}");
+        var groups = await admin.GetAsync($"/api/admin/accounting/export?format=pdf&{window}");
         await StatusAssert.Is(HttpStatusCode.OK, groups);
         using (var doc = UglyToad.PdfPig.PdfDocument.Open(await groups.Content.ReadAsByteArrayAsync()))
         {

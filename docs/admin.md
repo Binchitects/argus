@@ -1877,43 +1877,43 @@ An answer of a comparison (Compare) not voted on yet stays blind, as in the
 chat: its model is "Model A" or "Model B", its cost waits for the vote (and is
 out of the cost total until then), and the model filter does not find it.
 
-### Usage by group
-
-**Usage by group** (Observe, with `usage.read`) has each group's requests,
-tokens and spend over a day, a week, 30 or 90 days: chat and API keys
-together, by the dashboards' rule of whose a request is, refusals for a key's
-rate limit left out. Each row has the group's members, how many of them used
-it, the share of input tokens read from the cache, and its spend, the most
-spent first, with **(in no group)** last. Open a group for its members who
-used it, each with their own requests, tokens and spend (a name opens the
-person). A person in two groups counts in both, so the groups can add up to
-more than everyone's together (the line above the table). Each person's own
-use is on the **LLM and users** dashboard, and each month's spend per group
-and cost centre on Groups' chargeback report.
-
 ### Accounting
 
 **Admin → Accounting** (`billing.read`: the Billing role, an accountant's) shows
-what running the models really cost over the time chosen, and shares it out:
+what running the models really cost over the time chosen, and shares it out.
 
 - **Running cost**: power, hardware and service. Power is the GPUs' measured
-  draw (Prometheus, `nvidia_smi_power_draw_watts` averaged over the window)
-  plus the rest of the machine's, times the cooling overhead (PUE), at the price
-  of a kWh. Hardware is its price spread over its life, a month at a time.
-  Service is a monthly sum: support, licences, hosting, the people who run it.
-  All of it is set in **Settings → Costs** (`Costs:PowerPricePerKwh`,
+  draw (Prometheus, `nvidia_smi_power_draw_watts` averaged over each bucket of
+  the window) plus the rest of the machine's, times the cooling overhead (PUE),
+  at the price of a kWh. Hardware is its price spread over its life, a month at
+  a time. Service is a monthly sum: support, licences, hosting, the people who
+  run it. All of it is set in **Settings → Costs** (`Costs:PowerPricePerKwh`,
   `Costs:Pue`, `Costs:OtherPowerWatts`, `Costs:HardwarePrice`,
-  `Costs:HardwareMonths`, `Costs:ServicePerMonth`). Without Prometheus the GPUs
-  are left out and the page says so.
-- **What a unit costs**: the running cost over a million tokens, a request and
-  a person who used it; and the spend at the prices of Settings → Prices, as a
-  share of the running cost (above 100 %: the prices charge more than it costs).
-- **Shared out**: each group, cost centre, person and project, with its
-  requests, tokens, model hours, spend, its share of the use and its part of the
-  running cost. The share is **by spend** by default (`Costs:ShareBy`: output,
-  pictures and video weigh more, as their prices do), **by tokens** or **by
-  model time**. A person in two groups counts in both, and once in a cost
-  centre. **CSV** has every row and the running cost.
+  `Costs:HardwareMonths`, `Costs:ServicePerMonth`). The page says what is
+  missing: the GPUs not measured (no monitoring), no hardware price, no
+  service cost.
+- **The totals**: the running cost and the spend at the prices of Settings →
+  Prices, each against the time before (as long, at today's costs); a month
+  at this rate; **GPU idle**, the running cost of the time the GPUs were not
+  busy (room for more people, or for fewer GPUs); and what a unit costs: a
+  million tokens, a request, a person who used it, an hour of the models'
+  time.
+- **Where the cost comes from**: power, hardware and service as shares of the
+  whole, with how each was counted; the **running cost over time**, bucket by
+  bucket; **spend against the running cost** (above it, the prices charge more
+  than the machine costs); and **against the time before**: running cost,
+  spend, requests, tokens, model hours and people, then and now.
+- **Shared out**: each group (its credit a month and cost centre, open it for
+  its people), cost centre, person (sortable, searchable), project, model,
+  source (the chat, API keys and Code Arena, Code Studio, the media studio,
+  the app's own work) and kind of work (chat answers, API keys, pictures,
+  video, speech), each with its requests, tokens, model hours, spend, its
+  share of the use and its part of the running cost. The share is **by
+  spend** by default (`Costs:ShareBy`: output, pictures and video weigh more,
+  as their prices do), **by tokens** or **by model time**. A person in two
+  groups counts in both, and once in a cost centre.
+- **Export**: a PDF report, an Excel workbook or a CSV with every figure,
+  chart and table, for the time and basis shown; each export is audited.
 
 The GPUs' busy time, idle time, energy and what held work back are on the
 Hardware dashboard's **GPU time and what holds work back** section.

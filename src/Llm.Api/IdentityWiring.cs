@@ -679,7 +679,6 @@ public static class IdentityWiring
         Dashboards.DashboardEndpoints.MapDashboards(app);
         Chat.LineMetrics.MapLineMetrics(app);
         Dashboards.UsageEndpoints.MapUsage(app);
-        Dashboards.GroupUsage.MapGroupUsage(app);
         Reports.Accounting.MapAccounting(app);
         Dashboards.LogEndpoints.MapLogs(app);
         Dashboards.AlertEndpoints.MapAlerts(app);

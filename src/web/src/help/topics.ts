@@ -1089,32 +1089,24 @@ export const topics = {
     manual: { doc: 'admin', section: 'security' },
   },
 
-  'usage-groups': {
-    title: 'Usage by group',
-    about: "Each group's requests, tokens and spend over the time chosen, chat and API keys together, and the people in no group.",
-    admin: true,
-    parts: [
-      { name: 'Time range', text: 'A preset or **Custom range…**, kept in the page\'s address.' },
-      { name: 'Export', text: 'The groups for the time shown as a **PDF report**, an **Excel workbook** or a **CSV**.' },
-      { name: 'The groups', text: 'Members, how many used it, requests, tokens, the share of input read from the cache, and spend, the most spent first; a person in two groups counts in both.' },
-      { name: 'Members', text: 'Open a group for its members who used it, each with their own requests, tokens and spend.' },
-    ],
-    tasks: [{ title: 'See which team uses the models most', steps: ['Choose **Last 30 days**.', 'Read the spend column.', 'Open the group for who in it.'] }],
-    manual: { doc: 'admin', section: 'usage-by-group' },
-  },
-
   accounting: {
     title: 'Accounting',
-    about: 'What running the models cost over the time chosen (power, hardware, service), what a unit of use costs, and that cost shared out to groups, cost centres, people and projects.',
+    about: 'What running the models cost over the time chosen (power, hardware, service), against the time before, what a unit costs, what the idle GPUs cost, and that cost shared out to groups, cost centres, people, projects, models, sources and kinds of work.',
     admin: true,
     parts: [
-      { name: 'Running cost', text: "Power: the GPUs' measured draw and the rest of the machine's, times the cooling overhead, at the power price. Hardware: its price over its life. Service: the monthly cost. All set in **Settings → Costs**." },
-      { name: 'What a unit costs', text: 'The running cost over a million tokens, a request and a person who used it; and the spend at the prices of Settings → Prices, against the running cost.' },
+      { name: 'Time range', text: 'A preset or **Custom range…**, kept in the page\'s address; the time before is as long.' },
       { name: 'Share the cost out', text: '**By spend** (the default: output, pictures and video weigh more), **by tokens** or **by model time**.' },
-      { name: 'Shared out', text: 'Groups, cost centres, people and projects, each with requests, tokens, model hours, spend, share and cost. A person in two groups counts in both.' },
-      { name: 'CSV', text: 'Every row and the running cost, for the finance team.' },
+      { name: 'The totals', text: 'The running cost and the spend at the prices, each against the time before; a month at this rate; **GPU idle**, what the GPUs\' idle time cost; and a million tokens, a request, a person and a model hour at the running cost.' },
+      { name: 'Where the cost comes from', text: "Power (the GPUs' measured draw and the rest of the machine's, times the overhead, at the power price), hardware (its price over its life) and service (a month), as shares, all set in **Settings → Costs**." },
+      { name: 'Over time', text: 'The running cost bucket by bucket, and the spend at the prices against it.' },
+      { name: 'Against the time before', text: 'Running cost, spend, requests, tokens, model hours and people, then and now.' },
+      { name: 'Shared out', text: 'Groups (with their credit and cost centre; open one for its people), cost centres, people (sort by any column, find by name), projects, models, where it came from and what it was for. A person in two groups counts in both.' },
+      { name: 'Export', text: 'A **PDF report**, an **Excel workbook** or a **CSV**, for the time and basis shown.' },
     ],
-    tasks: [{ title: 'Charge each team its share of last month', steps: ['Set the costs in **Settings → Costs**.', 'Choose **Last 30 days**.', 'Open **Cost centres** or **Groups**, or download the **CSV**.'] }],
+    tasks: [
+      { title: 'Charge each team its share of last month', steps: ['Set the costs in **Settings → Costs**.', 'Choose **Last 30 days**.', 'Open **Groups** or **Cost centres**, or **Export** the Excel workbook.'] },
+      { title: 'See whether the machine pays for itself', steps: ['Read **Spend at the prices** against **Running cost**.', 'Read **GPU idle**: a large one is room for more people.'] },
+    ],
     manual: { doc: 'admin', section: 'accounting' },
   },
 
