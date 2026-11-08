@@ -42,13 +42,13 @@ public sealed partial class GpuShare : IDisposable
     private readonly EngineClient engine;
     private readonly EngineRoute route;
     private readonly IServiceScopeFactory scopes;
-    private readonly IOptions<EngineOptions> options;
+    private readonly IOptionsMonitor<EngineOptions> options;
     private readonly Modules modules;
     private readonly Replicas replicas;
     private readonly TimeProvider clock;
     private readonly ILogger<GpuShare> logger;
 
-    public GpuShare(MediaControl media, EngineState state, EngineClient engine, EngineRoute route, IServiceScopeFactory scopes, IOptions<EngineOptions> options, Modules modules,
+    public GpuShare(MediaControl media, EngineState state, EngineClient engine, EngineRoute route, IServiceScopeFactory scopes, IOptionsMonitor<EngineOptions> options, Modules modules,
         Replicas replicas, TimeProvider clock, ILogger<GpuShare> logger)
     {
         (this.media, this.state, this.engine, this.route, this.scopes, this.options, this.modules, this.replicas, this.clock, this.logger) =
@@ -138,7 +138,7 @@ public sealed partial class GpuShare : IDisposable
         try
         {
             media.Hold(model.Name);
-            if (options.Value.Enabled && Short(model) is { } need)
+            if (options.CurrentValue.Enabled && Short(model) is { } need)
             {
                 await MakeRoomAsync(hold, need, ct);
             }
@@ -163,7 +163,7 @@ public sealed partial class GpuShare : IDisposable
         var hold = new Hold(this, model) { Free = freeMb, Release = release };
         try
         {
-            if (options.Value.Enabled && needMb > 0 && await freeMb(ct) is { } free && free < needMb)
+            if (options.CurrentValue.Enabled && needMb > 0 && await freeMb(ct) is { } free && free < needMb)
             {
                 await MakeRoomAsync(hold, needMb, ct);
             }
@@ -191,7 +191,9 @@ public sealed partial class GpuShare : IDisposable
         {
             kept = scope.ServiceProvider.GetRequiredService<ModelCatalog>().Kept();
         }
-        await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, hold.Made, ct, gpus, hold.Asleep);
+        // A model kept loaded stays as it is (asleep, it would make the next chat wait for it), unless an admin lets these
+        // jobs put kept vLLM models to sleep (Engine:MediaPausesKept).
+        await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, hold.Made, ct, gpus, hold.Asleep, pauseKept: options.CurrentValue.MediaPausesKept);
         if (hold.Unloaded.Count == 0 && hold.Asleep.Count == 0)
         {
             // Nothing could make room (every chat model is kept loaded, or in use all this minute): the job runs as it is.
@@ -282,7 +284,7 @@ public sealed partial class GpuShare : IDisposable
     public IReadOnlyCollection<int>? GpusOf(MediaControl.Model model)
     {
         var devices = state.Hardware is { } hw ? GpuPlan.DevicesOf(hw) : [];
-        var gpu = model.Row.Gpu ?? media.GpuOf(model.Server) ?? options.Value.MediaGpu ?? (devices.Count > 0 ? devices[0].Index : null);
+        var gpu = model.Row.Gpu ?? media.GpuOf(model.Server) ?? options.CurrentValue.MediaGpu ?? (devices.Count > 0 ? devices[0].Index : null);
         return gpu is { } g && devices.Any(d => d.Index == g) ? [g] : null;
     }
 

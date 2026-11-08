@@ -490,7 +490,15 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task On_a_machine_of_four_gpus_only_the_media_servers_gpu_is_lent_its_vllm_model_sleeps_and_wakes_and_the_others_stay()
+    public Task On_a_machine_of_four_gpus_only_the_media_servers_gpu_is_lent_its_vllm_model_sleeps_and_wakes_and_the_others_stay() => FourGpusAsync(kept: false, pause: false);
+
+    [Fact]
+    public Task A_vllm_model_kept_loaded_is_not_put_to_sleep_for_a_video_so_no_chat_waits_for_it() => FourGpusAsync(kept: true, pause: false);
+
+    [Fact]
+    public Task An_admin_may_let_videos_put_a_vllm_model_kept_loaded_to_sleep() => FourGpusAsync(kept: true, pause: true);
+
+    private async Task FourGpusAsync(bool kept, bool pause)
     {
         // Four GPUs; the video server on GPU 3, where flash (vLLM) runs; other (vLLM) on GPUs 0-1; the chat model (llama.cpp) on GPU 2.
         var hardware = Path.Combine(_dir, "hardware.json");
@@ -509,6 +517,7 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         await using var s = await NewAsync(new Dictionary<string, string?>
         {
             ["Engine:HardwareFile"] = hardware, ["Engine:VllmStatusDir"] = Path.Combine(_dir, "vllm-status"),
+            ["Engine:MediaPausesKept"] = pause ? "true" : "false",
         }, services => services.AddHttpClient(VllmBackend.Client).ConfigurePrimaryHttpMessageHandler(() => vllm));
         // GPU 3's free memory: what flash leaves while it is awake.
         s.Serve.FreeOf = () => vllm.Phase("flash") == "ready" ? 2_000 : 80_000;
@@ -536,6 +545,10 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
                 var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
                 await catalog.WritePresetsAsync();
                 await catalog.WriteVllmPresetsAsync();
+                if (kept)
+                {
+                    catalog.SetKept(["flash"]);
+                }
             }
             await s.Media.RefreshAsync(CancellationToken.None);
             var watcher = s.App.Services.GetRequiredService<EngineWatcher>();
@@ -558,6 +571,17 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
             var video = s.Media.Find(Video)!;
             Assert.Equal([3], s.Gpu.GpusOf(video));
             var hold = await s.Gpu.HoldAsync(video, deadline.Token);
+            if (kept && !pause)
+            {
+                // Kept loaded: not touched; the video runs with what room there is, and says so.
+                Assert.Empty(hold.Slept);
+                Assert.Empty(hold.Unloaded);
+                Assert.Equal("ready", vllm.Phase("flash"));
+                Assert.Contains(s.Gpu.Recent, h => h.Text.Contains("no idle chat model could make room", StringComparison.Ordinal));
+                await hold.DisposeAsync();
+                Assert.Empty(vllm.Sleeps);
+                return;
+            }
             // flash, on GPU 3, sleeps; the chat model on GPU 2 and other on GPUs 0-1 are not touched.
             Assert.Equal(["flash"], hold.Slept);
             Assert.Empty(hold.Unloaded);

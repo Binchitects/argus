@@ -679,7 +679,7 @@ public sealed partial class EngineRoute
     /// fails unloads instead. A model on other GPUs is never touched (a vLLM group sleeps whole: all its GPUs free).
     /// </summary>
     public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct,
-        IReadOnlyCollection<int>? gpus = null, ICollection<string>? slept = null)
+        IReadOnlyCollection<int>? gpus = null, ICollection<string>? slept = null, bool pauseKept = false)
     {
         // Real time: the job waits for it, whatever the app's clock says.
         var waited = System.Diagnostics.Stopwatch.StartNew();
@@ -702,7 +702,8 @@ public sealed partial class EngineRoute
             bool OnLent(string name) => gpus is not { Count: > 0 } || !engine.Places.TryGetValue(name, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains);
             bool Sleeps(string name) => slept is not null && !engine.Counted(name) && engine.Places.ContainsKey(name);
             // Loading ones too: a request let through before the GPU was lent; each makes room once it has loaded and is idle.
-            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && !stays.Contains(m.Name) && (!kept.Contains(m.Name) || Sleeps(m.Name))).ToList();
+            // A model kept loaded is never touched, unless pauseKept lets a vLLM one sleep (back in seconds when the job ends).
+            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && !stays.Contains(m.Name) && (!kept.Contains(m.Name) || pauseKept && Sleeps(m.Name))).ToList();
             if (spares.Count == 0)
             {
                 return;

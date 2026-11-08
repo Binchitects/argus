@@ -27,6 +27,12 @@ public sealed class EngineOptions
     public string? LmcacheRemote { get; set; }
     /// <summary>How long a request waits for a vLLM model it started (a large one loads in minutes).</summary>
     public TimeSpan VllmStartWait { get; set; } = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// Whether a picture or video job short of GPU memory may put a vLLM model kept loaded to sleep (back in seconds after
+    /// it). Off: a model kept loaded is never touched, so no chat waits for it; the job uses what room there is.
+    /// </summary>
+    public bool MediaPausesKept { get; set; }
     /// <summary>Where the vLLM supervisors say what they do (services/vllm/supervisor.sh's status, each in its own folder).</summary>
     public string VllmStatusDir { get; set; } = "/vllm-status";
 

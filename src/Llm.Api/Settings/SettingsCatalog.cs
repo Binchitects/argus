@@ -534,6 +534,8 @@ public static class SettingsCatalog
             { Default = "2147483648", Unit = "bytes", Min = 0, Max = 274_877_906_944, Optional = false },
         new("Engine:EmbedReserveBytes", Model, "GPU memory for the embedder", "What the embedder keeps on its GPU when it runs on one.", SettingType.WholeNumber, SettingScope.AppRestart)
             { Default = "1073741824", Unit = "bytes", Min = 0, Max = 274_877_906_944, Optional = false },
+        new("Engine:MediaPausesKept", Model, "Pictures and videos may pause models kept loaded", "A picture or video job short of GPU memory may put a vLLM model kept loaded to sleep (its weights to RAM, back in a few seconds after the job). Off: a model kept loaded is never touched, so no chat waits for it to come back; the job makes room with the models not kept loaded, or runs with what there is.", SettingType.Boolean, SettingScope.Live)
+            { Default = "false" },
         new("Engine:VllmStartWait", Model, "Wait for a vLLM model to load", "How long a request, or a model's move, waits for a vLLM or SGLang model it started (a large one loads in minutes).", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:20:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
         new("HuggingFace:BaseUrl", Model, "Hugging Face address", "Where models are searched for and downloaded (Admin → Models): Hugging Face itself, or a mirror of it inside the company (an Artifactory or Nexus Hugging Face remote, a hf-mirror). The Hugging Face token, when set, is sent to it.", SettingType.Url, SettingScope.Live)
