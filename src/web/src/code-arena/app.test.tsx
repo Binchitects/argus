@@ -133,7 +133,8 @@ describe('Code Arena in the browser', () => {
     // The events come in at the next frame, together: the question then has the server's id.
     expect(await screen.findByText('Thought for 1.2 s')).toBeInTheDocument()
     const answer = screen.getByRole('region', { name: 'Answer' })
-    expect(within(answer).getByText('Edit file')).toBeInTheDocument()
+    // The edit is its diff: no card of its own beside it.
+    expect(within(answer).queryByText('Edit file')).toBeNull()
     const changes = within(answer).getByRole('figure', { name: 'Changes to src/a.txt' })
     expect(within(changes).getByText('two')).toBeInTheDocument()
     expect(within(changes).getByText('Removed:')).toBeInTheDocument()

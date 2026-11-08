@@ -82,6 +82,27 @@ export function runOutput(value: unknown): RunOutput | null {
 }
 
 /** The header's one-line summary of the arguments: code shows its first line. */
+/** The arguments that say what a call is about, in order: the first one a call has is all its card's header needs. */
+const leading = ['pattern', 'query', 'q', 'command', 'cmd', 'path', 'file_path', 'file', 'filename', 'url', 'symbol', 'name', 'description', 'title', 'prompt', 'question']
+
+/**
+ * What a call's card says beside its name: its main argument alone (a path, a command, a search), on one line; null when
+ * it has none of them (the card shows each argument by its name then).
+ */
+export function argsLead(raw: string): string | null {
+  const a = splitArgs('', raw)
+  if (a.unparsed !== null) return null
+  const all = new Map<string, string>([...a.plain, ...a.code.map((c): [string, string] => [c.key, c.code])])
+  for (const key of leading) {
+    const v = all.get(key)
+    if (v && v.trim()) {
+      const line = v.split('\n').find((l) => l.trim())?.trim() ?? ''
+      return v.trim().includes('\n') ? `${line} …` : line
+    }
+  }
+  return null
+}
+
 export function argsSummary(raw: string): [string, string][] {
   const a = splitArgs('', raw)
   if (a.unparsed !== null) return a.unparsed ? [['arguments', a.unparsed]] : []

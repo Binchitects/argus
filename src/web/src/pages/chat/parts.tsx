@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
 import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
-import { agentParts, argsSummary, partsSummary, splitArgs } from './tool-args'
+import { agentParts, argsLead, argsSummary, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
 import { GameDialog, type Game } from '@/components/app/games'
@@ -178,6 +178,8 @@ export const ToolCard = memo(function ToolCard({
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
   // Read once per call's arguments, not at each drawing.
   const args: [string, string][] = useMemo(() => (delegate ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)), [delegate, call.function.arguments])
+  // Its main argument alone beside its name (a path, a command): every argument is under Asked with.
+  const lead = useMemo(() => (delegate ? null : argsLead(call.function.arguments)), [delegate, call.function.arguments])
   const running = !result && live && !waiting
   const drawing = running && /image|picture|draw/.test(call.function.name)
   const animating = running && /animate/.test(call.function.name)
@@ -203,11 +205,15 @@ export const ToolCard = memo(function ToolCard({
           </span>
           <span className="tool-name shrink-0 font-medium">{toolTitle(call.function.name)}</span>
           <span className="min-w-0 truncate text-muted-foreground">
-            {args.map(([k, v]) => (
-              <span key={k} className="mr-2">
-                <span className="text-muted-foreground">{k}:</span> <span className="font-mono text-xs text-foreground">{v}</span>
-              </span>
-            ))}
+            {lead !== null ? (
+              <span className="font-mono text-xs">{lead}</span>
+            ) : (
+              args.map(([k, v]) => (
+                <span key={k} className="mr-2">
+                  <span className="text-muted-foreground">{k}:</span> <span className="font-mono text-xs text-foreground">{v}</span>
+                </span>
+              ))
+            )}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             {waiting ? (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentResults, argsSummary, runOutput, splitArgs } from './tool-args'
+import { agentResults, argsLead, argsSummary, runOutput, splitArgs } from './tool-args'
 
 describe('tool arguments', () => {
   it('a program is code in its language; short values stay a list; the rest is JSON', () => {
@@ -43,5 +43,15 @@ describe('what sub-agents brought back', () => {
     ])
     expect(agentResults([{ title: 'Sum', result: '4' }, { name: 'x' }])).toBeNull()
     expect(agentResults([])).toBeNull()
+  })
+})
+
+describe('a card’s header', () => {
+  it('says only what the call is about: its path, command or search, on one line', () => {
+    expect(argsLead(JSON.stringify({ path: 'src/a.ts', old_string: 'x', new_string: 'y' }))).toBe('src/a.ts')
+    expect(argsLead(JSON.stringify({ command: 'npm test\nnpm run lint', timeout: 60 }))).toBe('npm test …')
+    expect(argsLead(JSON.stringify({ pattern: 'applyCoupon', path: 'src' }))).toBe('applyCoupon')
+    expect(argsLead(JSON.stringify({ limit: 5 }))).toBeNull()
+    expect(argsLead('not json')).toBeNull()
   })
 })

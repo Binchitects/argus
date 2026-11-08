@@ -575,6 +575,8 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               const body = run.calls.map((t) => {
                 const result = results.get(t.id)
                 const waitingHere = live && waiting.includes(t.id)
+                // A lone edit that went through is its diff below (the file, what changed, opened in the editor): no card of its own.
+                if (run.calls.length === 1 && result?.status === 'complete' && !result.error && diffs[result.id]) return null
                 return <ToolCard key={t.id} call={t} result={result} live={live} waiting={waitingHere} progress={calls?.[t.id]} agents={agents?.[t.id]} />
               })
               // What the person acts on or reads stays out of the fold: the file a call opened or wrote, what it made
