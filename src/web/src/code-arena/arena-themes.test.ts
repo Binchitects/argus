@@ -76,8 +76,8 @@ describe("Monaco's themes for the app's colour themes", () => {
   })
 
   it("a colour theme's are its own colours", () => {
-    expect(themes.get('arena-sakura-dark')!.colors).toMatchObject({ 'editor.background': '#0f0e0f', 'editor.foreground': '#ecebeb', 'editorCursor.foreground': '#d76797', 'editorWidget.background': '#171516' })
-    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#fcfcfd', 'editor.selectionBackground': '#007e9033', 'editorLineNumber.foreground': '#696d6e' })
+    expect(themes.get('arena-sakura-dark')!.colors).toMatchObject({ 'editor.background': '#0e0e0e', 'editor.foreground': '#ebebeb', 'editorCursor.foreground': '#d76797', 'editorWidget.background': '#161616' })
+    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#fcfcfc', 'editor.selectionBackground': '#007e9033', 'editorLineNumber.foreground': '#6b6c6d' })
   })
 
   it.each(every)("$id $kind: the suggestions, lists, links, buttons and the overview ruler wear its colours, not VS Code's blue", ({ kind, palette: p, theme }) => {
