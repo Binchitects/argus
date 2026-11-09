@@ -365,7 +365,7 @@ public sealed class AgentTests : IDisposable
         // conversation goes on.
         _gateway.Context = 40_000;
         using var h = new Harness(_gateway, _mcp, c => c["compactAt"] = 30);
-        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: the person asked about turns 1 to 3.") : Reply.Say(new string('x', 8000));
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: the person asked about turns 1 to 3.") : Reply.Say(FakeGateway.Prose(8000));
         // What each run said: the turn it compacts at depends on how big the prompt and the tools are.
         var said = "";
         foreach (var (text, more) in new[] { ("turn 1 " + new string('a', 8000), false), ("turn 2 " + new string('b', 8000), true), ("turn 3 " + new string('c', 8000), true), ("turn 4", true) })

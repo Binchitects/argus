@@ -2178,7 +2178,8 @@ internal sealed partial class Agent
         {
             throw new UnfitSummary(Loops(summary.Text) ? LoopedSummary : "the model's summary was cut off at its length limit");
         }
-        if (Loops(summary.Text))
+        // Stopped by the stream's own watch where it began repeating itself: its loop is cut, but it is no summary.
+        if (summary.FinishReason == GatewayClient.Looped || Loops(summary.Text))
         {
             throw new UnfitSummary(LoopedSummary);
         }

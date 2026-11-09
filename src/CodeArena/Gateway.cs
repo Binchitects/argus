@@ -81,6 +81,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>The finish reason of an answer cut short by a lost connection after part of it arrived (what arrived is kept).</summary>
     public const string Interrupted = "interrupted";
 
+    /// <summary>The finish reason of an answer stopped where it began repeating itself (what came before the loop is kept).</summary>
+    public const string Looped = "looped";
+
     /// <summary>How long the stream may stay quiet before its first event (a long prompt is read first) and between two.</summary>
     public TimeSpan FirstEventWait { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan EventWait { get; set; } = TimeSpan.FromMinutes(3);
@@ -480,7 +483,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                     // Its loop cut off: what came before it, and a word for the person; the request ends here.
                     Retrying?.Invoke(looped);
                     ended = true;
-                    finish ??= "stop";
+                    finish = Looped;
                     break;
                 }
             }

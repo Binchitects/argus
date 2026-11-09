@@ -373,6 +373,17 @@ public sealed class FakeGateway : FakeServer
     /// <summary>The system prompt alone: the first message, the same in every request of a session.</summary>
     public static string SystemOnly(JsonObject request) => request["messages"]![0]!["content"]!.GetValue<string>();
 
+    /// <summary>A long answer of about <paramref name="length"/> characters that never repeats itself (one letter again and again is a loop the stream stops).</summary>
+    public static string Prose(int length)
+    {
+        var sb = new System.Text.StringBuilder(length + 16);
+        for (var i = 0; sb.Length < length; i++)
+        {
+            sb.Append("word").Append(i).Append(' ');
+        }
+        return sb.ToString(0, length);
+    }
+
     /// <summary>A compaction's request for a summary: the conversation, then Code Arena's ask.</summary>
     public static bool Summarizing(JsonObject request) => Last(request).StartsWith(Agent.SummaryAsk, StringComparison.Ordinal);
 

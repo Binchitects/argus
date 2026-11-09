@@ -147,7 +147,7 @@ public sealed class WindowTests : IDisposable
             {
                 "find it" => Reply.Call(("session_search", """{"query":"Northwind vendor"}""")),
                 "read it" => Reply.Call(("session_read", """{"from":1,"to":2}""")),
-                _ => FakeGateway.HasToolResults(req) && req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "tool" ? Reply.Say("done") : Reply.Say("noted " + new string('n', 3000)),
+                _ => FakeGateway.HasToolResults(req) && req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "tool" ? Reply.Say("done") : Reply.Say("noted " + FakeGateway.Prose(3000)),
             };
         };
         var input = "We chose Northwind Traders as the vendor.\n" + string.Concat(Enumerable.Range(1, 6).Select(i => $"step {i} " + new string('s', 3000) + "\n")) + "find it\nread it\n/exit\n";
@@ -163,7 +163,7 @@ public sealed class WindowTests : IDisposable
         // Found, then read word for word, though the summary stands for it.
         var results = Results(_gateway.Requests[^1]);
         Assert.Contains("#1 the person: We chose Northwind Traders as the vendor.", results[^2], StringComparison.Ordinal);
-        Assert.StartsWith("#1 the person: We chose Northwind Traders as the vendor.\n\n#2 you: noted nnn", results[^1], StringComparison.Ordinal);
+        Assert.StartsWith("#1 the person: We chose Northwind Traders as the vendor.\n\n#2 you: noted word0 word1", results[^1], StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1180,6 +1180,7 @@ Code Studio → Security reviews a repository at a commit, read with the person'
 - `Llm.Tests/ReviewTests.A_merge_request_that_adds_a_vulnerable_package_or_a_scanners_finding_says_so`
 - `Llm.Tests/FixTests.A_security_fixs_change_is_checked_by_the_scanners_and_the_review_before_its_merge_request`
 - `Llm.Tests/CodeArenaSyncTests.Code_Arena_reads_the_latest_security_review_of_its_branch_with_what_Fix_it_would_ask`
+- `Llm.Tests/SecurityReviewTests.Several_repositories_are_reviewed_one_after_the_other_then_looked_at_across_for_what_they_share`
 
 **Watched by** `app:vulnerabilities` (Admin → Compliance, and `./arenactl check compliance`)
 
