@@ -18,16 +18,18 @@ internal sealed class CommandJob
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _dropped;
 
-    private CommandJob(int id, string command, Process process)
+    private CommandJob(int id, string command, Process process, DateTime started)
     {
         Id = id;
         Command = command;
         _process = process;
+        Started = started;
     }
 
     public int Id { get; }
     public string Command { get; }
-    public DateTime Started { get; } = DateTime.UtcNow;
+    /// <summary>When it was started: taken before its process starts, so how long it took is never less than it ran.</summary>
+    public DateTime Started { get; }
     public DateTime? Ended { get; private set; }
     /// <summary>The process's exit code once it ended; -1 when it could not be read.</summary>
     public int? ExitCode { get; private set; }
@@ -68,9 +70,10 @@ internal sealed class CommandJob
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
         Proc.Prepare(psi);
+        var started = DateTime.UtcNow;
         var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
         process.StandardInput.Close();
-        var job = new CommandJob(id, command, process) { Output = output, Finished = finished, Background = background, Turn = turn, Session = session };
+        var job = new CommandJob(id, command, process, started) { Output = output, Finished = finished, Background = background, Turn = turn, Session = session };
         _ = job.WatchAsync();
         return job;
     }

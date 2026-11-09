@@ -141,7 +141,7 @@ public sealed partial class StudioRuns(IServiceScopeFactory scopes, TimeProvider
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var now = clock.GetUtcNow();
-        var due = await db.Workflows.AsNoTracking().Where(w => w.Enabled && w.NextRunAt != null && w.NextRunAt <= now).Take(20).ToListAsync(ct);
+        var due = await db.Workflows.AsNoTracking().Where(w => w.Enabled && w.NextRunAt != null && w.NextRunAt <= now).OrderBy(w => w.NextRunAt).Take(20).ToListAsync(ct);
         var started = 0;
         foreach (var w in due)
         {
@@ -162,7 +162,7 @@ public sealed partial class StudioRuns(IServiceScopeFactory scopes, TimeProvider
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var now = clock.GetUtcNow();
-        var due = await db.WorkflowRunSteps.AsNoTracking().Where(s => s.Kind == "wait" && s.Status == "waiting" && s.ResumeAt <= now).Take(20).ToListAsync(ct);
+        var due = await db.WorkflowRunSteps.AsNoTracking().Where(s => s.Kind == "wait" && s.Status == "waiting" && s.ResumeAt <= now).OrderBy(s => s.ResumeAt).Take(20).ToListAsync(ct);
         var resumed = 0;
         foreach (var s in due)
         {

@@ -129,9 +129,11 @@ class LauncherTests(unittest.TestCase):
                          ["serve", str(self.gguf), "--tokenizer", "/library/hf/org/Model@abc"],
                          ["serve", str(self.gguf), "--hf-config-path=/library/hf/org/Model@abc"]):
                 self.assertEqual(argv, vllm_serve.args(argv))
-            for argv in (["--model-path", "/library/hf/org/Model@abc", "--tp-size", "1"],
-                         ["--model-path", str(self.gguf), "--tokenizer-path", "/library/hf/org/Model@abc"]):
-                self.assertEqual(argv, sglang_serve.args(argv))
+            snapshot = ["--model-path", "/library/hf/org/Model@abc", "--tp-size", "1"]
+            self.assertEqual(snapshot, sglang_serve.args(snapshot))
+            # A file named with its tokenizer keeps it; only the prefill graphs, which a GGUF file runs out of memory capturing, are left out.
+            named = ["--model-path", str(self.gguf), "--tokenizer-path", "/library/hf/org/Model@abc"]
+            self.assertEqual(named + ["--disable-prefill-cuda-graph"], sglang_serve.args(named))
         self.assertEqual([], calls)
 
     def test_an_architecture_transformers_cannot_read_says_why_and_how_else_to_run_it(self):
@@ -147,13 +149,13 @@ class LauncherTests(unittest.TestCase):
         # The fake servers' image: no transformers, no gguf.
         with mock.patch.dict(sys.modules, {"transformers": None, "gguf": None}):
             self.assertEqual(["serve", str(self.gguf)], vllm_serve.args(["serve", str(self.gguf)]))
-            self.assertEqual(["--model-path", str(self.gguf)], sglang_serve.args(["--model-path", str(self.gguf)]))
+            self.assertEqual(["--model-path", str(self.gguf), "--disable-prefill-cuda-graph"], sglang_serve.args(["--model-path", str(self.gguf)]))
 
     def test_sglang_gets_its_tokenizer_folder_and_refuses_a_part_of_a_split_file_with_why(self):
         modules, _ = fake_transformers()
         with mock.patch.dict(sys.modules, modules):
             run = sglang_serve.args(["--model-path", str(self.gguf), "--tp-size", "1"])
-            self.assertEqual(["--model-path", str(self.gguf), "--tp-size", "1", "--tokenizer-path", gguf_config.folder_for(str(self.gguf), str(self.dir / "hf"))], run)
+            self.assertEqual(["--model-path", str(self.gguf), "--tp-size", "1", "--disable-prefill-cuda-graph", "--tokenizer-path", gguf_config.folder_for(str(self.gguf), str(self.dir / "hf"))], run)
             with self.assertRaises(ValueError) as e:
                 sglang_serve.args(["--model-path", "/library/org/Big-GGUF/Big-Q4_K_M-00001-of-00003.gguf", "--tp-size", "2"])
         self.assertIn("it reads one GGUF file, and this is a part of one split in several", str(e.exception))

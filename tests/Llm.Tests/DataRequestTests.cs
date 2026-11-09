@@ -66,7 +66,7 @@ public sealed class DataRequestTests(AppFixture app)
         await using (var scope = f.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.DataRequests.Where(r => r.Status == "open").Take(1).ExecuteUpdateAsync(s => s.SetProperty(r => r.DueAt, DateTimeOffset.UtcNow.AddDays(-1)));
+            await db.DataRequests.Where(r => r.Status == "open").OrderBy(r => r.Id).Take(1).ExecuteUpdateAsync(s => s.SetProperty(r => r.DueAt, DateTimeOffset.UtcNow.AddDays(-1)));
         }
         var check = await CheckAsync(admin);
         Assert.Equal("fail", check.GetProperty("state").GetString());

@@ -106,7 +106,7 @@ public sealed class VllmAdvisorTests
         Assert.Contains("vLLM queues or preempts the rest.", crowded.Message, StringComparison.Ordinal);
         // Far fewer than that: a warning that the GPUs wait while people queue.
         var few = Assert.Single(VllmAdvisor.Advise(Model("big", 262144, "0,1,2,3", parallel: 4), big, hw).Problems, p => p.Field == "parallel");
-        Assert.Contains("Only 4 people at once a copy", few.Message, StringComparison.Ordinal);
+        Assert.Contains("Each copy serves only 4 people at once", few.Message, StringComparison.Ordinal);
         // Qwen3-235B FP8 at TP=4: about 1M tokens, some 60 to 90 people at a usual length (4 at the whole window).
         var qwen3 = Load("Qwen3-235B-A22B-Instruct-2507-FP8");
         Assert.InRange(Tokens(qwen3, 0, 1, 2, 3), 1_000_000, 1_400_000);
