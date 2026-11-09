@@ -65,6 +65,8 @@ internal sealed class DebugSession : IAsyncDisposable
 
     /// <summary>How long a stop waits for the adapter to end by itself before its processes are killed.</summary>
     public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(3);
+    /// <summary>How long a stop waits, once the adapter is killed, for it to be gone.</summary>
+    public static readonly TimeSpan KillWait = TimeSpan.FromSeconds(2);
 
     private const int MostNamed = 10_000;
     private static readonly StringComparer PathCompare = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -258,7 +260,7 @@ internal sealed class DebugSession : IAsyncDisposable
             }
         }
         _adapter.Kill();
-        await Task.WhenAny(_ended.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+        await Task.WhenAny(_ended.Task, Task.Delay(KillWait));
     }
 
     /// <summary>A request of the session's own; the adapter's response, or null when it ended first.</summary>

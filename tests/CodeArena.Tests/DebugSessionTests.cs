@@ -168,7 +168,8 @@ public sealed class DebugSessionTests : IDisposable
 
         var clock = Stopwatch.StartNew();
         Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/debug/stop", new JsonObject { ["id"] = id })).StatusCode);
-        Assert.InRange(clock.Elapsed, DebugSession.StopWait - TimeSpan.FromMilliseconds(200), DebugSession.StopWait + TimeSpan.FromSeconds(3));
+        // At most its wait, the kill's wait, and a slow runner's second or two.
+        Assert.InRange(clock.Elapsed, DebugSession.StopWait - TimeSpan.FromMilliseconds(200), DebugSession.StopWait + DebugSession.KillWait + TimeSpan.FromSeconds(3));
         Assert.Equal(["initialize", "terminate", "disconnect"], _adapter.Commands);
         Assert.True(_adapter.Received.Last()["arguments"]!["terminateDebuggee"]!.GetValue<bool>());
         await _adapter.Closed.Task.WaitAsync(TimeSpan.FromSeconds(5));

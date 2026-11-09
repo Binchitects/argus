@@ -186,7 +186,8 @@ describe('admin models: vLLM', () => {
       'GET /api/admin/models/library': () => ({ json: [flash] }),
       'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
       'GET /api/admin/models/media/files': () => ({ json: [] }),
-      'POST /api/admin/models/advice': () => ({ json: advice }),
+      // The file opens on llama.cpp first: its form may ask before the engine is changed, and is answered as llama.cpp (no limits yet).
+      'POST /api/admin/models/advice': (b) => ({ json: ((b as { engineKind?: string }).engineKind ?? 'llamacpp') !== 'llamacpp' ? advice : { problems: [] } }),
       'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
     })
     return calls
