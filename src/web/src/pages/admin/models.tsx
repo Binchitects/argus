@@ -73,8 +73,9 @@ interface ModelRow extends SavedModel {
   cache?: TokenCache | null
   /** Failed to load: when it is tried again by itself. */
   retryAt?: string | null
-  /** A media model that failed to load: why (gpu-memory, bad-options, missing-file, crashed, timeout, refused), the line that says so, how many times in a row. */
-  failure?: { kind: string; detail: string; tries: number; since: string } | null
+  /** Why it failed to load or start: a media model's (gpu-memory, bad-options, missing-file, crashed, timeout, refused) or, on vLLM, SGLang, LMDeploy or
+   * Strata, as its engine said (the line of its log), with what to change and which engine; how many times in a row. */
+  failure?: EngineFailure | null
   /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
@@ -325,6 +326,29 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
       )}
     </Card>
   )
+}
+
+/** Why a model failed to start on its engine: gpu-memory, unsupported, missing-file, bad-options, download or crashed. */
+/** A failure's kind in a few words, for the card's line (Why says the whole of it). */
+const failureInBrief: Record<string, string> = {
+  'gpu-memory': 'too little GPU memory',
+  unsupported: 'it cannot run this model',
+  'missing-file': 'a file is missing',
+  'bad-options': 'it refused a setting',
+  download: 'it looked for files it lacks',
+  crashed: 'it stopped while starting',
+}
+
+export type EngineFailure = {
+  kind: string
+  detail: string
+  tries: number
+  since?: string
+  /** A chat model's on vLLM, SGLang, LMDeploy or Strata: what to change, its engine (whose log holds the rest), when it is tried again. */
+  hint?: string
+  engine?: string
+  nextTry?: string | null
+  exit?: number | null
 }
 
 /** "for 40 s", "for 3 min": how long it has been loading or unloading. */
@@ -586,7 +610,30 @@ function ModelCard({
         </>
       ),
     })
-  if (m.status === 'failed' && !media)
+  if (m.failure && !media) {
+    const f = m.failure
+    const next = f.nextTry ? new Date(f.nextTry).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
+    problems.push({
+      title: `${engineLabel(m.engineKind)} could not start it: ${failureInBrief[f.kind] ?? failureInBrief.crashed}`,
+      variant: 'destructive',
+      body: (
+        <>
+          {f.hint && <span className="block">{f.hint}</span>}
+          <span className="mt-1 block">
+            {engineLabel(m.engineKind)} said: <code className="break-all text-xs">{f.detail}</code>
+          </span>
+          <span className="mt-1 block text-xs">
+            {f.tries > 1 ? `Tried ${f.tries} times` : 'Tried once'}
+            {next ? `; next from ${next}` : ''}. The rest is in{' '}
+            <a href={`/api/admin/models/${encodeURIComponent(m.name)}/log`} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
+              its log on {f.engine ?? engineLabel(m.engineKind)}
+            </a>
+            .
+          </span>
+        </>
+      ),
+    })
+  } else if (m.status === 'failed' && !media)
     problems.push({
       title: 'The engine could not load it',
       variant: 'destructive',

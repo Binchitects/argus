@@ -391,6 +391,12 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
     /// <summary>Its engine's kind (EngineKinds).</summary>
     public string KindOf(string model) => BackendOf(model).Capabilities.Kind;
 
+    /// <summary>Why a model on vLLM, SGLang, LMDeploy or Strata failed to start, as its engine said; null on llama.cpp or while it has not failed.</summary>
+    public EngineFailure? FailureOf(string model) => BackendOf(model) is VllmBackend v ? v.FailureOf(model) : null;
+
+    /// <summary>The end of a model's own log on vLLM, SGLang, LMDeploy or Strata; null on llama.cpp (its container's log has it).</summary>
+    public string? LogOf(string model) => BackendOf(model) is VllmBackend v ? v.LogOf(model) : null;
+
     /// <summary>Starts loading a model on its engine.</summary>
     public Task LoadAsync(string name, CancellationToken ct = default) => BackendOf(name).LoadAsync(name, ct);
 

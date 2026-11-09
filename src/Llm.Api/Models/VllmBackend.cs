@@ -180,6 +180,38 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
         }
     }
 
+    /// <summary>The end of each of a model's processes' logs (the supervisor's &lt;entry&gt;.log), at most <paramref name="lines"/> lines each; empty when none.</summary>
+    public string LogOf(string model, int lines = 400)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var e in Presets().Where(e => e.Model == model))
+        {
+            var path = Path.Combine(StatusDir, e.Name + ".log");
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    continue;
+                }
+                var tail = File.ReadLines(path).TakeLast(lines);
+                sb.Append("== ").Append(e.Name).Append(" (").Append(Name).Append(")\n");
+                foreach (var l in tail)
+                {
+                    sb.Append(l).Append('\n');
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                sb.Append("== ").Append(e.Name).Append(": its log cannot be read (").Append(ex.Message).Append(")\n");
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Why a model of this engine failed to start (its first copy that did), from its status file; null while none has.</summary>
+    public EngineFailure? FailureOf(string model) =>
+        Presets().Where(e => e.Model == model).Select(e => EngineFailure.Of(StatusOf(e.Name), Name)).FirstOrDefault(f => f is not null);
+
     /// <summary>Why the engine is not running (its supervisor's heartbeat missing or old), or null.</summary>
     public string? Down()
     {

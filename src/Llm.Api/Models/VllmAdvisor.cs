@@ -582,7 +582,7 @@ public static class VllmAdvisor
             if (m.Parallel * 4 <= usual && m.Parallel < 64)
             {
                 problems.Add(new("parallel", string.Create(inv,
-                    $"Only {m.Parallel} {(m.Parallel == 1 ? "person" : "people")} at once a copy, and its cache holds about {Math.Min(usual, 256)} at a conversation's usual length ({Math.Min(context, TypicalTokens):N0} tokens): the others wait in its line while the GPUs have room to spare. Choose about {Math.Min(usual, 256)} people at once for the most answers a second (the recommended settings do)."), false));
+                    $"Each copy serves only {m.Parallel} {(m.Parallel == 1 ? "person" : "people")} at once, though its cache holds about {Math.Min(usual, 256)} at a conversation's usual length ({Math.Min(context, TypicalTokens):N0} tokens): the others wait in its line while the GPUs have room to spare. Choose about {Math.Min(usual, 256)} people at once for the most answers a second (the recommended settings do)."), false));
             }
             if (room < MinCache(copies.Min(c => c.Sum(d => (long)(d.Total * utilization)))))
             {

@@ -377,6 +377,73 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_model_sglang_cannot_start_says_why_as_sglang_said_with_what_to_change_and_its_log()
+    {
+        var s = await StartAsync();
+        try
+        {
+            // SGLang's own words when the GPU's memory is short, after the traceback that says only where.
+            s.Sglang.Broken.Add("flash");
+            s.Sglang.Logs["flash"] =
+            [
+                "Traceback (most recent call last):",
+                "  File \"/sgl-workspace/sglang/python/sglang/srt/mem_cache/kv_cache_configurator.py\", line 2220, in _profile_available_bytes",
+                "    raise ValueError(",
+                "ValueError: Loaded weights leave no GPU memory for the KV cache under --mem-fraction-static=0.3. Raise --mem-fraction-static above 0.308.",
+                "[2026-11-09 15:28:48] Received sigquit from a child process. It usually means the child failed.",
+            ];
+            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "sglang", file = "hf/org/flash@r", context = 8192 }));
+            // Added on SGLang without a number of people at once: as many as a model moved there serves, not llama.cpp's one.
+            Assert.Equal(VllmAdvisor.DefaultParallel, (await RowAsync(s, "flash")).GetProperty("parallel").GetInt32());
+            await StatusAssert.Is(HttpStatusCode.Accepted, await s.Admin.PostAsync("/api/admin/models/flash/load"));
+            await UntilAsync(s, () => Task.FromResult(s.State.StatusOf("flash") == "failed"), "flash failed on SGLang");
+
+            var failure = (await RowAsync(s, "flash")).GetProperty("failure");
+            Assert.Equal("gpu-memory", failure.GetProperty("kind").GetString());
+            Assert.StartsWith("ValueError: Loaded weights leave no GPU memory for the KV cache", failure.GetProperty("detail").GetString(), StringComparison.Ordinal);
+            Assert.Contains("larger share of the GPU's memory", failure.GetProperty("hint").GetString(), StringComparison.Ordinal);
+            Assert.Equal(("sglang", 1), (failure.GetProperty("engine").GetString(), failure.GetProperty("tries").GetInt32()));
+            // Its own log, which the engine's container log does not hold (the supervisor keeps one a model).
+            var log = await s.Admin.GetAsync("/api/admin/models/flash/log");
+            await StatusAssert.Is(HttpStatusCode.OK, log);
+            Assert.Contains("Received sigquit from a child process", await log.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            // A model that has not failed says nothing of a failure, and a llama.cpp one has no such log here.
+            await StatusAssert.Is(HttpStatusCode.NotFound, await s.Admin.GetAsync("/api/admin/models/nothing/log"));
+
+            // Loaded once it is given room: the failure is gone.
+            s.Sglang.Broken.Remove("flash");
+            await UntilAsync(s, async () => (await RowAsync(s, "flash")).GetProperty("failure").ValueKind == JsonValueKind.Null, "the failure is gone once it starts");
+        }
+        finally
+        {
+            await s.Stop();
+        }
+    }
+
+    [Fact]
+    public void An_engines_log_is_read_by_its_last_error_not_by_the_lines_it_says_while_starting()
+    {
+        // vLLM's startup speaks of memory and the KV cache; it stopped on a model it cannot run.
+        var vllm = EngineFailure.Classify(
+        [
+            "INFO 11-09 15:23:39 [gpu_worker.py:692] Available KV cache memory: 2.97 GiB",
+            "INFO 11-09 15:23:41 [gpu_worker.py:955] Free memory on device (9.96/23.56 GiB) on startup. Desired GPU memory utilization is (0.3, 7.07 GiB).",
+            "ValueError: Model architectures ['Qwen3_5ForConditionalGeneration'] are not supported for now.",
+        ], 1);
+        Assert.Equal("unsupported", vllm.Kind);
+        Assert.StartsWith("ValueError: Model architectures", vllm.Detail, StringComparison.Ordinal);
+        Assert.Equal("gpu-memory", EngineFailure.Classify(["torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB."], 1).Kind);
+        var window = EngineFailure.Classify(["ValueError: To serve at least one request with the models's max seq len (32768), (4.5 GiB KV cache is needed, which is larger than the available KV cache memory (2.0 GiB)."], 1);
+        Assert.Equal("gpu-memory", window.Kind);
+        Assert.Contains("shorter context", window.Hint, StringComparison.Ordinal);
+        Assert.Equal("missing-file", EngineFailure.Classify(["FileNotFoundError: [Errno 2] No such file or directory: '/library/hf/x/config.json'"], 1).Kind);
+        Assert.Equal("bad-options", EngineFailure.Classify(["vllm serve: error: unrecognized arguments: --stepz"], 2).Kind);
+        var crash = EngineFailure.Classify(["Segmentation fault", "RuntimeError: NCCL error in: ../csrc/x.cpp:1, unhandled system error"], 139);
+        Assert.Equal(("crashed", "RuntimeError: NCCL error in: ../csrc/x.cpp:1, unhandled system error"), (crash.Kind, crash.Detail));
+        Assert.Equal("it exited with code 9", EngineFailure.Classify([], 9).Detail);
+    }
+
+    [Fact]
     public async Task A_vllm_model_moves_to_sglang_on_other_gpus_beside_it_and_back_on_the_same_ones()
     {
         var s = await StartAsync();

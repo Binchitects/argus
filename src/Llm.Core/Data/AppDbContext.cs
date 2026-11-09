@@ -174,11 +174,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             .FindExtension<FileKeyExtension>()?.Key);
         var files = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<byte[], byte[]>(v => sealer.Seal(v), v => sealer.Open(v));
         var maybeFiles = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<byte[]?, byte[]?>(v => v == null ? null : sealer.Seal(v), v => v == null ? null : sealer.Open(v));
-        builder.Entity<ChatAttachment>().Property(a => a.Data).HasConversion(maybeFiles);
-        builder.Entity<ChatAttachment>().Property(a => a.Sound).HasConversion(maybeFiles);
+        // A file is replaced, never changed in place: compared by reference (not byte by byte, as files can be large).
+        var sameFile = new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<byte[]>((a, b) => ReferenceEquals(a, b), v => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v), v => v);
+        var sameMaybeFile = new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<byte[]?>((a, b) => ReferenceEquals(a, b), v => v == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v), v => v);
+        builder.Entity<ChatAttachment>().Property(a => a.Data).HasConversion(maybeFiles, sameMaybeFile);
+        builder.Entity<ChatAttachment>().Property(a => a.Sound).HasConversion(maybeFiles, sameMaybeFile);
         builder.Entity<ChatAttachment>().Property(a => a.Text).HasConversion(v => sealer.SealText(v), v => sealer.OpenText(v));
-        builder.Entity<AttachmentPage>().Property(p => p.Data).HasConversion(files);
-        builder.Entity<Decks.DeckTemplate>().Property(t => t.Data).HasConversion(files);
+        builder.Entity<AttachmentPage>().Property(p => p.Data).HasConversion(files, sameFile);
+        builder.Entity<Decks.DeckTemplate>().Property(t => t.Data).HasConversion(files, sameFile);
         builder.UseOpenIddict<Guid>();
 
         builder.Entity<Setting>(e =>

@@ -10,7 +10,7 @@ import { admin, fakeApi, renderApp } from '@/test/utils'
 const everyone = { audience: 'Everyone', groups: [] }
 const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString()
 
-type Row = { status: string; why?: string | null; since?: string | null; instead?: boolean; evicted?: number; retryAt?: string | null; failure?: object | null }
+type Row = { status: string; engineKind?: string; why?: string | null; since?: string | null; instead?: boolean; evicted?: number; retryAt?: string | null; failure?: object | null }
 
 function view(tiny: Row, image: Row = { status: 'unloaded' }) {
   return {
@@ -90,6 +90,34 @@ describe('admin models: loading and unloading', () => {
     expect(within(details).getByText('CUDA error: out of memory')).toBeInTheDocument()
     expect(within(details).getByText(/3 times in a row\./)).toBeInTheDocument()
     expect(within(details).getByText(/next from/)).toBeInTheDocument()
+  })
+
+  it('says why a model on SGLang could not start, as SGLang said, what to change, and links its own log', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: view({
+          status: 'failed', engineKind: 'sglang',
+          failure: {
+            kind: 'gpu-memory', engine: 'sglang', tries: 2, exit: 1, nextTry: new Date(Date.now() + 120_000).toISOString(),
+            detail: 'ValueError: Loaded weights leave no GPU memory for the KV cache under --mem-fraction-static=0.3.',
+            hint: "Its GPUs had too little memory free for its weights and its token cache: give it a larger share of the GPU's memory.",
+          },
+        }),
+      }),
+    })
+    renderApp('/admin/models')
+    await screen.findByRole('heading', { name: /tiny-b/ })
+    const tiny = card('tiny-b')
+    // Not llama.cpp's log, nor "the engine": SGLang, in a line; Why says the whole of it.
+    expect(within(tiny).getByText('SGLang could not start it: too little GPU memory')).toBeInTheDocument()
+    expect(within(tiny).queryByText(/llamacpp/)).not.toBeInTheDocument()
+    await userEvent.click(within(tiny).getByRole('button', { name: 'Why' }))
+    const details = await screen.findByRole('dialog', { name: 'tiny-b' })
+    expect(within(details).getByText(/Loaded weights leave no GPU memory for the KV cache/)).toBeInTheDocument()
+    expect(within(details).getByText(/give it a larger share of the GPU's memory/)).toBeInTheDocument()
+    expect(within(details).getByText(/Tried 2 times; next from/)).toBeInTheDocument()
+    expect(within(details).getByRole('link', { name: 'its log on sglang' })).toHaveAttribute('href', '/api/admin/models/tiny-b/log')
+    expect(within(details).queryByText(/docker compose logs llamacpp/)).not.toBeInTheDocument()
   })
 
   it('a picture model whose server refused its settings waits to be changed', async () => {

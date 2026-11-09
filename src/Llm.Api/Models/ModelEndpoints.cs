@@ -70,6 +70,8 @@ public static class ModelEndpoints
         g.MapDelete("/{name}", RemoveAsync);
         g.MapDelete("/{name}/move", ForgetMoveAsync);
         // Loading and unloading is an operator's duty too, without changing the models (models.load).
+        g.MapGet("/{name}/log", (string name, EngineClient engines) =>
+            engines.LogOf(name) is { Length: > 0 } log ? Results.Text(log, "text/plain; charset=utf-8") : Results.NotFound());
         g.MapPost("/{name}/load", LoadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
         g.MapPost("/{name}/unload", UnloadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
         g.MapPut("/{name}/keep", KeepAsync);
@@ -135,6 +137,8 @@ public static class ModelEndpoints
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
                 // Failed to load: when it is tried again.
                 retryAt = state.NextTry(m.Name),
+                // On vLLM, SGLang, LMDeploy or Strata: why it failed to start, as its engine said, and what to change.
+                failure = engines.FailureOf(m.Name),
                 // Loading or unloading: why (an admin, a request, kept loaded, making room for another), and since when.
                 why = Why(m.Name), since = state.Reason(m.Name)?.Since,
                 // Loaded by an admin in place of a model that never makes room: it never makes room either until unloaded.
@@ -342,6 +346,11 @@ public static class ModelEndpoints
         }
         // Of the kind it is added on: it leaves no other.
         var model = new LocalModel { Name = name, File = "", EngineKind = body.EngineKind is { Length: > 0 } k ? k.Trim() : EngineKinds.LlamaCpp };
+        // A model new on vLLM, SGLang, LMDeploy or Strata serves many people at once, as one moved there does (not llama.cpp's one).
+        if (EngineKinds.ServerPerModel(model.EngineKind))
+        {
+            model.Parallel = VllmAdvisor.DefaultParallel;
+        }
         var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults, [.. taken],
             new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), media.Placed()));
         if (problem is not null)

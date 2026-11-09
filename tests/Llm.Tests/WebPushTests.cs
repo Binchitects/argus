@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Llm.Api.Notifications;
+using Llm.Core.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -155,6 +157,35 @@ public sealed class WebPushTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.NotFound, await other.Http.DeleteAsync(new Uri($"/api/push/subscriptions/{device.GetProperty("id").GetString()}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/push/subscriptions/{device.GetProperty("id").GetString()}", UriKind.Relative)));
         Assert.Empty((await b.JsonAsync(await b.GetAsync("/api/push"))).GetProperty("devices").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task The_same_news_said_at_once_by_many_is_kept_and_pushed_once_with_no_error()
+    {
+        await using var f = NewApp();
+        var (b, id) = await PersonAsync(f);
+        using var browser = new Browser();
+        await StatusAssert.Is(HttpStatusCode.OK, await b.PostAsync("/api/push/subscriptions", browser.Subscription("https://fcm.googleapis.com/fcm/send/once-1")));
+
+        // Eight at the same moment (as two instances, or a task and an alert, might): one in the bell, one push.
+        var said = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+        {
+            using var scope = f.Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<Notifier>().SendAsync(id, new News("alert", "Disk nearly full", "90% used.", "/admin/alerts", Key: "disk-full-once"));
+        }));
+        Assert.Equal(1, said.Count(x => x));
+        await _push.WaitAsync("fcm.googleapis.com", "/fcm/send/once-1");
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(1, await db.Notifications.CountAsync(n => n.UserId == id && n.Key == "disk-full-once"));
+            // Said again later, too: not again.
+            Assert.False(await scope.ServiceProvider.GetRequiredService<Notifier>().SendAsync(id, new News("alert", "Disk nearly full", Key: "disk-full-once")));
+            // To many at once (each once): this person already has it.
+            await scope.ServiceProvider.GetRequiredService<Notifier>().SendManyAsync([id, id], new News("alert", "Disk nearly full", Key: "disk-full-once"));
+            Assert.Equal(1, await db.Notifications.CountAsync(n => n.UserId == id && n.Key == "disk-full-once"));
+        }
+        Assert.Single(_push.To("fcm.googleapis.com", "/fcm/send/once-1"));
     }
 
     [Fact]

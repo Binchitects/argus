@@ -207,6 +207,7 @@ public sealed class AppFixture : IAsyncLifetime
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("ConnectionStrings:App", connectionString);
+            b.UseSetting("Database:StrictQueries", "true");
             b.UseSetting("Auth:Domain", Domain);
             b.UseSetting("Auth:AdminPassword", AdminPassword);
             b.UseSetting("Auth:AdminEmail", "admin@llm.test");

@@ -22,6 +22,9 @@ public sealed class FakeVllm(string config, string status) : HttpMessageHandler
     /// <summary>Processes that fail to start (by entry name), as one out of memory.</summary>
     public HashSet<string> Broken { get; } = [];
 
+    /// <summary>What a broken process's log ends with (its status file's last lines and its .log), by its name.</summary>
+    public ConcurrentDictionary<string, string[]> Logs { get; } = new();
+
     /// <summary>Whether the supervisor runs (writes its heartbeat).</summary>
     public bool Running { get; set; } = true;
 
@@ -97,7 +100,14 @@ public sealed class FakeVllm(string config, string status) : HttpMessageHandler
     private void Write(string name, string phase, int port)
     {
         var path = Path.Combine(status, name + ".json");
-        File.WriteAllText(path + ".tmp", new JsonObject { ["name"] = name, ["phase"] = phase, ["port"] = port, ["log"] = new JsonArray() }.ToJsonString());
+        var log = phase == "failed" && Logs.TryGetValue(name, out var lines) ? lines : [];
+        var o = new JsonObject { ["name"] = name, ["phase"] = phase, ["port"] = port, ["log"] = new JsonArray([.. log.Select(l => (JsonNode)l)]) };
+        if (phase == "failed")
+        {
+            (o["exit"], o["tries"]) = (1, 1);
+            File.WriteAllLines(Path.Combine(status, name + ".log"), log);
+        }
+        File.WriteAllText(path + ".tmp", o.ToJsonString());
         File.Move(path + ".tmp", path, overwrite: true);
     }
 

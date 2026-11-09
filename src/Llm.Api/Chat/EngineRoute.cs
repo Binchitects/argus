@@ -421,7 +421,7 @@ public sealed partial class EngineRoute
         }
         else if (engine.StatusOf(model) == "failed" && !engine.MayAsk(model))
         {
-            why = $"{model} could not be started just now.";
+            why = $"{model} could not be started just now{Because(model)}.";
         }
         else
         {
@@ -452,7 +452,7 @@ public sealed partial class EngineRoute
             }
             else
             {
-                why = $"{model} has no room on its GPUs now: the models there are answering or kept loaded.";
+                why = NoRoom(model, models, room);
             }
         }
         // With a fallback, the gateway's fallbacks answer (it reaches the model, fails at once, and goes on); without, say when.
@@ -602,7 +602,7 @@ public sealed partial class EngineRoute
             }
             if (status == "failed")
             {
-                throw new ChatGatewayException($"{model} could not be started (its engine's log says why under Admin → Models). Choose another model.", 503) { NotLoaded = true };
+                throw new ChatGatewayException($"{model} could not be started{Because(model)} (Admin → Models says what to change). Choose another model.", 503) { NotLoaded = true };
             }
             if (!told)
             {
@@ -777,9 +777,30 @@ public sealed partial class EngineRoute
     {
         if (engine.StatusOf(model) == "failed" && !engine.MayAsk(model))
         {
-            throw new ChatGatewayException($"{model} could not be loaded just now. Try again in a few minutes, or choose another model.", 503) { NotLoaded = true };
+            throw new ChatGatewayException($"{model} could not be loaded just now{Because(model)}. Try again in a few minutes, or choose another model.", 503) { NotLoaded = true };
         }
     }
+
+    /// <summary>
+    /// Why there is no room for <paramref name="model"/> on its GPUs, naming the models there: kept loaded (they never make
+    /// room) when none may, else answering now or a moment ago (an idle one makes room at the next try).
+    /// </summary>
+    private string NoRoom(string model, IReadOnlyList<EngineModel> models, Room room)
+    {
+        var places = engine.Places;
+        var mine = places.TryGetValue(model, out var p) ? p.PerGpu.Keys.ToHashSet() : [];
+        var there = models.Where(m => m.Name != model && m.Status is "loaded" or "loading" or "unloading"
+            && (mine.Count == 0 || (places.TryGetValue(m.Name, out var q) && q.PerGpu.Keys.Any(mine.Contains)))).Select(m => m.Name).ToList();
+        var names = there.Count > 0 ? string.Join(", ", there.Take(4)) + (there.Count > 4 ? $" and {there.Count - 4} more" : "") : "other models";
+        return room == Room.None
+            ? $"{model} has no room on its GPUs: {names} {(there.Count == 1 ? "is kept loaded there and never makes" : "are kept loaded there and never make")} room (unpin one under Admin → Models, or place {model} on other GPUs)."
+            : there.Count == 1
+                ? $"{model} has no room on its GPUs this moment: {names} answers there, or did a moment ago, and makes room once it is idle."
+                : $"{model} has no room on its GPUs this moment: {names} answer there, or did a moment ago, and make room once idle.";
+    }
+
+    /// <summary>": its GPUs had too little memory free": why a model on vLLM, SGLang, LMDeploy or Strata failed to start; empty when unknown.</summary>
+    private string Because(string model) => client.FailureOf(model) is { } f ? $": {f.InBrief}" : "";
 
     /// <summary>What the engine said of a model's slots, lately; null: nothing recent (it is too busy to say now).</summary>
     private async Task<View?> ViewAsync(string model, CancellationToken ct)

@@ -45,7 +45,7 @@ class SglangImageTests(unittest.TestCase):
         self.assertIn('runpy.run_module("sglang.launch_server"', text)
         # Added to sys.argv inside the process: /proc/PID/cmdline keeps the arguments it was started with.
         self.assertIn('sys.argv = ["sglang.launch_server", *run, *(["--api-key", key] if key else [])]', text)
-        self.assertIn("run = args(sys.argv[1:])", text)
+        self.assertIn("run = share(args(sys.argv[1:]))", text)
         # The GGUF files' tokenizer folder comes from vLLM's module, which the image has beside the supervisor.
         self.assertIn("COPY vllm/supervisor.sh vllm/vllm-helper.py vllm/gguf_config.py /vllm/", self.text)
 
@@ -73,3 +73,34 @@ class SglangImageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryShareTests(unittest.TestCase):
+    """The app's share of a GPU (as vLLM's --gpu-memory-utilization) made SGLang's --mem-fraction-static, which counts
+    what other processes hold of the GPU as its own, leaving room for what SGLang takes beside its fraction."""
+
+    GIB = 2**30
+
+    def setUp(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("sglang_serve", SERVE)
+        self.serve = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.serve)
+
+    def test_what_others_hold_is_added_to_the_share(self):
+        argv = ["--model-path", "/library/m", "--mem-fraction-static", "0.3", "--port", "8001"]
+        self.assertEqual(["--model-path", "/library/m", "--mem-fraction-static", "0.6", "--port", "8001"], self.serve.share(argv, lambda: (0.3, 80 * self.GIB)))
+
+    def test_it_leaves_4_5_gib_of_a_small_gpu_and_8_percent_of_a_large_one(self):
+        argv = ["--mem-fraction-static", "0.3"]
+        # A 24 GiB GPU, over half held by llama.cpp: 4.5 GiB stays free.
+        self.assertEqual(["--mem-fraction-static", "0.812"], self.serve.share(argv, lambda: (0.57, 24 * self.GIB)))
+        # A 141 GiB GPU: 8%.
+        self.assertEqual(["--mem-fraction-static", "0.92"], self.serve.share(["--mem-fraction-static", "0.5"], lambda: (0.6, 141 * self.GIB)))
+
+    def test_unchanged_on_an_empty_gpu_or_when_unknown(self):
+        argv = ["--mem-fraction-static", "0.5"]
+        self.assertEqual(argv, self.serve.share(argv, lambda: (0.0, 24 * self.GIB)))
+        self.assertEqual(argv, self.serve.share(argv, lambda: None))
+        self.assertEqual(["--port", "1"], self.serve.share(["--port", "1"], lambda: (0.5, 24 * self.GIB)))

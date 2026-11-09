@@ -32,6 +32,11 @@ var fileKey = builder.Configuration["Auth:DataKey"] is { Length: > 0 } dataKey ?
 builder.Services.AddDbContext<AppDbContext>((sp, o) =>
 {
     o.UseNpgsql(connectionString);
+    // Tests (Database:StrictQueries) fail on a page of rows taken in no order, which comes back in any order.
+    if (builder.Configuration.GetValue<bool>("Database:StrictQueries"))
+    {
+        o.ConfigureWarnings(w => w.Throw(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.RowLimitingOperationWithoutOrderByWarning));
+    }
     ((Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsBuilderInfrastructure)o).AddOrUpdateExtension(new FileKeyExtension(fileKey));
     o.UseOpenIddict<Guid>();
     // The bell's news is pushed to people's devices too, whoever saves it.
