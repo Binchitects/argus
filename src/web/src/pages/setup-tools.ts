@@ -16,7 +16,7 @@ export const CA_FILE = 'arena-ca.crt'
 
 /** The install line's word on the signature: whose certificate signed the builds, which the installer checks with the CA your machine trusts. */
 const signedBy = (c: { codeArena: { signature?: { signer: string; issuer: string } | null } | null }) =>
-  c.codeArena?.signature ? ` and that ${c.codeArena.signature.issuer} signed it (${c.codeArena.signature.signer}; trust that CA first)` : ''
+  c.codeArena?.signature ? ` and that this Arena's CA, ${c.codeArena.signature.issuer}, signed it (${c.codeArena.signature.signer}: the installer carries that CA and keeps it for updates)` : ''
 
 /** A build of Code Arena the app serves (/api/downloads/code-arena). */
 export interface CodeArenaBuild {

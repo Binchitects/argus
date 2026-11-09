@@ -410,6 +410,21 @@ public sealed class FakeMcp : FakeServer
     /// <summary>The IDE's launcher beside the build (Windows'), at the build's address/ide: its bytes, and the SHA-256 it lists (null: theirs).</summary>
     public (byte[] Bytes, string? Sha256)? Ide { get; set; }
 
+    /// <summary>Arena signs its builds: the builds' list (SHA256SUMS, made here), its signature with this key, and this certificate chain (PEM).</summary>
+    public (System.Security.Cryptography.RSA Key, string ChainPem)? Signing { get; set; }
+
+    /// <summary>The builds' list as sha256sum writes it: this system's build (and its IDE launcher on Windows).</summary>
+    private byte[] SignedList((string Version, byte[] Bytes, string? Sha256) build)
+    {
+        var exe = OperatingSystem.IsWindows() ? "code-arena.exe" : "code-arena";
+        var list = $"{Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(build.Bytes))}  {Updates.Rid}/{exe}\n";
+        if (Ide is { } ide)
+        {
+            list += $"{Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ide.Bytes))}  {Updates.Rid}/{Updates.IdeLauncher}\n";
+        }
+        return Encoding.ASCII.GetBytes(list);
+    }
+
     public bool Sse { get; set; }
     /// <summary>Arena's default chat model, told in initialize's _meta as Arena MCP does; null: not told.</summary>
     public string? DefaultModel { get; set; }
@@ -493,7 +508,12 @@ public sealed class FakeMcp : FakeServer
                             ? new JsonObject { ["size"] = ide.Bytes.Length, ["sha256"] = ide.Sha256 ?? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ide.Bytes)) }
                             : null,
                     }),
+                    ["signature"] = Signing is null ? null : new JsonObject { ["by"] = "Code Arena (test)" },
                 }.ToJsonString())
+                : path == "/api/downloads/code-arena/SHA256SUMS" ? SignedList(build)
+                : path == "/api/downloads/code-arena/SHA256SUMS.sig" && Signing is { } signing
+                    ? signing.Key.SignData(SignedList(build), System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1)
+                : path == "/api/downloads/code-arena/code-signing.crt" && Signing is { } chain ? Encoding.ASCII.GetBytes(chain.ChainPem)
                 : path == "/api/downloads/code-arena/" + Updates.Rid ? build.Bytes
                 : path == $"/api/downloads/code-arena/{Updates.Rid}/ide" && Ide is { } launcher ? launcher.Bytes : [];
             await ctx.Response.OutputStream.WriteAsync(bytes, ct);

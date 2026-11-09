@@ -87,7 +87,7 @@ class PruneTests(unittest.TestCase):
         self.s.write(".env", f"BACKUP_DIR={empty}\n")
         r = self.s.run("backup.sh")
         self.assertEqual(r.returncode, 1)
-        self.assertEqual(self.s.calls(), [["docker", "run", "--rm", "--network", "none", "-v", f"{empty}:/d", "python:3.13-slim",
+        self.assertEqual(self.s.calls(), [["docker", "run", "--rm", "--network", "none", "--label", "arena.helper=1", "-v", f"{empty}:/d", "python:3.13-slim",
                                            "chown", f"{os.getuid()}:{os.getgid()}", "/d"]])
         self.assertIn("sudo chown", r.stderr)
 

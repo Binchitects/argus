@@ -1524,6 +1524,32 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("every file of 9.9.9 is there, as it was shipped", r.stdout)
 
+    def test_A_helper_a_stopped_run_left_is_removed_by_the_next_and_one_at_work_is_left_alone(self):
+        self.install()
+        store = self.r.store()
+        helper = store["images"]["python:3.13-slim"]
+        # Ctrl-C between a container's create and its start leaves it, --rm or not.
+        leftovers = [
+            {"id": "c0ffee01", "name": "beautiful_cannon", "state": "created", "image_id": helper, "image_ref": "python:3.13-slim", "labels": ["arena.helper=1"],
+             "project": "", "service": ""},
+            {"id": "c0ffee02", "name": "older_one", "state": "created", "image_id": helper, "image_ref": "python:3.13-slim", "labels": [], "project": "", "service": ""},
+            {"id": "c0ffee03", "name": "stopped_one", "state": "exited", "image_id": helper, "image_ref": "python:3.13-slim", "labels": ["arena.helper=1"],
+             "project": "", "service": ""},
+        ]
+        at_work = {"id": "c0ffee04", "name": "a_backup", "state": "running", "image_id": helper, "image_ref": "python:3.13-slim", "labels": ["arena.helper=1"],
+                   "project": "", "service": ""}
+        store["containers"] += leftovers + [at_work]
+        self.r.state.write_text(json.dumps(store))
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        left = {c["id"] for c in self.containers()}
+        self.assertTrue(left.isdisjoint({"c0ffee01", "c0ffee02", "c0ffee03"}), left)
+        self.assertIn("c0ffee04", left)
+        # Its own throwaway containers carry the label.
+        helpers = [a for a in self.r.s.calls() if a[1:2] == ["run"] and "python:3.13-slim" in a]
+        self.assertTrue(helpers)
+        self.assertTrue(all("arena.helper=1" in a for a in helpers), [a[:8] for a in helpers if "arena.helper=1" not in a])
+
     def test_Repair_gives_a_volume_back_to_its_service(self):
         self.install()
         store = self.r.store()

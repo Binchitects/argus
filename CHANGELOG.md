@@ -41,6 +41,21 @@ starts beside the models already on the GPU.
   error in the log.
 - Studio's schedule and wait sweeps took their 20 rows in no order; they now
   take the earliest first. Tests fail on any page of rows taken with no order.
+- **Code Arena would not install or update from an Arena with its own CA.**
+  The install scripts and `code-arena update` took a signed build only when
+  the machine already trusted the Arena's CA, and on Windows the check also
+  failed on the revocation status, which the Arena's certificates do not
+  publish, so even a machine that trusted the CA was refused. The scripts
+  now carry the Arena's signing CA and check against it alone, whatever
+  the machine trusts. They keep it beside the program
+  (`code-arena-signing-ca.pem`), and `code-arena update` takes only builds
+  that CA signed.
+- **An upgrade stopped at the wrong moment left a container behind.** With
+  Ctrl-C between a helper container's create and its start, the container
+  stayed (`--rm` only removes one that ran), and the next upgrade's health
+  check failed on it. The installer's and the backup's throwaway containers
+  are now labelled, and every install, upgrade, repair and rollback (and
+  each backup) removes the ones a stopped run left.
 - Code Arena: a job's time is counted from before its process starts, so a
   2-second job no longer reads 1 second on a loaded machine.
 

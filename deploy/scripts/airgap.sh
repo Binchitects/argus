@@ -209,7 +209,7 @@ if [[ $ACTION == pack ]]; then
   # Only when the volume is there: a run would make it.
   engine_file() {
     "$ENGINE" volume inspect "${PROJECT}_engine" >/dev/null 2>&1 || return 1
-    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_engine:/engine:ro" "$HELPER" cat "/engine/$1" 2>/dev/null
+    "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_engine:/engine:ro" "$HELPER" cat "/engine/$1" 2>/dev/null
   }
 
   # kind<TAB>path for each file of the library the stack reads, the chat models' from models.ini.
@@ -411,7 +411,7 @@ PY
     say "  none: the speech server fetches its models, or they come with the default models"
   elif "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then
     owner=""; [[ $ENGINE == docker ]] && owner=" && chown $(id -u):$(id -g) /out/audio.tar.gz"
-    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_audio:/src:ro" -v "$B/audio:/out" "$HELPER" \
+    "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_audio:/src:ro" -v "$B/audio:/out" "$HELPER" \
       sh -c "tar -czf /out/audio.tar.gz --numeric-owner -C /src .$owner" || die "archiving the ${PROJECT}_audio volume failed"
     AUDIO=yes; say "  the speech server's models: $(human "$(stat -c %s "$B/audio/audio.tar.gz")")"
   else
@@ -565,7 +565,7 @@ if [[ -f "$B/audio/audio.tar.gz" ]]; then
   "$ENGINE" volume inspect "$vol" >/dev/null 2>&1 \
     || "$ENGINE" volume create --label "com.docker.compose.project=$PROJECT" --label com.docker.compose.volume=audio "$vol" >/dev/null \
     || die "cannot make the $vol volume"
-  "$ENGINE" run --rm --pull never --network none -v "$vol:/target" -v "$B/audio:/bundle:ro" "$HELPER" \
+  "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "$vol:/target" -v "$B/audio:/bundle:ro" "$HELPER" \
     tar -xzf /bundle/audio.tar.gz --numeric-owner -C /target || die "filling $vol failed"
   say "  done"
 fi

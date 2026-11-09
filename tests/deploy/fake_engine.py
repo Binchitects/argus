@@ -273,8 +273,14 @@ def stateful(args: list[str]) -> int | None:
                 rows = [c for c in rows if c["project"] == value.split("=", 1)[1]]
             elif key == "label" and value.startswith("com.docker.compose.service="):
                 rows = [c for c in rows if c["service"] == value.split("=", 1)[1]]
+            elif key == "label":
+                # Any other label: a container's own (a helper's arena.helper=1), as K=V.
+                rows = [c for c in rows if value in c.get("labels", [])]
+            elif key == "status":
+                rows = [c for c in rows if c["state"] == value]
             elif key == "ancestor":
-                rows = [c for c in rows if c["image_id"] == value.replace("sha256:", "")]
+                wanted = st.image(value) or value.replace("sha256:", "")
+                rows = [c for c in rows if c["image_id"] == wanted]
         if "-a" not in args and "-aq" not in args:
             rows = [c for c in rows if c["state"] == "running"]
         for c in rows:

@@ -192,7 +192,7 @@ own_dir() {   # own_dir <dir>
   local dir=$1
   mkdir -p "$dir" || die "cannot create $dir"
   if [[ ! -O "$dir" && ! -w "$dir" && -r "$dir" && -z "$(ls -A "$dir")" ]] && command -v docker >/dev/null; then
-    docker run --rm --network none -v "$dir:/d" "$HELPER" chown "$(id -u):$(id -g)" /d >/dev/null \
+    docker run --rm --network none --label arena.helper=1 -v "$dir:/d" "$HELPER" chown "$(id -u):$(id -g)" /d >/dev/null \
       && [[ -O "$dir" ]] && say "  $dir was root's (Docker made it for the app's mount): now $(id -un)'s"
   fi
   if [[ -O "$dir" ]]; then
@@ -384,14 +384,14 @@ if [[ $ACTION == restore ]]; then
   for a in "$FROM"/volumes/*.tar.gz; do
     [[ -f "$a" ]] || continue
     vol="$(basename "$a" .tar.gz)"
-    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
+    "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
       sh -c "find /target -mindepth 1 -delete && tar -xzpf /backup/${vol}.tar.gz --numeric-owner -C /target" \
       && say "  restored  $vol" || die "restoring $vol failed"
   done
 
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
     say "==> gateway database"
-    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
+    "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
     for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1 && break; sleep 2; done
@@ -506,12 +506,16 @@ print(n_sql)
 '
 HAVE_HELPER=1
 "$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || { HAVE_HELPER=0; fail "$HELPER_MISSING"; }
+# A backup stopped between a helper's create and its start left it (--rm removes only one that ran): gone first.
+stale=$( { "$ENGINE" ps -aq --filter label=arena.helper=1 --filter status=created; "$ENGINE" ps -aq --filter label=arena.helper=1 --filter status=exited; } 2>/dev/null | sort -u)
+# shellcheck disable=SC2086
+[[ -z "$stale" ]] || "$ENGINE" rm -f $stale >/dev/null 2>&1 || :
 for vol in $(compose_volumes); do
   [[ $HAVE_HELPER -eq 1 ]] || break
   case "$SKIP_VOLUMES" in *" $vol "*) continue ;; esac
   if [[ "$INCLUDE_LOGS" != 1 ]]; then case "$LOG_VOLUMES" in *" $vol "*) continue ;; esac; fi
   "$ENGINE" volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1 || continue
-  n_sql=$("$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
+  n_sql=$("$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
           sh -c "python -c '$SNAPSHOT_PY' /out/${vol}.tar.gz && chown ${UIDGID} /out/${vol}.tar.gz && chmod 600 /out/${vol}.tar.gz" 2>>"$LOG")
   if [[ $? -eq 0 && -s "$OUT/volumes/${vol}.tar.gz" ]]; then
     printf '  %-22s %7s%s\n' "$vol" "$(du -h "$OUT/volumes/${vol}.tar.gz" | cut -f1)" "$([[ "${n_sql:-0}" -gt 0 ]] && echo "  (${n_sql} SQLite database(s) via online backup)")"

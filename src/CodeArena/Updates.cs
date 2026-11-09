@@ -118,7 +118,11 @@ internal static class Updates
     /// renamed over it (on Windows the running one moves aside first, as code-arena.exe.old); the IDE's launcher beside it
     /// too, when Arena has one for this system, checked the same way. What it did, or why it did not.
     /// </summary>
-    /// <param name="caFile">The CA this machine trusts for Arena (--ca, the config's, ARENA_CA_CERT); null: the system's.</param>
+    /// <summary>The Arena's signing CA, which the installers keep beside the program (Arena's DownloadEndpoints.SigningCaFile).</summary>
+    public const string SigningCaFile = "code-arena-signing-ca.pem";
+
+    /// <param name="caFile">The CA this machine trusts for Arena (--ca, the config's, ARENA_CA_CERT); null: the system's. The signing CA
+    /// beside the program (<see cref="SigningCaFile"/>), when the installer kept one, is the one a build's signature is checked with.</param>
     public static async Task<(bool Done, string Said)> UpdateAsync(Config config, HttpClient http, Action<string> progress, CancellationToken ct, string? exe = null,
         string? caFile = null)
     {
@@ -138,6 +142,10 @@ internal static class Updates
         progress($"Downloading Code Arena {found.Version} for {found.Rid} ({Files.Size(found.Size)}) from Arena…");
         var temporary = exe + ".new";
         var root = found.Url[..found.Url.LastIndexOf('/')];
+        // The Arena's signing CA its installer kept beside it: a build is taken only when that CA signed it, whether or not this
+        // machine trusts it; without one, the CA this machine trusts for Arena.
+        var pinned = Path.Combine(Path.GetDirectoryName(exe) ?? ".", SigningCaFile);
+        caFile = File.Exists(pinned) ? pinned : caFile;
         try
         {
             if (await FetchAsync(http, found.Url, temporary, found.Size, found.Sha256, found.Signed ? root : null, $"{found.Rid}/{Path.GetFileName(exe)}", caFile, ct) is { } problem)

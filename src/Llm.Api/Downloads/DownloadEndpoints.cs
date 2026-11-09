@@ -43,9 +43,9 @@ public static class DownloadEndpoints
         g.MapGet("", List);
         // One line installs it: the build for the machine, checked against its SHA-256, on the person's PATH.
         g.MapGet("/install.sh", (IConfiguration config, Microsoft.Extensions.Options.IOptions<Identity.AuthOptions> auth) =>
-            Results.Text(InstallSh($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null), "text/x-shellscript; charset=utf-8"));
+            Results.Text(InstallSh($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null, SigningRoot(config)), "text/x-shellscript; charset=utf-8"));
         g.MapGet("/install.ps1", (IConfiguration config, Microsoft.Extensions.Options.IOptions<Identity.AuthOptions> auth) =>
-            Results.Text(InstallPs1($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null), "text/plain; charset=utf-8"));
+            Results.Text(InstallPs1($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null, SigningRoot(config)), "text/plain; charset=utf-8"));
         // The builds' list and its signature (scripts/sign-code-arena.sh, on the host with the CA's key): installers and
         // code-arena update check a build against them with the CA they trust, not only against the SHA-256 listed here.
         g.MapGet("/SHA256SUMS", (IConfiguration config) => Path.Combine(Signature(config) is not null ? SignatureRoot(config) : Root(config), "SHA256SUMS") is var list
@@ -86,6 +86,37 @@ public static class DownloadEndpoints
     /// before an upgrade changed them signs nothing) and its list (SHA256SUMS, with the SHA-256 of the Authenticode-signed
     /// Windows builds beside it in place of the image's) holds for its certificate's key; null: not signed.
     /// </summary>
+    /// <summary>
+    /// The CA at the top of the code-signing certificate's chain (the last of code-signing.crt, when it signs itself), as
+    /// PEM; null when the builds are not signed or the chain ends below a root (a public CA's: the machine's store has it).
+    /// The installers carry it and check against it alone, then keep it beside the program for code-arena update: a build
+    /// is taken only when this Arena's CA signed it, whether or not the machine trusts that CA, or the Arena's site.
+    /// </summary>
+    public static string? SigningRoot(IConfiguration config)
+    {
+        var crt = Path.Combine(SignatureRoot(config), "code-signing.crt");
+        if (Signature(config) is null || !File.Exists(crt))
+        {
+            return null;
+        }
+        try
+        {
+            var certs = new System.Security.Cryptography.X509Certificates.X509Certificate2Collection();
+            certs.ImportFromPemFile(crt);
+            using var top = certs[^1];
+            var root = top.SubjectName.RawData.AsSpan().SequenceEqual(top.IssuerName.RawData) ? top.ExportCertificatePem() : null;
+            foreach (var c in certs)
+            {
+                c.Dispose();
+            }
+            return root;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return null;
+        }
+    }
+
     public static CodeArenaSignature? Signature(IConfiguration config)
     {
         var (image, madeFrom, list, sig, crt) = (Path.Combine(Root(config), "SHA256SUMS"), Path.Combine(SignatureRoot(config), "SHA256SUMS.image"),
@@ -179,7 +210,7 @@ public static class DownloadEndpoints
     /// signed, that certificate from a CA the machine (or CODE_ARENA_CA) trusts; put in ~/.local/bin (CODE_ARENA_DIR), then
     /// how to sign in. CODE_ARENA_CA names the CA file on a self-signed deployment.
     /// </summary>
-    public static string InstallSh(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false)
+    public static string InstallSh(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false, string? signingRoot = null)
     {
         var sums = string.Concat(builds.Where(b => !b.Rid.StartsWith("win-", StringComparison.Ordinal) && b.Sha256 is not null)
             .Select(b => $"  {b.Rid}) sum={b.Sha256} ;;\n"));
@@ -204,7 +235,7 @@ public static class DownloadEndpoints
             curl "$@" -o "$tmp" "$arena/api/downloads/code-arena/$rid"
             if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp" | cut -d' ' -f1); fi
             if [ "$got" != "$sum" ]; then rm -f "$tmp"; echo "Code Arena: the download does not match its SHA-256: nothing installed" >&2; exit 1; fi
-            {{(isSigned ? SignedSh : UnsignedSh)}}chmod 755 "$tmp"
+            {{(isSigned ? SignedSh(signingRoot) : UnsignedSh)}}chmod 755 "$tmp"
             mv -f "$tmp" "$dir/code-arena"
             echo "Code Arena $version is in $dir/code-arena."
             case ":$PATH:" in *":$dir:"*) ;; *) echo "Add $dir to your PATH (e.g. in ~/.profile): export PATH=\"$dir:\$PATH\"" ;; esac
@@ -214,30 +245,44 @@ public static class DownloadEndpoints
             """;
     }
 
+    /// <summary>Where the installers keep the Arena's signing CA, beside the program: code-arena update checks against it.</summary>
+    public const string SigningCaFile = "code-arena-signing-ca.pem";
+
     /// <summary>
-    /// install.sh's check of a signed build: the certificate from a CA this machine trusts (or CODE_ARENA_CA), for code
-    /// signing; the builds' list signed with its key; this build in the list. Without openssl, said and not checked.
+    /// install.ps1's check of a signed build: the certificate for code signing, chained to the Arena's signing CA it carries
+    /// (<paramref name="root"/>: whether or not Windows trusts it, which is then kept beside the program), else to a root
+    /// Windows trusts; no revocation check (the Arena's certificates name no list to check); the builds' list signed with its
+    /// key; this build in the list.
     /// </summary>
-    /// <summary>
-    /// install.ps1's check of a signed build: the certificate chains to a root Windows trusts, for code signing; the builds'
-    /// list signed with its key; this build in the list.
-    /// </summary>
-    private const string SignedPs1 = """
+    private static string SignedPs1(string? root) => $$"""
         $sig = Join-Path $dir '.code-arena.sig'; New-Item -ItemType Directory -Force -Path $sig | Out-Null
         Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/SHA256SUMS" -OutFile (Join-Path $sig 'SHA256SUMS')
         Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/SHA256SUMS.sig" -OutFile (Join-Path $sig 'SHA256SUMS.sig')
         Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/code-signing.crt" -OutFile (Join-Path $sig 'bundle.crt')
-        $pem = Get-Content -Raw (Join-Path $sig 'bundle.crt')
-        $leaf = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Text.Encoding]::ASCII.GetBytes(($pem -split '-----END CERTIFICATE-----')[0] + '-----END CERTIFICATE-----'))
+        $certs = @([regex]::Matches((Get-Content -Raw (Join-Path $sig 'bundle.crt')), '-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----') | ForEach-Object { [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Text.Encoding]::ASCII.GetBytes($_.Value)) })
+        $leaf = $certs[0]
         $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
         $chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3')) | Out-Null
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        foreach ($c in ($certs | Select-Object -Skip 1)) { $chain.ChainPolicy.ExtraStore.Add($c) | Out-Null }
+        {{(root is null ? "$chained = $chain.Build($leaf)" : $$"""
+        $rootPem = @'
+        {{root.Trim()}}
+        '@
+        $root = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Text.Encoding]::ASCII.GetBytes($rootPem))
+        $chain.ChainPolicy.ExtraStore.Add($root) | Out-Null
+        # This Arena's CA, carried here: taken whether or not Windows trusts it, and only it.
+        $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::AllowUnknownCertificateAuthority
+        $chained = $chain.Build($leaf) -and $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate.Thumbprint -eq $root.Thumbprint
+        """)}}
         $sums = [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS'))
         $key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($leaf)
         $listed = [Text.Encoding]::ASCII.GetString($sums) -split "`n"
-        $good = $chain.Build($leaf) -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ($listed -contains "$sum  $rid/code-arena.exe") -and (-not $ideSum -or ($listed -contains "$ideSum  $rid/code-arena-ide.exe"))
+        $good = $chained -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ($listed -contains "$sum  $rid/code-arena.exe") -and (-not $ideSum -or ($listed -contains "$ideSum  $rid/code-arena-ide.exe"))
+        $why = ($chain.ChainStatus | ForEach-Object { $_.StatusInformation.Trim() } | Where-Object { $_ }) -join '; '
         Remove-Item -Recurse -Force $sig
-        if (-not $good) { Remove-Item $tmp; if ($ideSum) { Remove-Item $ideTmp }; throw "Code Arena: the build is not the one this Arena's CA signed (or Windows does not trust that CA: certutil -addstore -f Root ca.crt): nothing installed" }
-        Write-Host "Signed by $($leaf.GetNameInfo('SimpleName', $false)), checked."
+        if (-not $good) { Remove-Item $tmp; if ($ideSum) { Remove-Item $ideTmp }; throw "Code Arena: the build is not the one this Arena's CA signed{{(root is null ? " (or Windows does not trust that CA: certutil -user -addstore Root ca.crt)" : "")}}$(if ($why) { " ($why)" }): nothing installed" }
+        {{(root is null ? "" : "Set-Content -Path (Join-Path $dir '" + SigningCaFile + "') -Value $rootPem -Encoding ascii\n")}}Write-Host "Signed by $($leaf.GetNameInfo('SimpleName', $false)), checked."
         $auth = Get-AuthenticodeSignature $tmp
         if ($auth.Status -eq 'Valid') { Write-Host "Windows names its publisher: $($auth.SignerCertificate.GetNameInfo('SimpleName', $false))." }
         else { Write-Host "Windows does not take its Authenticode signature ($($auth.Status): $($auth.StatusMessage)): it runs, with no publisher named." }
@@ -246,19 +291,27 @@ public static class DownloadEndpoints
 
     private const string UnsignedSh = "echo \"Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.\"\n";
 
-    private const string SignedSh = """
+    /// <summary>
+    /// install.sh's check of a signed build: the certificate for code signing, chained to the Arena's signing CA it carries
+    /// (<paramref name="root"/>, kept beside the program), else to a CA this machine trusts (or CODE_ARENA_CA); the builds'
+    /// list signed with its key; this build in the list. Without openssl, said and not checked.
+    /// </summary>
+    private static string SignedSh(string? root) => $$"""
         if command -v openssl >/dev/null 2>&1; then
           sig="$dir/.code-arena.sig"; mkdir -p "$sig"
           curl "$@" -o "$sig/SHA256SUMS" "$arena/api/downloads/code-arena/SHA256SUMS"
           curl "$@" -o "$sig/SHA256SUMS.sig" "$arena/api/downloads/code-arena/SHA256SUMS.sig"
           curl "$@" -o "$sig/bundle.crt" "$arena/api/downloads/code-arena/code-signing.crt"
-          openssl x509 -in "$sig/bundle.crt" -out "$sig/leaf.crt"
+        {{(root is null ? "" : "cat > \"$sig/root.pem\" <<'ARENA_CA'\n" + root.Trim() + "\nARENA_CA\n")}}  openssl x509 -in "$sig/bundle.crt" -out "$sig/leaf.crt"
           openssl x509 -in "$sig/leaf.crt" -pubkey -noout > "$sig/key.pem"
-          if ! openssl verify ${CODE_ARENA_CA:+-CAfile "$CODE_ARENA_CA"} -untrusted "$sig/bundle.crt" "$sig/leaf.crt" >/dev/null 2>&1             || ! openssl x509 -in "$sig/leaf.crt" -noout -ext extendedKeyUsage 2>/dev/null | grep -q "Code Signing"             || ! openssl dgst -sha256 -verify "$sig/key.pem" -signature "$sig/SHA256SUMS.sig" "$sig/SHA256SUMS" >/dev/null 2>&1             || ! grep -q "^$sum  $rid/code-arena$" "$sig/SHA256SUMS"; then
-            rm -rf "$sig" "$tmp"; echo "Code Arena: the build is not the one this Arena's CA signed (or the CA is not one this machine trusts: CODE_ARENA_CA names it): nothing installed" >&2; exit 1
+          if ! openssl verify {{(root is null ? "${CODE_ARENA_CA:+-CAfile \"$CODE_ARENA_CA\"}" : "-CAfile \"$sig/root.pem\"")}} -untrusted "$sig/bundle.crt" "$sig/leaf.crt" >/dev/null 2>&1 \
+            || ! openssl x509 -in "$sig/leaf.crt" -noout -ext extendedKeyUsage 2>/dev/null | grep -q "Code Signing" \
+            || ! openssl dgst -sha256 -verify "$sig/key.pem" -signature "$sig/SHA256SUMS.sig" "$sig/SHA256SUMS" >/dev/null 2>&1 \
+            || ! grep -q "^$sum  $rid/code-arena$" "$sig/SHA256SUMS"; then
+            rm -rf "$sig" "$tmp"; echo "Code Arena: the build is not the one this Arena's CA signed{{(root is null ? " (or the CA is not one this machine trusts: CODE_ARENA_CA names it)" : "")}}: nothing installed" >&2; exit 1
           fi
           echo "Signed by $(openssl x509 -in "$sig/leaf.crt" -noout -subject | sed 's/^subject= *//'), checked."
-          rm -rf "$sig"
+        {{(root is null ? "" : "  cp \"$sig/root.pem\" \"$dir/" + SigningCaFile + "\"\n")}}  rm -rf "$sig"
         else
           echo "Code Arena: openssl is not here, so the build's signature is not checked (its SHA-256 is)."
         fi
@@ -271,7 +324,7 @@ public static class DownloadEndpoints
     /// PATH, then how to sign in. With it, the IDE's launcher (code-arena-ide.exe), checked the same way, and a shortcut to
     /// it on the desktop and in the Start menu (not with CODE_ARENA_NO_SHORTCUTS): the IDE with no console window.
     /// </summary>
-    public static string InstallPs1(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false)
+    public static string InstallPs1(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false, string? signingRoot = null)
     {
         var windows = builds.Where(b => b.Rid.StartsWith("win-", StringComparison.Ordinal) && b.Sha256 is not null).ToList();
         if (windows.Count == 0)
@@ -305,7 +358,7 @@ public static class DownloadEndpoints
               Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/$rid/ide" -OutFile $ideTmp
               if ((Get-FileHash $ideTmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ideSum) { Remove-Item $tmp, $ideTmp; throw 'Code Arena: the IDE launcher does not match its SHA-256: nothing installed' }
             }
-            {{(isSigned ? SignedPs1 : "Write-Host 'Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.'\n")}}Move-Item -Force $tmp $exe
+            {{(isSigned ? SignedPs1(signingRoot) : "Write-Host 'Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.'\n")}}Move-Item -Force $tmp $exe
             if ($ideSum) {
               Move-Item -Force $ideTmp $ide
               if (-not $env:CODE_ARENA_NO_SHORTCUTS) {

@@ -469,8 +469,20 @@ container_rows() {
     | sed -e 's/|\//|/' -e 's/|sha256:/|/'
 }
 volume_exists() { E volume inspect "$1" >/dev/null 2>&1; }
-# A throwaway container of HELPER: it is never pulled.
-in_helper() { E run --rm --pull never --network none "$@"; }
+# A throwaway container of HELPER: it is never pulled, and labelled, so one a stopped run left is found and removed.
+HELPER_LABEL=arena.helper=1
+in_helper() { E run --rm --pull never --network none --label "$HELPER_LABEL" "$@"; }
+# The throwaway containers a stopped run left (Ctrl-C between a container's create and its start leaves it, --rm or
+# not): labelled ones not running, and any of HELPER never started. A running one (a backup at work) is left alone.
+clear_helpers() {
+  command -v "$ENGINE" >/dev/null 2>&1 || return 0
+  local ids
+  ids="$( { E ps -aq --filter "label=$HELPER_LABEL" --filter status=created; E ps -aq --filter "label=$HELPER_LABEL" --filter status=exited
+            E ps -aq --filter "ancestor=$HELPER" --filter status=created; } 2>/dev/null | sort -u)"
+  [[ -n "$ids" ]] || return 0
+  # shellcheck disable=SC2086
+  E rm -f $ids >/dev/null 2>&1 || :
+}
 
 # Settings from .env, with the stack's defaults.
 read_settings() {
@@ -550,7 +562,7 @@ ask_service() {   # ask_service TRAEFIK_HOST SERVICE_URL PATH [TOKEN] -> the ans
     [[ -z "$hdr" ]] || rm -f "$hdr"
   else
     # The token goes in the environment (-e NAME takes it from here), never on a command line.
-    ASK_TOKEN="$token" E run --rm --pull never --network "${PROJECT}_default" -e ASK_TOKEN "$HELPER" \
+    ASK_TOKEN="$token" E run --rm --pull never --label "$HELPER_LABEL" --network "${PROJECT}_default" -e ASK_TOKEN "$HELPER" \
       python3 -c "$ASK_PY" "$inside$path" 2>/dev/null
   fi
 }
@@ -616,6 +628,7 @@ lock() {
   exec 9>"$STATE/lock"
   if command -v flock >/dev/null; then flock -n 9 || die "another installer run holds $STATE/lock"; fi
   LOCKED=1
+  clear_helpers
 }
 TMPFILES=()
 finish() {
@@ -636,6 +649,7 @@ finish() {
       say "The install did not finish; what it did stays (--keep-failed). The admin's first password: ADMIN_PASSWORD in $DEPLOY/.env. Running it again takes it away and installs anew; $(rerun_cmd install --keep-failed) carries on instead."
     fi
   fi
+  [[ ${LOCKED:-0} -eq 1 ]] && clear_helpers
   [[ ${#TMPFILES[@]} -gt 0 ]] && rm -rf "${TMPFILES[@]}"
   if [[ -n "$TEE_PID" ]]; then exec 1>&3 2>&4; wait "$TEE_PID" 2>/dev/null; fi
   exit "$rc"
@@ -1181,7 +1195,7 @@ check_gpu_passthrough() {
   [[ $CPU_ONLY -eq 1 ]] && return 0
   [[ $ENGINE == podman ]] && flags=(--device nvidia.com/gpu=all) || flags=(--gpus all)
   step "the GPU from a container"
-  if out="$(E run --rm --pull never --network none "${flags[@]}" -e NVIDIA_DRIVER_CAPABILITIES=utility "$HELPER" nvidia-smi -L 2>&1)" && grep -q '^GPU' <<< "$out"; then
+  if out="$(E run --rm --pull never --network none --label "$HELPER_LABEL" "${flags[@]}" -e NVIDIA_DRIVER_CAPABILITIES=utility "$HELPER" nvidia-smi -L 2>&1)" && grep -q '^GPU' <<< "$out"; then
     ok "$(grep -c '^GPU' <<< "$out") GPU(s) reach containers: $(grep -m1 '^GPU' <<< "$out" | cut -d'(' -f1)"
   else
     req_bad "a container does not see the GPU: $(tail -n1 <<< "$out")"

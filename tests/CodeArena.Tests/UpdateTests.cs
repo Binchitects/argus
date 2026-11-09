@@ -139,6 +139,36 @@ public sealed class UpdateTests : IDisposable
     }
 
     [Fact]
+    public async Task A_signed_update_is_taken_when_the_CA_its_installer_kept_signed_it_though_this_machine_does_not_trust_that_CA()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var exe = Path.Combine(h.Root, "bin", OperatingSystem.IsWindows() ? "code-arena.exe" : "code-arena");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+        File.WriteAllText(exe, "the old one");
+        var (ca, leaf) = Pki();
+        _mcp.Signing = (leaf.GetRSAPrivateKey()!, leaf.ExportCertificatePem() + "\n" + ca.ExportCertificatePem());
+        _mcp.Build = ("99.0.0", "the new one"u8.ToArray(), null);
+
+        // No CA beside it, and this machine does not trust the Arena's: refused, nothing changed.
+        Assert.Equal(1, await h.RunUpdate(exe));
+        Assert.Contains("from a CA this machine trusts", h.Err, StringComparison.Ordinal);
+        Assert.Equal("the old one", File.ReadAllText(exe));
+
+        // The Arena's CA its installer kept beside it: taken.
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(exe)!, Updates.SigningCaFile), ca.ExportCertificatePem());
+        Assert.Equal(0, await h.RunUpdate(exe));
+        Assert.Contains("→ 99.0.0, signed by Arena's CA: the next start runs it.", h.Out, StringComparison.Ordinal);
+        Assert.Equal("the new one", File.ReadAllText(exe));
+
+        // Signed by another CA (the Arena's address taken over, or its CA changed): refused, though that CA came with it.
+        var (otherCa, otherLeaf) = Pki();
+        _mcp.Signing = (otherLeaf.GetRSAPrivateKey()!, otherLeaf.ExportCertificatePem() + "\n" + otherCa.ExportCertificatePem());
+        _mcp.Build = ("99.0.1", "not from it"u8.ToArray(), null);
+        Assert.Equal(1, await h.RunUpdate(exe));
+        Assert.Equal("the new one", File.ReadAllText(exe));
+    }
+
+    [Fact]
     public async Task A_session_says_a_newer_build_once_a_day_and_not_for_a_one_shot_answer()
     {
         using var h = new Harness(_gateway, _mcp);

@@ -239,7 +239,7 @@ public sealed class DownloadTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Signed_builds_are_served_with_their_signature_and_installed_only_when_the_CA_the_machine_trusts_signed_them()
+    public async Task Signed_builds_are_served_with_their_signature_and_installed_only_when_the_Arenas_own_CA_signed_them_whatever_the_machine_trusts()
     {
         var dir = Directory.CreateTempSubdirectory("signed-").FullName;
         try
@@ -290,33 +290,89 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Contains($"$sums = @{{ 'win-x64' = '{winSum}' }}", ps1, StringComparison.Ordinal);
             Assert.Contains("-contains \"$sum  $rid/code-arena.exe\")", ps1, StringComparison.Ordinal);
 
+            // The scripts carry the Arena's signing CA, the root of code-signing.crt: they check against it alone, and keep it.
+            Assert.Contains(ca.ExportCertificatePem().Trim(), sh, StringComparison.Ordinal);
+            Assert.Contains(ca.ExportCertificatePem().Trim(), ps1, StringComparison.Ordinal);
+            Assert.Contains("X509RevocationMode]::NoCheck", ps1, StringComparison.Ordinal);
+            var (otherCa, otherLeaf) = CodeSigning("other");
+            async Task SignWithAsync(X509Certificate2 by, X509Certificate2 itsCa)
+            {
+                await File.WriteAllBytesAsync(Path.Combine(served, "SHA256SUMS.sig"), by.GetRSAPrivateKey()!.SignData(sums, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+                await File.WriteAllTextAsync(Path.Combine(served, "code-signing.crt"), by.ExportCertificatePem() + "\n" + itsCa.ExportCertificatePem() + "\n");
+            }
+
             if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.X64
                 && File.Exists("/usr/bin/openssl"))
             {
-                async Task<(int Code, string Out)> RunAsync(X509Certificate2 trusted)
+                async Task<(int Code, string Out)> RunAsync(X509Certificate2? trusted)
                 {
                     var file = Path.Combine(dir, "install.sh");
                     await File.WriteAllTextAsync(file, sh.Replace($"https://{AppFixture.Domain}", "file://" + Path.Combine(dir, "served"), StringComparison.Ordinal));
-                    await File.WriteAllTextAsync(Path.Combine(dir, "trusted.crt"), trusted.ExportCertificatePem() + "\n");
                     var start = new System.Diagnostics.ProcessStartInfo("sh", file) { RedirectStandardOutput = true, RedirectStandardError = true };
                     start.Environment["CODE_ARENA_DIR"] = Path.Combine(dir, "bin");
-                    start.Environment["CODE_ARENA_CA"] = Path.Combine(dir, "trusted.crt");
+                    if (trusted is not null)
+                    {
+                        await File.WriteAllTextAsync(Path.Combine(dir, "trusted.crt"), trusted.ExportCertificatePem() + "\n");
+                        start.Environment["CODE_ARENA_CA"] = Path.Combine(dir, "trusted.crt");
+                    }
                     using var run = System.Diagnostics.Process.Start(start)!;
                     var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
                     await run.WaitForExitAsync();
                     return (run.ExitCode, said);
                 }
-                var (code, output) = await RunAsync(ca);
-                Assert.True(code == 0, output);
-                Assert.Contains("Signed by", output, StringComparison.Ordinal);
-                Assert.True(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+                // A machine that trusts nothing of this Arena's, or another CA: installed, and the Arena's CA kept beside it for updates.
+                foreach (var trusted in new[] { null, otherCa })
+                {
+                    var (code, output) = await RunAsync(trusted);
+                    Assert.True(code == 0, output);
+                    Assert.Contains("Signed by", output, StringComparison.Ordinal);
+                    Assert.True(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+                    Assert.Equal(ca.ExportCertificatePem().Trim(), (await File.ReadAllTextAsync(Path.Combine(dir, "bin", "code-arena-signing-ca.pem"))).Trim());
+                    Directory.Delete(Path.Combine(dir, "bin"), true);
+                }
 
-                // Signed by a CA the machine does not trust for this Arena: not installed.
-                File.Delete(Path.Combine(dir, "bin", "code-arena"));
-                (code, output) = await RunAsync(CodeSigning("other").Ca);
-                Assert.Equal(1, code);
-                Assert.Contains("is not the one this Arena's CA signed", output, StringComparison.Ordinal);
+                // Signed by another CA (the address taken over), its CA sent with it, even one the machine trusts: not installed.
+                await SignWithAsync(otherLeaf, otherCa);
+                var (refused, said) = await RunAsync(otherCa);
+                Assert.Equal(1, refused);
+                Assert.Contains("is not the one this Arena's CA signed", said, StringComparison.Ordinal);
                 Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+                await SignWithAsync(leaf, ca);
+            }
+
+            // install.ps1 as Windows runs it (PowerShell is in the SDK's image), the downloads answered from what is served here:
+            // a machine that does not trust the Arena's CA installs a build that CA signed, keeps the CA, and refuses another's.
+            if (File.Exists("/usr/bin/pwsh"))
+            {
+                async Task<string> RunPs1Async()
+                {
+                    var mocked = $$"""
+                        function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing) Copy-Item -Path (Join-Path '{{served}}' ($Uri -replace '^.*/api/downloads/code-arena/', '')) -Destination $OutFile }
+                        function Get-AuthenticodeSignature { param($FilePath) [pscustomobject]@{ Status = 'NotSigned'; StatusMessage = 'not on Linux'; SignerCertificate = $null } }
+                        $env:LOCALAPPDATA = '{{dir}}'
+                        $env:CODE_ARENA_NO_SHORTCUTS = '1'
+                        """ + ps1;
+                    await File.WriteAllTextAsync(Path.Combine(dir, "install.ps1"), mocked);
+                    var start = new System.Diagnostics.ProcessStartInfo("pwsh", ["-NoProfile", "-NonInteractive", "-File", Path.Combine(dir, "install.ps1")]) { RedirectStandardOutput = true, RedirectStandardError = true };
+                    start.Environment["PROCESSOR_ARCHITECTURE"] = "AMD64";
+                    using var run = System.Diagnostics.Process.Start(start)!;
+                    var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
+                    await run.WaitForExitAsync();
+                    return said;
+                }
+                await File.WriteAllBytesAsync(Path.Combine(served, "win-x64"), signedExe);
+                var installed = Path.Combine(dir, "Programs", "code-arena");
+                var output = await RunPs1Async();
+                Assert.Contains("Signed by Code Arena (test), checked.", output, StringComparison.Ordinal);
+                Assert.Equal(signedExe, await File.ReadAllBytesAsync(Path.Combine(installed, "code-arena.exe")));
+                Assert.Equal(ca.ExportCertificatePem().Trim(), (await File.ReadAllTextAsync(Path.Combine(installed, "code-arena-signing-ca.pem"))).Trim());
+                Directory.Delete(installed, true);
+
+                await SignWithAsync(otherLeaf, otherCa);
+                output = await RunPs1Async();
+                Assert.Contains("is not the one this Arena's CA signed", output, StringComparison.Ordinal);
+                Assert.False(File.Exists(Path.Combine(installed, "code-arena.exe")));
+                await SignWithAsync(leaf, ca);
             }
 
             // A signature of another list (made before an upgrade changed the builds) signs nothing: the image's builds, as they are.
