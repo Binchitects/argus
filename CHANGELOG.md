@@ -15,6 +15,41 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.10.1 (2026-11-09)
+
+Models that fail on vLLM, SGLang, LMDeploy or Strata now say why, and SGLang
+starts beside the models already on the GPU.
+
+### :bug: Bugs fixed
+
+- **A model that could not start on vLLM, SGLang, LMDeploy or Strata said only
+  "failed"**, and the page pointed at llama.cpp's log. Admin → Models now shows
+  what kind of failure it was (too little GPU memory, a model or format the
+  engine cannot run, a missing file, a setting it refused, a crash), the
+  engine's own error line, what to change, the tries and the next try, and a
+  link to the model's own log. Chats and API keys get the reason in brief.
+- **SGLang could not start beside other models**: it counted the memory other
+  processes hold as part of its own share, so a share of 0.3 beside llama.cpp
+  left it nothing. Its launcher now adds what the others hold, and keeps
+  4.5 GiB (8% of a large GPU) free for CUDA graphs. GGUF files start without
+  prefill CUDA graphs, which ran out of memory while being captured.
+- **"No room on the GPU" named no one**: it now names the models holding the
+  GPU (kept loaded, or busy a moment ago).
+- A model new on a server-per-model engine starts serving 16 people at once,
+  not 1.
+- The same notification sent by several at once is written once, with no
+  error in the log.
+- Studio's schedule and wait sweeps took their 20 rows in no order; they now
+  take the earliest first. Tests fail on any page of rows taken with no order.
+- Code Arena: a job's time is counted from before its process starts, so a
+  2-second job no longer reads 1 second on a loaded machine.
+
+Tested live with real models: vLLM (safetensors and GGUF), SGLang (both),
+LMDeploy, and Qwen3.8-27B as a W4A16 snapshot on vLLM (fp8 cache, prefix
+caching and sleep mode). A Qwen3.8 GGUF file is refused for vLLM and SGLang
+with the reason (transformers cannot read its architecture); run it on
+llama.cpp, or use its Hugging Face snapshot.
+
 ## v7.10.0 (2026-11-09)
 
 Security review of whole products, code review of whole repositories and of
