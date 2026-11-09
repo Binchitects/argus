@@ -15,10 +15,10 @@ const project = {
   chats: [{ id: 'c1', title: 'Refund flow', kind: 'session', place: '/home/ada/shop', updatedAt: '2026-11-01T10:00:00Z', mine: true }],
   otherChats: [],
   goals: [
-    { id: 'g1', title: 'Card payments', description: null, status: 'doing', dueOn: '2026-11-30', doneAt: null, position: 0 },
-    { id: 'g2', title: 'Launch', description: null, status: 'done', dueOn: null, doneAt: '2026-10-20T10:00:00Z', position: 1 },
+    { id: 'g1', title: 'Card payments', description: null, status: 'doing', dueOn: '2026-11-30', doneAt: null, position: 0, humanHours: 8 },
+    { id: 'g2', title: 'Launch', description: null, status: 'done', dueOn: null, doneAt: '2026-10-20T10:00:00Z', position: 1, humanHours: null },
   ],
-  tasks: [{ id: 't1', title: 'Wire the gateway', goalId: 'g1', assigneeId: null, assignee: null, done: false, doneAt: null, createdAt: '2026-10-02T10:00:00Z' }],
+  tasks: [{ id: 't1', title: 'Wire the gateway', goalId: 'g1', assigneeId: null, assignee: null, done: false, doneAt: null, createdAt: '2026-10-02T10:00:00Z', humanHours: null }],
 }
 
 const report = {
@@ -36,6 +36,7 @@ const report = {
   budget: { monthly: 20, spent: 3.25, percent: 16, alertPercent: 80, stopAtBudget: false },
   merged: [],
   mergedError: null,
+  human: { estimated: 1, notEstimated: 1, byHandHours: 8, peopleHours: 1.5, modelHours: 0.17, hourlyRate: 50, byHandCost: 400, actualCost: 78.25, faster: 5, savedHours: 6.5, savedCost: 321.75 },
 }
 
 /** code-arena web's API, with Arena's projects as it relays them: the session in Payments. */
