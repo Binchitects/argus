@@ -15,6 +15,84 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.10.0 (2026-11-09)
+
+Security review of whole products, code review of whole repositories and of
+several together, what running the models really costs, and Code Arena
+sessions that run goal after goal until every one is met.
+
+### :rocket: Epics and highlights
+
+- **Security review, its own section.** What is open across the latest
+  review of each repository; several repositories reviewed at once, then
+  looked at across them: the weaknesses and vulnerable packages they share,
+  where secrets are, and the model's report of the paths from one
+  repository's weakness into another and what to fix first. Every finding
+  together, filtered and as CSV; each review says what is new since the last.
+- **Code Studio, rearranged and wider.** Workspaces, Review, and Ask and
+  explore. Review a whole repository at a branch (its product's code read file
+  by file, each finding checked by a second reviewer, a summary of its health),
+  or several repositories looked at across: how they depend on each other (as
+  Argus resolved it), problems at their boundaries, what they do alike or
+  differently. Four of Argus's tools across repositories, each asked in a
+  chat: what a change reaches, how two repositories are linked, where a change
+  belongs, the estate's map. Argus's new `files_at` lists a repository's files
+  at any commit.
+- **Accounting.** Admin → Accounting (the Billing role): what running the
+  models really costs (the GPUs' measured power and the rest of the machine's,
+  times the cooling overhead, the hardware written off, service), over time
+  and against the period before; the cost of the GPUs' idle time; a month at
+  this rate; a million tokens, a request, a person and a model hour at the
+  running cost; and that cost shared out to groups (with their people and
+  credit), cost centres, people, projects, models, sources and kinds of work.
+  PDF, Excel and CSV. The costs are set in Settings → Costs. Usage by group is
+  gone: Accounting has it all.
+- **Code Arena works until every goal is met.** A goal set while one is
+  worked on waits its turn, and each starts when the one before is met; a goal
+  can have no limit but its being met. `/loop 30m PROMPT` runs a prompt as a
+  background agent every so often.
+
+### :sparkles: New features & Enhancements
+
+- **Scheduled tasks and Agent Studio review code.** A task can review a whole
+  repository, several, or their security, and deliver what it found with a
+  link to the review; Agent Studio has a **Review code** step (a merge
+  request, a whole repository, several, their security). Ready-made tasks for
+  developers (merge requests waiting, failed pipelines, release notes,
+  repository and security reviews) and workflow templates (each merge request
+  reviewed as a comment, weekly repository health, weekly product security).
+- **Projects against doing it by hand.** Goals and tasks take the hours they
+  would take by hand; the report sets the work done against them, in hours,
+  cost (Settings → Costs → A person's hour) and how many times faster.
+- **Where the GPU time goes.** The Hardware dashboard's new section: GPU time
+  busy and idle, the busiest hour and hours of the week, the energy used, the
+  time people waited in line, and how much of the time each limit held work
+  back (the GPUs, the line, the context cache, VRAM, heat or power, the CPU),
+  with what to do about each.
+- **Sub-agents at once, per person and group**, beside their requests at
+  once, in the web chat and Code Arena.
+- **More people at once on a big GPU.** The vLLM advisor counts people at a
+  conversation's usual length (16K), not the full window, and Admin → Models
+  says when a model is set too low for its GPU.
+- **A model stuck repeating itself is stopped**, in its thinking (asked again
+  without thinking) or its answer, in the web chat, its sub-agents and Code
+  Arena.
+- **Calmer themes.** The colour themes keep their colour to buttons, links and
+  highlights; backgrounds are neutral, in dark mode above all.
+- **A cleaner Code Arena chat.** Sub-agents started together are one card, a
+  run of tool calls one line; a tool card says what the call is about (its
+  path, command or search); a lone edit is its diff. **@** lists every file,
+  with Show more. The Tools menu is names and switches, details behind Info.
+- **Onboarding caught up.** The tour shows what is new since 7.7; Home's
+  **Get started** covers the main areas the person may use.
+
+### :bug: Bugs fixed
+
+- **A pinned model was put to sleep by picture and video jobs**, so chats
+  waited for it to load again: a model kept loaded stays loaded
+  (`Engine:MediaPausesKept` to allow it).
+- Stat cards cut their second line; they wrap now.
+
 ## v7.9.1 (2026-11-08)
 
 A hotfix for offline installs: a bundle can carry every model but the chat
