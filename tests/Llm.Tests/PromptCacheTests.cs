@@ -132,7 +132,7 @@ public sealed class PromptCacheTests
         Assert.Equal([OnDemandTools.Function], demand.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
         var listed = demand.Notes();
         Assert.StartsWith("Research notes.\n\nTools to load:", listed, StringComparison.Ordinal);
-        Assert.Contains("- ARGUS [code-intel]: The code-intel tool. Functions: find_symbol, read_file.", listed, StringComparison.Ordinal);
+        Assert.Contains("- CODE-INTEL [code-intel]: The code-intel tool. Functions: find_symbol, read_file.", listed, StringComparison.Ordinal);
         Assert.Contains("- PYTHON [python]: The python tool. Functions: run_python.", listed, StringComparison.Ordinal);
 
         // A tool by its name loads all its functions; its notes join, its line goes.

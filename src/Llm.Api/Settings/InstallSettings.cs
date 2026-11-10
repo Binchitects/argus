@@ -29,7 +29,7 @@ public static class InstallSettings
         ["DOMAIN"] = "Auth:Domain", ["ADMIN_EMAIL"] = "Auth:AdminEmail", ["HTTPS_PORT"] = "Auth:HttpsPort", ["ACME_EMAIL"] = "Stack:Acme",
         ["HSTS_SECONDS"] = "Stack:HstsSeconds", ["MODEL"] = "Engine:FirstModel", ["DEFAULT_MODELS"] = "Engine:DefaultModels", ["HF_TOKEN"] = "HuggingFace:Token",
         ["LLAMACPP_BACKEND"] = "Engine:Backend", ["MEDIA_GPU"] = "Engine:MediaGpu", ["EMBED_GPU"] = "Engine:EmbedGpu", ["LMCACHE_REMOTE"] = "Engine:LmcacheRemote",
-        ["GITLAB_URL"] = "CodeIntel:GitlabUrl", ["GITLAB_CA_FILE"] = "Tls:CompanyCaFile", ["BACKUP_KEEP"] = "Storage:BackupsKept", ["DB_HOST"] = "Database:Host",
+        ["GITLAB_URL"] = "CodeIntel:GitlabUrl", ["CODE_INTEL_HOST"] = "CodeIntel:Host", ["GITLAB_CA_FILE"] = "Tls:CompanyCaFile", ["BACKUP_KEEP"] = "Storage:BackupsKept", ["DB_HOST"] = "Database:Host",
         ["DB_PORT"] = "Database:Port", ["DB_USER"] = "Database:Username", ["DB_SSL_MODE"] = "Database:SslMode", [Features] = "Features:On",
     };
 
