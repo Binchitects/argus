@@ -257,7 +257,7 @@ public static class DownloadEndpoints
             echo "Code Arena $version is in $dir/code-arena."
             {{AppEntrySh}}
             case ":$PATH:" in *":$dir:"*) ;; *) echo "Add $dir to your PATH (e.g. in ~/.profile): export PATH=\"$dir:\$PATH\"" ;; esac
-            echo "Next, sign in: code-arena login --url $arena${CODE_ARENA_CA:+ --ca $CODE_ARENA_CA}"
+            echo "Next, sign in: code-arena login --url $arena${CODE_ARENA_CA:+ --ca $CODE_ARENA_CA} (or later: the IDE works without signing in, and with a provider of your own)"
             echo "Then, in a project: code-arena (it checks this Arena for newer versions; code-arena update installs one)."
 
             """;
@@ -528,7 +528,7 @@ public static class DownloadEndpoints
             }
             $path = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (-not (($path -split ';') -contains $dir)) { [Environment]::SetEnvironmentVariable('Path', "$path;$dir", 'User'); Write-Host "Added $dir to your PATH (new terminals have it)." }
-            Write-Host "Code Arena is in $exe. Next, sign in: code-arena login --url $arena"
+            Write-Host "Code Arena is in $exe. Next, sign in: code-arena login --url $arena (or later: the IDE works without signing in, and with a provider of your own)"
             Write-Host 'Then, in a project: code-arena (it checks this Arena for newer versions; code-arena update installs one).'
 
             """;

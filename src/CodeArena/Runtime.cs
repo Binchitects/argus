@@ -392,6 +392,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             Models = models;
         }
         var its = Models.Where(m => m.Id.StartsWith(name + ":", StringComparison.Ordinal)).Select(m => m.Id).ToList();
+        // No model until now (signed out): its first answers from here on.
+        if (Model.Name == NoModelName && its.Count > 0)
+        {
+            SwitchModel(Models.First(m => m.Id == its[0]));
+        }
         return its.Count == 0
             ? $"{name} is kept, but it listed no models (its address or key may be wrong; \"models\" in config.json lists them by hand)."
             : $"{name} is kept: {its.Count} model{(its.Count == 1 ? "" : "s")} ({string.Join(", ", its.Take(6))}{(its.Count > 6 ? ", …" : "")}). /model {its[0]} uses one.";
@@ -489,6 +494,12 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>Thrown for what stops a session before it starts, with what to do about it.</summary>
     public sealed class StartException(string message) : Exception(message);
 
+    /// <summary>Not signed in to an Arena: only the providers of the person's own answer, or no model (the IDE alone).</summary>
+    public bool SignedOut { get; init; }
+
+    /// <summary>The model's name while there is none (signed out, no provider).</summary>
+    public const string NoModelName = "(no model)";
+
     public static async Task<Runtime> StartAsync(Options o, CliEnv env, Ui ui, CancellationToken ct)
     {
         Config config;
@@ -501,12 +512,16 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException(e.Message);
         }
         config.ApplyEnvironment(env.Env);
-        if (config.GatewayUrl is null || string.IsNullOrEmpty(config.ApiKey))
+        // Not signed in: the providers of the person's own answer (their keys), or the IDE works without a model until they sign
+        // in or add one. Only a terminal run with neither cannot go on.
+        var signedOut = config.GatewayUrl is null || string.IsNullOrEmpty(config.ApiKey);
+        if (signedOut && !o.Ide && !config.Providers.Any(p => Providers.KeyOf(p, env.Env) is not null))
         {
-            throw new StartException("Not signed in to an Arena yet. Run: code-arena login");
+            throw new StartException("Not signed in to an Arena, and no provider of your own. Run: code-arena login, or add a provider with your own key " +
+                "(code-arena chat, then /providers add NAME), or open the IDE (code-arena) to work without a model and sign in later.");
         }
         // Said now, not found later as a server that never connects.
-        if (config.WrongAddress(env.Paths.ConfigFile) is { } wrong)
+        if (!signedOut && config.WrongAddress(env.Paths.ConfigFile) is { } wrong)
         {
             throw new StartException(wrong);
         }
@@ -520,7 +535,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             throw new StartException(e.Message);
         }
-        var rt = new Runtime(config, ui, env, http, new GatewayClient(http, config.GatewayUrl, config.ApiKey));
+        var rt = new Runtime(config, ui, env, http, signedOut
+            ? new GatewayClient(http, "http://arena.invalid", "") { Detached = true }
+            : new GatewayClient(http, config.GatewayUrl!, config.ApiKey!)) { SignedOut = signedOut };
         // A key refused: the newer one saved since, when there is one (the session keeps working).
         keys.Newer = refused => refused == rt.Config.ApiKey || refused == rt.Gateway.Key ? rt.AdoptSavedKey() : rt.Config.ApiKey is { Length: > 0 } now && now != refused ? now : null;
         // Each request names its chat and project in Arena: what the session uses counts to the project.
@@ -719,9 +736,15 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             throw new StartException(e.Message);
         }
+        if (Models.Count == 0 && !(SignedOut && o.Ide))
+        {
+            throw new StartException(SignedOut
+                ? "Not signed in to an Arena, and your providers list no models: check their keys (/providers), or run code-arena login."
+                : "The gateway lists no models for your key. Ask your admin which models you may use.");
+        }
         if (Models.Count == 0)
         {
-            throw new StartException("The gateway lists no models for your key. Ask your admin which models you may use.");
+            Ui.Info("Not signed in to an Arena: the IDE works without a model. Sign in from its Accounts menu, or add a provider of your own (the plug beside the chat's model).");
         }
         // A few seconds more for the servers (a run that cannot wait for them later, -p, gives them their whole handshake).
         var firstTries = Task.WhenAll(_links.Select(l => l.FirstTry));
@@ -760,9 +783,10 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 throw new StartException($"The gateway has no model {o.Model}. Yours: {string.Join(", ", Models.Select(x => x.Id))}");
             }
-            // No model of its own: the one a new chat in Arena starts with, as Arena MCP says, else the gateway's first.
-            var fallback = Models.FirstOrDefault(x => x.Id == arena?.Client?.DefaultModel) ?? Models[0];
-            if (wanted is not null)
+            // No model of its own: the one a new chat in Arena starts with, as Arena MCP says, else the gateway's first (none:
+            // signed out with no provider, the IDE alone; a turn says how to get one).
+            var fallback = Models.FirstOrDefault(x => x.Id == arena?.Client?.DefaultModel) ?? Models.FirstOrDefault() ?? new ModelInfo(NoModelName);
+            if (wanted is not null && Models.Count > 0)
             {
                 Ui.Warn($"{wanted} is not offered any more: using {fallback.Id}.");
             }

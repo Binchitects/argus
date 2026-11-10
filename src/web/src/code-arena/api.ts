@@ -19,6 +19,9 @@ export interface CodeState {
   project: string
   branch: string | null
   model: string
+  /** Not signed in to an Arena: the providers of the person's own only, or no model at all (noModel: the IDE alone). */
+  signedOut?: boolean
+  noModel?: boolean
   /** The model's window, in tokens. */
   context: number
   /** About how many of them the conversation fills now (the prompt, the tools and the history). */

@@ -1708,6 +1708,12 @@ function Workbench({
           get={(signal) => ideApi<ActiveBroadcast[]>('/api/broadcasts', { signal })}
           dismiss={(id) => ideApi(`/api/broadcasts/${id}/dismiss`, { body: {} })}
         />
+        {state.noModel && (
+          <output className="block rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm">
+            Not signed in to an Arena: the editor, terminal, git and tasks work, the agent has no model. Sign in from <strong>Accounts</strong>, or add a provider of your own
+            with its key (the plug beside the chat's model).
+          </output>
+        )}
       </div>
       {opening && (
         <output className="fixed inset-0 z-[100] grid place-items-center bg-background/90 backdrop-blur-sm">

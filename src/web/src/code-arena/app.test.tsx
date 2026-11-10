@@ -522,6 +522,12 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/api/broadcasts/b1/dismiss')).toBe(true))
   })
 
+  it('signed out with no model, says the IDE works and how to get one', async () => {
+    backend({ state: { signedOut: true, noModel: true, model: '(no model)' } })
+    renderCode()
+    expect(await screen.findByText(/Not signed in to an Arena: the editor, terminal, git and tasks work/)).toBeInTheDocument()
+  })
+
   it('rates an answer as the web chat does: down with a reason, kept by Arena through Code Arena, and taken back', async () => {
     const { calls } = backend({
       session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },

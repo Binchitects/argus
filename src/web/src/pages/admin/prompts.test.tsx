@@ -112,8 +112,8 @@ describe('prompt log', () => {
     const calls = fakeApi(admin, {
       'GET /api/tags': () => ({ json: { known: ['review', 'security'], used: [{ tag: 'later', count: 2 }] } }),
       'GET /api/admin/prompts': () => ({ json: { items: [{ ...row(0, 'chat'), id: 'm1', tags, brief }], next: null } }),
-      'PUT /api/admin/prompts/chat/m1/tags': (body: { tags: string[] }) => {
-        tags = body.tags
+      'PUT /api/admin/prompts/chat/m1/tags': (body) => {
+        tags = (body as { tags: string[] }).tags
         return { json: { tags } }
       },
       'POST /api/admin/prompts/chat/m1/summarize': () => {

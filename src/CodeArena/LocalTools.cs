@@ -1098,6 +1098,29 @@ internal static class Proc
         psi.Environment.Remove("CODE_ARENA_TOKEN");
     }
 
+    /// <summary>Linux's "Text file busy" (ETXTBSY): the program was just written, and a child started meanwhile still holds it open.</summary>
+    private const int TextFileBusy = 26;
+
+    /// <summary>
+    /// Started; a program just written (an adapter unpacked, a script made) may be held open for a moment by a child another
+    /// thread started meanwhile, which has not reached its own exec yet: Linux then refuses to run it (ETXTBSY), and it is
+    /// started again once that child let go, within half a second.
+    /// </summary>
+    public static async Task<Process> StartAsync(ProcessStartInfo psi, CancellationToken ct)
+    {
+        for (var wait = 10; ; wait *= 2)
+        {
+            try
+            {
+                return Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
+            }
+            catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == TextFileBusy && wait <= 160 && !OperatingSystem.IsWindows())
+            {
+                await Task.Delay(wait, ct);
+            }
+        }
+    }
+
     /// <summary>
     /// Runs it to its end or its timeout. Its output (stdout and stderr together) is kept within <paramref name="maxChars"/>,
     /// and all of it, up to <see cref="MostKept"/>, is written to <paramref name="whole"/> when given.
@@ -1111,7 +1134,7 @@ internal static class Proc
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
         Prepare(psi);
-        using var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
+        using var process = await StartAsync(psi, ct);
         process.StandardInput.Close();
         using var output = new Bounded(maxChars, whole);
         var readers = new[] { Pump(process.StandardOutput, output), Pump(process.StandardError, output) };

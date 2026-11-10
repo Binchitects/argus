@@ -84,6 +84,16 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>The finish reason of an answer stopped where it began repeating itself (what came before the loop is kept).</summary>
     public const string Looped = "looped";
 
+    /// <summary>
+    /// No Arena signed in to: it lists no models of its own and sends nothing (the providers' models go to them), and a
+    /// request for one of its own says how to get a model.
+    /// </summary>
+    public bool Detached { get; init; }
+
+    /// <summary>What a request says while <see cref="Detached"/>.</summary>
+    public const string NoModel = "No model to answer: Code Arena is not signed in to an Arena. Sign in (the IDE's Accounts menu, or code-arena login), " +
+        "or add a provider of your own with its key (the IDE's plug beside the chat's model, or /providers add NAME).";
+
     /// <summary>The key the requests go with: a newer one replaces it (Runtime.AdoptSavedKey) without starting again.</summary>
     public string Key { get; set; } = key;
 
@@ -253,6 +263,10 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     private async Task<List<ModelInfo>> GatewayModelsAsync(CancellationToken ct)
     {
+        if (Detached)
+        {
+            return [];
+        }
         var ids = await ModelIdsAsync(ct);
         var info = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
         try
@@ -744,6 +758,10 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     private async Task<HttpResponseMessage> Send(HttpRequestMessage req, CancellationToken ct)
     {
+        if (Detached)
+        {
+            throw new GatewayException(NoModel, 401);
+        }
         try
         {
             return await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);

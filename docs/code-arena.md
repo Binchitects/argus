@@ -20,8 +20,8 @@ tests `tests/CodeArena.Tests`.
 
 **Your account → Connect your tools → Code Arena (our own agent)** installs
 it in one line, the build for the machine checked against the SHA-256 this
-Arena lists (the downloads need no sign-in; the program does nothing without
-a key):
+Arena lists (the downloads need no sign-in; without one, it works with a
+provider of your own or as an IDE alone, below):
 
 ```bash
 curl -fsSL https://DOMAIN/api/downloads/code-arena/install.sh | sh     # Linux and macOS: into ~/.local/bin
@@ -161,6 +161,20 @@ usual folders stays there). `ARENA_URL`, `ARENA_API_KEY`, `ARENA_GATEWAY_URL`,
 The gateway is taken to be `https://gateway.DOMAIN` and Arena's tools
 `https://DOMAIN/mcp`; `login --gateway URL` (or `"gateway"`, `"mcpUrl"` in the
 file) when they are elsewhere.
+
+### Without signing in
+
+Code Arena works without an Arena too. Signed out, the models of a provider
+of your own answer, with your key (`/providers add NAME`, or the plug beside
+the IDE chat's model; see [other providers' models](#other-providers-models)): nothing goes to an Arena,
+and what needs one (syncing with the web chat, Arena's tools, memory and
+skills kept there, broadcasts, feedback) waits until you sign in. With no
+provider either, the IDE opens all the same (`code-arena`, or the shortcut):
+the editor, the terminal, source control, tasks and the debugger work, a
+notice above the workbench says the agent has no model, and a message to it
+says how to get one. Sign in later from **Accounts**; add a provider and its
+first model answers at once. A terminal run (`code-arena chat`, `-p`) with
+neither says what to do.
 
 ### A company's own CA
 
@@ -2378,6 +2392,8 @@ together); questions are asked one at a time first.
 Every session reads, into the model's instructions:
 
 1. `ARENA.md` in the config folder: the person's own, for every project;
+   then the first of `ARENA.md`, `AGENTS.md`, `CLAUDE.md` and `QWEN.md` in
+   `~/.code-arena`, else `~/.claude/CLAUDE.md`;
 2. `ARENA.md` at the repository's root (the folder holding `.git`), or in the
    working directory when it is not in a repository;
 3. `ARENA.md` in the working directory, when it is below the root.
@@ -3071,8 +3087,12 @@ message, without starting Code Arena again.
   `~/.code-arena/skills` and Claude Code's `~/.claude/skills`, after the
   config folder's `skills/`. A skill folder written for Claude Code works as
   it is. The Skills view and `/skills` say where each was read from
-  (`.claude/skills`, `~/.claude/skills`…). With `CODE_ARENA_HOME` set, your
-  home's folders are not read: everything is in that folder.
+  (`.claude/skills`, `~/.claude/skills`…). The home's folders are read as a
+  project's own are for the rest too: `commands/` and `agents/` in
+  `~/.code-arena` and `~/.claude`, the instructions (above) and
+  `~/.code-arena/memory.md` (lines `- …`, the person's memory). With
+  `CODE_ARENA_HOME` set, your home's folders are not read: everything is in
+  that folder.
 
 ### Import and export skills
 

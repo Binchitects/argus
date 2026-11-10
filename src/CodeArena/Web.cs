@@ -733,6 +733,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["project"] = Path.GetFileName(root) is { Length: > 0 } project ? project : root,
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),
             ["model"] = _rt.Model.Name,
+            // Not signed in to an Arena: the providers of the person's own only, or no model at all (the IDE alone).
+            ["signedOut"] = _rt.SignedOut,
+            ["noModel"] = _rt.Models.Count == 0,
             ["context"] = _rt.Model.Context,
             // How full the window is (about), what fills the next request by kind in characters (the page scales them to
             // contextUsed), the room kept in it for the answer, and when the session compacts itself: the status bar, the
