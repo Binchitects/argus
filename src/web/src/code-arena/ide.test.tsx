@@ -60,6 +60,13 @@ const fakes = vi.hoisted(() => {
     isDisposed() {
       return this.disposed
     }
+    /** As Monaco's: the decorations replaced (the merge conflicts' marks), their new ids. */
+    decorations: unknown[] = []
+    deltaDecorations(_old: string[], next: unknown[]) {
+      this.live()
+      this.decorations = next
+      return next.map((_, i) => `decoration-${this.alt}-${i}`)
+    }
     getValue() {
       this.live()
       return this.value
@@ -156,7 +163,14 @@ const fakes = vi.hoisted(() => {
       const before = this.value.slice(0, offset).split('\n')
       return { lineNumber: before.length, column: before.at(-1)!.length + 1 }
     }
+    /** As Monaco's: told just before the model goes. */
+    willDispose: (() => void)[] = []
+    onWillDispose(f: () => void) {
+      this.willDispose.push(f)
+      return { dispose: () => void (this.willDispose = this.willDispose.filter((x) => x !== f)) }
+    }
     dispose() {
+      for (const f of this.willDispose) f()
       for (const f of fakes.disposing) f(this)
       this.disposed = true
     }
@@ -510,6 +524,20 @@ vi.mock('monaco-editor', () => ({
     }
   },
   KeyMod: { CtrlCmd: 2048, Shift: 1024, Alt: 512, WinCtrl: 256, chord: (a: number, b: number) => (a | (b << 16)) >>> 0 },
+  // As Monaco's: an event of one's own, fired to its listeners.
+  Emitter: class<T> {
+    listeners: ((e: T) => void)[] = []
+    event = (f: (e: T) => void) => {
+      this.listeners.push(f)
+      return { dispose: () => void (this.listeners = this.listeners.filter((x) => x !== f)) }
+    }
+    fire(e: T) {
+      for (const f of this.listeners) f(e)
+    }
+    dispose() {
+      this.listeners = []
+    }
+  },
   KeyCode: { F1: 59, F2: 60, F3: 61, F5: 63, KeyB: 32, KeyK: 41, KeyL: 42, KeyP: 46, KeyS: 49, Backquote: 92, Delete: 20, Enter: 3 },
   json: { jsonDefaults: { setDiagnosticsOptions: (o: { schemas?: { fileMatch: string[] }[] }) => fakes.jsonOptions.push(o) } },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
@@ -524,7 +552,7 @@ vi.mock('monaco-editor', () => ({
     },
     registerDocumentRangeFormattingEditProvider: () => ({ dispose() {} }),
     ...Object.fromEntries(
-      ['Hover', 'Completion', 'SignatureHelp', 'Definition', 'Declaration', 'TypeDefinition', 'Implementation', 'Reference', 'DocumentHighlight', 'DocumentSymbol', 'Rename'].map((kind) => [
+      ['Hover', 'Completion', 'SignatureHelp', 'Definition', 'Declaration', 'TypeDefinition', 'Implementation', 'Reference', 'DocumentHighlight', 'DocumentSymbol', 'Rename', 'CodeLens'].map((kind) => [
         kind === 'Completion' ? 'registerCompletionItemProvider' : `register${kind}Provider`,
         (languages: unknown, provider: Record<string, (...args: unknown[]) => unknown>) => {
           const key = kind.toLowerCase()
