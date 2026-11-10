@@ -96,7 +96,7 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
         {
             return;
         }
-        foreach (var file in new[] { PersonFile, ProjectFile }.Where(File.Exists))
+        foreach (var file in new[] { PersonFile, ProjectFile, HomeFile }.OfType<string>().Where(File.Exists))
         {
             var done = file + ".imported";
             PrivateFiles.WriteAllText(done, (File.Exists(done) ? File.ReadAllText(done) : "") + File.ReadAllText(file));
@@ -205,6 +205,9 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
 
     public string PersonFile => Path.Combine(paths.ConfigDir, "memory.md");
 
+    /// <summary>The person's memory in their home's Code Arena folder (~/.code-arena/memory.md), read as theirs too, as a project's folder is.</summary>
+    public string? HomeFile => paths.Home is { Length: > 0 } home ? Path.Combine(home, ".code-arena", "memory.md") : null;
+
     public string ProjectFile => Path.Combine(paths.DataDir, "memory", Key(projectRoot) + ".md");
 
     /// <summary>A project's file name: its folder's name and a hash of its whole path (two folders of one name stay apart).</summary>
@@ -220,10 +223,10 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     /// <summary>The memories, in order (the lines "- ..." of the file).</summary>
     public List<string> Read(bool person)
     {
-        var file = FileOf(person);
-        return File.Exists(file)
-            ? [.. File.ReadAllLines(file).Where(l => l.StartsWith("- ", StringComparison.Ordinal)).Select(l => l[2..].Trim()).Where(l => l.Length > 0)]
+        static IEnumerable<string> Lines(string? file) => file is not null && File.Exists(file)
+            ? File.ReadAllLines(file).Where(l => l.StartsWith("- ", StringComparison.Ordinal)).Select(l => l[2..].Trim()).Where(l => l.Length > 0)
             : [];
+        return [.. Lines(FileOf(person)).Concat(person ? Lines(HomeFile) : []).Distinct(StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>Adds a memory (one line); false when the same is there already.</summary>

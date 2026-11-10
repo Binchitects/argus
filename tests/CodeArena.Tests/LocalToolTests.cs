@@ -514,9 +514,8 @@ public sealed class LocalToolTests : IDisposable
         foreach (var (args, why) in new[]
         {
             ("""{"steps":[{"number":9,"status":"done"}]}""", "no step 9"),
-            ("""{"steps":[{"number":4,"status":"doing"}]}""", "One step is doing at a time"),
             ("""{"steps":[{"number":2,"depends_on":[3]},{"number":3,"depends_on":[2]}]}""", "in a circle"),
-            ("""{"steps":[{"number":2,"status":"finished"}]}""", "one of todo, doing, blocked, done"),
+            ("""{"steps":[{"number":2,"status":"half"}]}""", "one of todo, doing, blocked, done"),
             ("""{"steps":[{"notes":"no title"}]}""", "needs a title"),
         })
         {

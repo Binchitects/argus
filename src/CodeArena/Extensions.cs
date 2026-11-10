@@ -132,13 +132,16 @@ internal sealed class Extensions
 
     private static readonly string[] ProjectFolders = [".code-arena", ".arena", ".claude", ".qwen"];
 
-    /// <summary>The person's own skills' folders in their home, after the config folder's: Code Arena's and Claude Code's.</summary>
+    /// <summary>
+    /// The person's own folders in their home, after the config folder's: Code Arena's and Claude Code's, read as a project's
+    /// own are (their commands, agents and skills), for every project.
+    /// </summary>
     private static readonly string[] HomeFolders = [".code-arena", ".claude"];
 
     /// <summary>The folders read, the project's first (they win), whose each is, and how it is shown.</summary>
     private static IEnumerable<(string Dir, string Source, string Origin)> Folders(AppPaths paths, string projectRoot, string kind) =>
         ProjectFolders.Select(f => (Path.Combine(projectRoot, f, kind), "project", $"{f}/{kind}")).Append((Path.Combine(paths.ConfigDir, kind), "person", "config"))
-            .Concat(kind == "skills" && paths.Home is { Length: > 0 } home ? HomeFolders.Select(f => (Path.Combine(home, f, kind), "person", $"~/{f}/{kind}")) : [])
+            .Concat(paths.Home is { Length: > 0 } home ? HomeFolders.Select(f => (Path.Combine(home, f, kind), "person", $"~/{f}/{kind}")) : [])
             // The skills Arena's plugins bring come after the project's and the person's own, and Arena's own last: those of the same name win.
             .Concat(kind == "skills" ? [(PluginSkills.Folder(paths), "arena", "arena"), (BuiltInSkills.Folder(paths), "builtin", "builtin")] : []);
 

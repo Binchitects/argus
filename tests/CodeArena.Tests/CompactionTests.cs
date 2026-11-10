@@ -103,6 +103,46 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_summary_keeps_the_files_changed_and_the_commands_run_whatever_it_says_and_clearing_shortens_long_calls()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY: worked on it.") : Reply.Say("ok");
+        await using var rt = await StartAsync(h);
+        var whole = new string('x', 9000);
+        for (var i = 0; i < 4; i++)
+        {
+            rt.Agent.Messages.Add(new JsonObject { ["role"] = "user", ["content"] = $"question {i} " + new string('q', 1500) });
+            rt.Agent.Messages.Add(new JsonObject
+            {
+                ["role"] = "assistant", ["content"] = "",
+                ["tool_calls"] = new JsonArray(
+                    new JsonObject { ["id"] = $"w{i}", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "write_file", ["arguments"] = new JsonObject { ["path"] = $"src/part{i}.cs", ["content"] = whole }.ToJsonString() } },
+                    new JsonObject { ["id"] = $"s{i}", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "run_shell", ["arguments"] = new JsonObject { ["command"] = $"dotnet test --filter Part{i}" }.ToJsonString() } }),
+            });
+            rt.Agent.Messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = $"w{i}", ["content"] = "Wrote it." });
+            rt.Agent.Messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = $"s{i}", ["content"] = "Passed: " + new string('r', 3000) });
+            rt.Agent.Messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = $"answer {i}" });
+        }
+
+        // Cleared first: the earlier calls' long arguments are short now, the latest turn's whole.
+        var before = rt.Agent.Estimate();
+        Assert.True(rt.Agent.ClearEarlier().Count > 0);
+        Assert.True(rt.Agent.Estimate() < before);
+        var calls = rt.Agent.Messages.SelectMany(m => (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>()).Where(c => c["function"]!["name"]!.GetValue<string>() == "write_file").ToList();
+        Assert.True(calls[0]["function"]!["arguments"]!.GetValue<string>().Length < 2000, "an earlier long call is shortened");
+        Assert.Contains("src/part0.cs", calls[0]["function"]!["arguments"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains(whole, calls[^1]["function"]!["arguments"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // Compacted: the model's summary, and under it what Code Arena knows from the calls.
+        Assert.True(await rt.Agent.CompactAsync(true, CancellationToken.None));
+        var summary = rt.Agent.Messages[0]["content"]!.GetValue<string>();
+        Assert.Contains("SUMMARY: worked on it.", summary, StringComparison.Ordinal);
+        Assert.Contains("## Kept by Code Arena", summary, StringComparison.Ordinal);
+        Assert.Contains("src/part0.cs", summary, StringComparison.Ordinal);
+        Assert.Contains("dotnet test --filter Part0", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Compact_at_shows_and_sets_it_and_keeps_it_for_the_next_sessions()
     {
         using var h = new Harness(_gateway, _mcp);

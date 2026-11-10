@@ -1416,7 +1416,7 @@ internal sealed partial class Agent
     /// The tools' results before the person's last two messages, past <see cref="ClearAbove"/>, kept aside and cleared to a
     /// line saying where (read_result reads them again): how many, and the characters freed.
     /// </summary>
-    private (int Count, long Chars) ClearEarlier()
+    internal (int Count, long Chars) ClearEarlier()
     {
         var questions = Messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "user").Select(x => x.i).ToList();
         if (questions.Count < 3)
@@ -1437,6 +1437,18 @@ internal sealed partial class Agent
             var line = KeptResults.Cleared(tool, text.Length, kept);
             Messages[i]["content"] = line;
             (count, freed) = (count + 1, freed + text.Length - line.Length);
+        }
+        // The calls' long arguments too (a file written whole, an edit's old and new text): the file holds them now.
+        for (var i = 0; i < questions[^2]; i++)
+        {
+            foreach (var call in (Messages[i]["tool_calls"] as JsonArray ?? []).OfType<JsonObject>())
+            {
+                if (call["function"] is JsonObject f && f.Str("arguments") is { Length: > ClearAbove * 2 } args && ShortArguments(args) is { } shorter && shorter.Length < args.Length)
+                {
+                    f["arguments"] = shorter;
+                    (count, freed) = (count + 1, freed + args.Length - shorter.Length);
+                }
+            }
         }
         if (count > 0)
         {
@@ -1514,7 +1526,7 @@ internal sealed partial class Agent
         // First the earlier tools' results, kept aside: often enough, and nothing is lost.
         if (ClearEarlier() is { Count: > 0 } cleared)
         {
-            var said = $"Cleared {cleared.Count} earlier tool {(cleared.Count == 1 ? "result" : "results")} (~{Fmt.Tokens((long)(cleared.Chars / CharsPerToken))} tokens) to make room: they are kept, read_result reads them again.";
+            var said = $"Cleared {cleared.Count} earlier tool {(cleared.Count == 1 ? "result or long call" : "results and long calls")} (~{Fmt.Tokens((long)(cleared.Chars / CharsPerToken))} tokens) to make room: they are kept, read_result reads them again.";
             if (Estimate() + ahead < at)
             {
                 // Cleared, not compacted: every message keeps its place, and so do the notes beside them.
@@ -1632,7 +1644,7 @@ internal sealed partial class Agent
     private const string SummaryInstruction = SummaryAsk + "\n\nSummarize the conversation above so you can carry on from the summary alone: it replaces everything above. " +
         "Write these sections, each a few bullet points, leaving out any with nothing to say: ## Goal (the person's goals and instructions, in their words); " +
         "## Constraints and preferences; ## Decisions (and why); ## Files (read or changed, with paths, and what changed); ## Commands (run, and what they showed); " +
-        "## Errors met; ## State (what is done, what is half done); ## Next steps. Be concrete and brief (at most 500 words). Invent nothing. " +
+        "## Errors met; ## State (what is done, what is half done); ## Next steps. Be concrete and brief (at most 800 words): keep every file path, name and number that matters. Invent nothing. " +
         "Do not call a tool: answer with the summary alone.";
 
     private const string TurnInstruction = SummaryAsk + "\n\nSummarize what you did in this turn so far, since the person's last message (earlier summaries of it included), " +
@@ -1640,7 +1652,7 @@ internal sealed partial class Agent
         "errors met, what is done and what is left. Be concrete and brief (at most 300 words). Invent nothing. Do not call a tool: answer with the summary alone.";
 
     /// <summary>The longest summary asked for, in tokens.</summary>
-    private const int SummaryTokens = 2_048;
+    private const int SummaryTokens = 3_072;
 
     /// <summary>The room a thinking model's summary has beside it for thinking, in tokens (at most an eighth of the window).</summary>
     private const int SummaryThinking = 8_192;
@@ -1910,7 +1922,7 @@ internal sealed partial class Agent
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
         var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction + SessionNumbers(keepFrom), force, ct);
-        var text = (summary ?? Digest(older, failure!)) + PlanNote();
+        var text = (summary is null ? Digest(older, failure!) : summary + Kept(older)) + PlanNote();
         Context.Shown?.Clear();
         Messages =
         [
@@ -2124,6 +2136,16 @@ internal sealed partial class Agent
             chars -= ToolChars();
             tools = [];
         }
+        // Too big: the long results and call arguments cut first (the summary needs what was done, not every line of it),
+        // before any message is left out.
+        if (chars > budget)
+        {
+            var copy = messages.OfType<JsonObject>().ToList();
+            if (Shrink(copy))
+            {
+                chars = copy.Sum(Size) + instruction.Length + (tools.Count > 0 ? ToolChars() : 0);
+            }
+        }
         var left = 0;
         // The oldest go first (after an earlier summary, which holds what came before them), each with what follows it up
         // to the next message of the person's, so every call keeps its result.
@@ -2279,6 +2301,29 @@ internal sealed partial class Agent
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// What Code Arena itself knows of the messages a summary covers, whatever the summary says: the files changed and the
+    /// commands run (from the calls), added under it so a long session's work is not lost in the summary.
+    /// </summary>
+    private string Kept(List<JsonObject> older)
+    {
+        var (files, commands) = Touched(older);
+        if (files.Count == 0 && commands.Count == 0)
+        {
+            return "";
+        }
+        var sb = new StringBuilder("\n\n## Kept by Code Arena (from the calls, not the summary)\n");
+        if (files.Count > 0)
+        {
+            sb.Append("\nFiles changed: ").Append(string.Join(", ", files.TakeLast(60))).Append('\n');
+        }
+        if (commands.Count > 0)
+        {
+            sb.Append("\nCommands run (the latest):\n").Append(string.Join("", commands.TakeLast(20).Select(c => $"- {c}\n")));
+        }
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>What older messages held, when the model could not summarize them: the summary before them, the person's messages, the files changed, the commands run, the last answer.</summary>

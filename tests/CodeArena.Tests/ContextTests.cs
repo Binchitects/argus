@@ -34,6 +34,40 @@ public sealed class ContextTests : IDisposable
     }
 
     [Fact]
+    public void The_homes_code_arena_and_claude_folders_are_read_as_a_projects_own_are_commands_agents_instructions_and_memory()
+    {
+        var project = Project((".arena/commands/review.md", "The project's review (it wins)."));
+        var home = Path.Combine(_root, "home");
+        void Put(string name, string text)
+        {
+            var path = Path.Combine(home, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+        }
+        Put(".code-arena/commands/standup.md", "Summarize yesterday's commits.");
+        Put(".code-arena/commands/review.md", "My review.");
+        Put(".claude/agents/tester.md", "---\nname: tester\ndescription: Finds missing tests\n---\nYou look for code without tests.");
+        Put(".code-arena/ARENA.md", "Always answer in British English.");
+        Put(".claude/CLAUDE.md", "Not read: ~/.code-arena has its own.");
+        Put(".code-arena/memory.md", "# Memory\n- Prefers small commits.\n");
+        var paths = new AppPaths(Paths.ConfigDir, Paths.DataDir) { Home = home };
+
+        var x = Extensions.Load(paths, project);
+        Assert.Equal(["review", "standup"], x.Commands.Select(c => c.Name).Order());
+        Assert.Equal("The project's review (it wins).", x.Commands.Single(c => c.Name == "review").Prompt);
+        Assert.Equal("tester", Assert.Single(x.Agents).Name);
+
+        var said = SystemPrompt.Instructions(paths, project, project);
+        Assert.Contains(said, i => i.Text == "Always answer in British English.");
+        Assert.DoesNotContain(said, i => i.Text.StartsWith("Not read", StringComparison.Ordinal));
+        File.Delete(Path.Combine(home, ".code-arena", "ARENA.md"));
+        Assert.Contains(SystemPrompt.Instructions(paths, project, project), i => i.Text.StartsWith("Not read", StringComparison.Ordinal));
+
+        Assert.Equal(["Prefers small commits."], new MemoryStore(paths, project).Read(true));
+        Assert.Contains("Prefers small commits.", new MemoryStore(paths, project).ForPrompt(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Memories_are_kept_per_project_and_for_the_person_outside_the_repository()
     {
         var project = Project();

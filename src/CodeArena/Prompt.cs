@@ -267,7 +267,7 @@ internal static class SystemPrompt
     public static readonly string[] InstructionFiles = ["ARENA.md", "AGENTS.md", "CLAUDE.md", "QWEN.md"];
 
     /// <summary>
-    /// The person's own ARENA.md (config folder), then the project's at the repository's root and the working directory's when
+    /// The person's own ARENA.md (config folder) and their home's (~/.code-arena, else ~/.claude/CLAUDE.md), then the project's at the repository's root and the working directory's when
     /// it is below the root: in each folder the first of ARENA.md, AGENTS.md, CLAUDE.md and QWEN.md (a project written for
     /// another agent is read as it is).
     /// </summary>
@@ -294,6 +294,16 @@ internal static class SystemPrompt
             }
         }
         Add(paths.UserInstructions, "The person's instructions (ARENA.md in their config folder)");
+        // And those in their home's Code Arena folder, else Claude Code's (~/.claude/CLAUDE.md), as a project's are read.
+        if (paths.Home is { Length: > 0 } home)
+        {
+            var before = found.Count;
+            First(Path.Combine(home, ".code-arena"), "The person's instructions (~/.code-arena)");
+            if (found.Count == before)
+            {
+                Add(Path.Combine(home, ".claude", "CLAUDE.md"), "The person's instructions (~/.claude/CLAUDE.md)");
+            }
+        }
         var top = gitRoot ?? root;
         First(top, "Project instructions");
         if (!string.Equals(Path.GetFullPath(top), root, StringComparison.Ordinal))

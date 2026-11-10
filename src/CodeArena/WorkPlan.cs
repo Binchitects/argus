@@ -61,8 +61,68 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
     /// with remove; without: one added at the end); clear starts again from nothing.
     /// </summary>
     /// <remarks><paramref name="isCommand"/>: whether a step's check is a command to run (a program here), not words to look by.</remarks>
-    public WorkPlan Apply(JsonObject args, Func<string, bool>? isCommand = null)
+    public WorkPlan Apply(JsonObject args, Func<string, bool>? isCommand = null) => Apply(args, isCommand, out _);
+
+    /// <summary>The status words other agents use, as the plan's own.</summary>
+    private static readonly Dictionary<string, string> StatusWords = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["todo"] = WorkStep.Todo, ["to do"] = WorkStep.Todo, ["pending"] = WorkStep.Todo, ["not_started"] = WorkStep.Todo, ["open"] = WorkStep.Todo,
+        ["doing"] = WorkStep.Doing, ["in_progress"] = WorkStep.Doing, ["in progress"] = WorkStep.Doing, ["active"] = WorkStep.Doing, ["started"] = WorkStep.Doing,
+        ["done"] = WorkStep.Done, ["completed"] = WorkStep.Done, ["complete"] = WorkStep.Done, ["finished"] = WorkStep.Done,
+        ["blocked"] = WorkStep.Blocked, ["failed"] = WorkStep.Blocked, ["stuck"] = WorkStep.Blocked,
+    };
+
+    /// <summary>
+    /// A call as the model wrote it, read kindly: the steps as a JSON string, a step's other names for its fields (id, step,
+    /// description, dependsOn), other agents' status words. What was read so is said back (<paramref name="mended"/>).
+    /// </summary>
+    private static JsonObject Kindly(JsonObject args, List<string> mended)
+    {
+        var a = (JsonObject)args.DeepClone();
+        if (a["steps"] is JsonValue text && text.TryGetValue<string>(out var json) && Json.Parse(json) is JsonArray parsed)
+        {
+            a["steps"] = parsed;
+            mended.Add("steps came as a string of JSON: read as the list");
+        }
+        foreach (var step in (a["steps"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            void Alias(string name, params string[] others)
+            {
+                if (step[name] is not null)
+                {
+                    return;
+                }
+                foreach (var o in others)
+                {
+                    if (step[o] is { } v)
+                    {
+                        step[name] = v.DeepClone();
+                        step.Remove(o);
+                        return;
+                    }
+                }
+            }
+            Alias("number", "id", "step", "index");
+            Alias("title", "name", "description", "content", "task");
+            Alias("depends_on", "dependsOn", "dependencies", "after");
+            Alias("check", "done_when", "verify", "test");
+            if (step["number"] is JsonValue nv && nv.TryGetValue<string>(out var ns) && int.TryParse(ns.Trim().TrimStart('#'), out var n))
+            {
+                step["number"] = n;
+            }
+            if (step.Str("status") is { } status && !WorkStep.States.Contains(status) && StatusWords.TryGetValue(status.Trim(), out var known))
+            {
+                step["status"] = known;
+            }
+        }
+        return a;
+    }
+
+    /// <summary>The plan with the changes, and what in the call was read kindly or done for it (said back to the model).</summary>
+    public WorkPlan Apply(JsonObject args, Func<string, bool>? isCommand, out List<string> mended)
+    {
+        mended = [];
+        args = Kindly(args, mended);
         var plan = args.Bool("clear") == true ? None : this;
         var title = args.Str("title")?.Trim() is { Length: > 0 } t ? Cut(t, 200) : plan.Title;
         var goal = args.Str("goal") is { } g ? (g.Trim().Length == 0 ? null : Cut(g.Trim(), 4000)) : plan.Goal;
@@ -74,9 +134,15 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
             if (number is { } n)
             {
                 var at = steps.FindIndex(s => s.Number == n);
+                if (at < 0 && change.Bool("remove") != true && !string.IsNullOrWhiteSpace(change.Str("title")) && n > (steps.Count == 0 ? 0 : steps.Max(s => s.Number)))
+                {
+                    // A new step with the number it will have (a plan written whole, its steps numbered): added.
+                    steps.Add(new WorkStep(n, ""));
+                    at = steps.Count - 1;
+                }
                 if (at < 0)
                 {
-                    throw new PlanError($"The plan has no step {n}: leave out number to add a step.");
+                    throw new PlanError($"The plan has no step {n}: leave out number to add a step (its steps are {(steps.Count == 0 ? "none yet" : string.Join(", ", steps.Select(s => s.Number)))}).");
                 }
                 if (change.Bool("remove") == true)
                 {
@@ -152,7 +218,19 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
                 steps.Add(step);
             }
         }
-        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, steps) { Review = plan.Review, Critique = plan.Critique };
+        // A step begun while another was doing, which this call did not change: that one waits again (one doing at a time).
+        var doing = steps.Where(s => s.Status == WorkStep.Doing).ToList();
+        if (doing.Count > 1)
+        {
+            var changed = (args["steps"] as JsonArray ?? []).OfType<JsonObject>().Where(c => c.Str("status") == WorkStep.Doing).Select(c => c.Int("number")).ToHashSet();
+            var keep = doing.LastOrDefault(s => changed.Contains(s.Number)) ?? doing[^1];
+            foreach (var other in doing.Where(s => s != keep))
+            {
+                steps[steps.IndexOf(other)] = other with { Status = WorkStep.Todo };
+                mended.Add($"step {other.Number} was doing: it is to do again, as step {keep.Number} began (mark it done when its check passed)");
+            }
+        }
+        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, [.. steps.OrderBy(s => s.Number)]) { Review = plan.Review, Critique = plan.Critique };
         made.Validate();
         return made;
     }
@@ -165,11 +243,39 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
     {
         var said = Normal(command);
         var step = Steps.FirstOrDefault(s => s.Status == WorkStep.Doing && s.Check is { } c && Normal(c) == said)
-            ?? Steps.FirstOrDefault(s => s.Status != WorkStep.Done && s.Check is { } c && Normal(c) == said);
+            ?? Steps.FirstOrDefault(s => s.Status != WorkStep.Done && s.Check is { } c && Normal(c) == said)
+            ?? Steps.FirstOrDefault(s => s.Status == WorkStep.Doing && s.Check is { } c && Runs(command, c))
+            ?? Steps.FirstOrDefault(s => s.Status != WorkStep.Done && s.Check is { } c && Runs(command, c));
         return step is null ? this : Checked(step.Number, passed, output, at);
     }
 
     private static string Normal(string command) => string.Join(' ', command.Trim().Trim('`').Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
+    /// Whether a command run is a step's check: as written, or with it as one of the commands it chains (cd src &amp;&amp; dotnet
+    /// test, dotnet test 2&gt;&amp;1 | tail): what ran is what the check asks.
+    /// </summary>
+    internal static bool Runs(string ran, string check)
+    {
+        var (r, c) = (Normal(ran), Normal(check));
+        if (r == c)
+        {
+            return true;
+        }
+        if (c.Length == 0)
+        {
+            return false;
+        }
+        foreach (var part in System.Text.RegularExpressions.Regex.Split(r, @"\s*(?:&&|\|\||;|\|)\s*"))
+        {
+            var p = Normal(System.Text.RegularExpressions.Regex.Replace(part, @"\s+\d?>&?\d?\S*$", ""));
+            if (p == c)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>A step's check ran: how it went, the end of what it said.</summary>
     public WorkPlan Checked(int number, bool passed, string output, DateTimeOffset at) =>

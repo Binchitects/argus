@@ -302,9 +302,11 @@ public sealed class FakeGateway : FakeServer
         if (reply.ThinksOn)
         {
             await WriteEvent(ctx, Chunk(new JsonObject { ["role"] = "assistant", ["content"] = "" }));
-            while (true)
+            // A model that thinks on and on, each thought its own (not one repeated: that is a loop, which the repetition
+            // guard stops by itself).
+            for (var thought = 1; ; thought++)
             {
-                await WriteEvent(ctx, Chunk(new JsonObject { ["reasoning_content"] = reply.Reasoning ?? "Let me think again. " }));
+                await WriteEvent(ctx, Chunk(new JsonObject { ["reasoning_content"] = $"{reply.Reasoning ?? "Let me think again. "}Thought {thought} weighs case {thought * 7 % 13} against {thought * 11 % 17}. " }));
                 await Task.Delay(5, ct);
             }
         }

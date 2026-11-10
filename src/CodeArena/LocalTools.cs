@@ -1052,9 +1052,10 @@ internal static partial class LocalTools
     private static Task<ToolResult> PlanTool(JsonObject a, ToolContext c, CancellationToken ct)
     {
         WorkPlan plan;
+        List<string> mended;
         try
         {
-            plan = c.Plan.Apply(a, c.IsCommand);
+            plan = c.Plan.Apply(a, c.IsCommand, out mended);
         }
         catch (PlanError e)
         {
@@ -1071,7 +1072,8 @@ internal static partial class LocalTools
         }
         c.Plan = plan;
         c.PlanChanged?.Invoke(plan);
-        return Task.FromResult(new ToolResult(plan.Text()) { Display = plan.Render(c.Ui) });
+        var note = mended.Count == 0 ? "" : $"\n\n(Read as: {string.Join("; ", mended)}.)";
+        return Task.FromResult(new ToolResult(plan.Text() + note) { Display = plan.Render(c.Ui) });
     }
 }
 
