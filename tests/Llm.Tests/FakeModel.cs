@@ -54,6 +54,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>Picture requests (the image tool), as sent.</summary>
     public ConcurrentQueue<JsonObject> ImageRequests { get; } = new();
 
+    /// <summary>The legacy completions asked (a prompt, no messages), kept apart from the chat requests other tests read.</summary>
+    public ConcurrentQueue<JsonObject> Completions { get; } = new();
+
     /// <summary>Runs before a picture is answered (its prompt): a test holds a slow picture there.</summary>
     public Func<string, Task>? BeforeImage { get; set; }
 
@@ -138,7 +141,7 @@ public sealed class FakeModel : HttpMessageHandler
         // The legacy completions (Code Arena's editor): the prompt carried on.
         if (request.RequestUri!.AbsolutePath.EndsWith("/completions", StringComparison.Ordinal) && !request.RequestUri.AbsolutePath.EndsWith("/chat/completions", StringComparison.Ordinal))
         {
-            Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));
+            Completions.Enqueue(body);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("""{"object":"text_completion","choices":[{"index":0,"text":" world();","finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}""", Encoding.UTF8, "application/json"),
