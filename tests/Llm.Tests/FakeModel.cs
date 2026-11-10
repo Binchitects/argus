@@ -45,6 +45,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>The model list and embeddings asked (path and query, and the key they came with).</summary>
     public ConcurrentQueue<(string Path, string? Key)> Passed { get; } = new();
 
+    /// <summary>A host whose server is down: every request to it is refused.</summary>
+    public const string DownHost = "down.test";
+
     /// <summary>Keys the gateway no longer knows: requests with them get 401.</summary>
     public ConcurrentDictionary<string, bool> RevokedKeys { get; } = new();
 
@@ -90,6 +93,11 @@ public sealed class FakeModel : HttpMessageHandler
         if (TimesOut)
         {
             throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 900 seconds elapsing.", new TimeoutException());
+        }
+        // A model server that is down (the app's own gateway then asks the fallback).
+        if (request.RequestUri?.Host == DownHost)
+        {
+            throw new HttpRequestException($"Connection refused ({DownHost}:80)");
         }
         if (request.Headers.Authorization?.Parameter is { } key && RevokedKeys.ContainsKey(key))
         {

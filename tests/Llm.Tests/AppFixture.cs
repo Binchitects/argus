@@ -260,6 +260,11 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:AlertmanagerUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:LokiUrl", "http://127.0.0.1:9");
+            // The chat-path classes run once more with the app's own gateway: dotnet test --environment ARENA_TEST_GATEWAY_MODE=chat.
+            if (Environment.GetEnvironmentVariable("ARENA_TEST_GATEWAY_MODE") is { Length: > 0 } mode)
+            {
+                b.UseSetting("Gateway:Mode", mode);
+            }
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>())
             {
                 b.UseSetting(k, v);
@@ -277,6 +282,9 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Chat.CodeIntelMcp>().ConfigurePrimaryHttpMessageHandler(() => CodeIntel);
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(AnswerCache.Client).ConfigurePrimaryHttpMessageHandler(() => Model);
+                // The app's own gateway sends to the engines: here, the fake model behind every route.
+                s.AddHttpClient(Llm.Api.Gateway.ModelGateway.Upstream).ConfigurePrimaryHttpMessageHandler(() => Model);
+                s.AddHttpClient(Llm.Api.Gateway.ModelGateway.UpstreamUnchecked).ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient(Llm.Api.Plugins.PluginCatalog.Client).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient(Llm.Api.Chat.Tools.CustomTools.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => Mcp);

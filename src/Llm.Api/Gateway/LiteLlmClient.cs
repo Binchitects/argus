@@ -19,6 +19,12 @@ public sealed class LiteLlmOptions
     public int ConnectWaitSeconds { get; set; } = 30;
 
     /// <summary>
+    /// Gateway:Mode, while the app's own gateway replaces LiteLLM: litellm (LiteLLM answers everything), chat (the app sends
+    /// its own chat to the engines itself, ModelGateway) or own (the app answers all it serves).
+    /// </summary>
+    public string Mode { get; set; } = GatewayModes.LiteLlm;
+
+    /// <summary>
     /// How long a new deployment's first chat waits, at most, for the gateway to make the chat's key (on a first start it
     /// sets up its database before it listens, which can take a minute or more): tried again after 1, 2, 4, 8 and then 15
     /// seconds while they fit. 0: told at once (a stack with no gateway, CI's).

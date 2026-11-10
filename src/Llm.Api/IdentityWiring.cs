@@ -301,6 +301,16 @@ public static class IdentityWiring
             c.Timeout = o.RequestTimeout;
         });
         services.AddSingleton<Chat.ChatKey>();
+        // The app's own gateway (Gateway:Mode): its clients to the engines, one that checks certificates and one that does not
+        // (a server whose VerifyTls is off), as the remote servers' clients are.
+        services.AddSingleton<Gateway.ModelGateway>();
+        services.AddHttpClient(Gateway.ModelGateway.Upstream, c => c.Timeout = Timeout.InfiniteTimeSpan);
+#pragma warning disable CA5359 // A server the admin chose not to check (Admin → Servers: Check the certificate off), as RemoteServerClient.Unchecked.
+        services.AddHttpClient(Gateway.ModelGateway.UpstreamUnchecked, c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true },
+        });
+#pragma warning restore CA5359
         services.AddSingleton<Chat.ChatModels>();
         // A tool call may run for an hour (Chat:ToolCallTimeout): each request sets its own limit.
         services.AddHttpClient<Chat.CodeIntelMcp>(c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);

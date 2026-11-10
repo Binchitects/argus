@@ -473,7 +473,8 @@ public sealed class EngineState(TimeProvider clock)
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, MediaControl media, HardwareProbe hardware, ILogger<ModelCatalog> logger)
+    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, MediaControl media, HardwareProbe hardware, ILogger<ModelCatalog> logger,
+    Gateway.ModelGateway own)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -1221,6 +1222,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// </summary>
     public async Task SyncGatewayAsync(CancellationToken ct = default)
     {
+        // The app's own gateway reads the routes afresh at its next call.
+        own.Invalidate();
         var syncing = Syncing.GetValue(gateway, _ => new SemaphoreSlim(1, 1));
         await syncing.WaitAsync(ct);
         try

@@ -757,6 +757,17 @@ app never asks LiteLLM of a key (`KeyInfoAsync` is gone), and `Gateway:KeyCacheS
 `Gateway:AnswerCacheKeyCheck`. The key lists on Account and Admin → People still read LiteLLM's (its spend and block
 state) until commit 11 moves the blocks to the app.
 
+Commit 10 (2026-11-10, branch v8.0): `ModelGateway` (routes from `GatewayRoutes`, rebuilt every 30 s, on an unknown name
+and whenever `SyncGatewayAsync` runs; a pool's copy picked by its in-flight count for its weight, a full one passed over;
+the body shaped per engine; the fallback asked on a refused connection or a 502/503/504), `SseMeter` and the metered
+stream (usage, cached tokens or llama.cpp's `cache_n`, the first token's time, an error chunk), and the ledger rows
+written behind the calls (the person by email, the chat's project as `ProjectTags` finds it). `GatewayChat.StreamAsync`
+uses it with `Gateway:Mode` `chat` or `own`; pictures and speech stay on LiteLLM until commit 12. OwnGatewayTests cover
+it; `dotnet test --environment ARENA_TEST_GATEWAY_MODE=chat` runs any class in the mode. The chat-path classes pass in
+it but for twelve tests that check LiteLLM's wire: `metadata.tags` on what reaches the engine (Meeting, BusinessMap,
+Deck, SecurityReview, Review: the tag is in the ledger now), the chat key, the connection waits and the
+`X-LLM-User-Email` header. They are rewritten in commit 19, when the mode is the only one.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

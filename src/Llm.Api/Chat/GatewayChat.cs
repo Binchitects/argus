@@ -53,7 +53,7 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
 public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media,
-    Microsoft.Extensions.Options.IOptionsMonitor<Gateway.LiteLlmOptions> gatewayOptions)
+    Microsoft.Extensions.Options.IOptionsMonitor<Gateway.LiteLlmOptions> gatewayOptions, Gateway.ModelGateway own)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
@@ -79,10 +79,12 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             // Inside vLLM or SGLang the chat goes ahead of API keys (their requests carry none: 0; the lower goes first on both).
             request["priority"] = -1;
         }
+        string[] fallbacks = [];
         if (route.FallbackOf(asked) is { } fallback && slot.Model != fallback)
         {
             // Should the model fail mid-way (its engine restarts), the gateway asks its fallback.
             request["fallbacks"] = new JsonArray(fallback);
+            fallbacks = [fallback];
         }
         if (slot.Slot is { } id)
         {
@@ -98,7 +100,8 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             HttpResponseMessage? res;
             try
             {
-                res = await OpenAsync(request, personEmail, ct);
+                // The app's own gateway (Gateway:Mode chat or own): straight to the engine, booked in the ledger here.
+                res = own.ForChat ? await own.ChatAsync(request, Caller(request, personEmail, conversation), fallbacks, ct) : await OpenAsync(request, personEmail, ct);
             }
             catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
             {
@@ -112,7 +115,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
                 continue;
             }
-            catch (ChatGatewayException ex) when (ex.Status == 400 && !registered && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
+            catch (ChatGatewayException ex) when (ex.Status == 400 && !registered && !own.ForChat && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
             {
                 // A model the app has not registered yet (a first start, the gateway just up): register now, ask again.
                 registered = true;
@@ -126,6 +129,18 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             }
             yield break;
         }
+    }
+
+    /// <summary>
+    /// Who a request is for, as the ledger books it: the person, the part of the app that asked (its first tag that names no
+    /// chat or project), its chat and its project (the tags chat:ID and project:ID, else the turn's chat).
+    /// </summary>
+    internal static Gateway.GatewayCaller Caller(JsonObject request, string personEmail, Guid? conversation)
+    {
+        var tags = (request["metadata"]?["tags"] as JsonArray ?? []).Select(t => t is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>().ToList();
+        Guid? Id(string prefix) => tags.FirstOrDefault(t => t.StartsWith(prefix, StringComparison.Ordinal)) is { } t && Guid.TryParse(t[prefix.Length..], out var g) ? g : null;
+        var tag = tags.FirstOrDefault(t => !t.StartsWith(Projects.ProjectTags.ChatPrefix, StringComparison.Ordinal) && !t.StartsWith(Projects.ProjectTags.ProjectPrefix, StringComparison.Ordinal));
+        return new Gateway.GatewayCaller(personEmail, "chat", tag, Id(Projects.ProjectTags.ChatPrefix) ?? conversation, Id(Projects.ProjectTags.ProjectPrefix));
     }
 
     /// <summary>One picture from an image model at the gateway, as PNG bytes. The spend is the person's, as in chat.</summary>
