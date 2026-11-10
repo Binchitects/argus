@@ -791,6 +791,14 @@ a route while it runs, booked by its prompt tokens) are answered by the app (`Ow
 translations and picture edits get 404 `model_not_found`; Anthropic's count_tokens goes by LiteLLM until commit 14.
 OwnApiTests; ApiPassageTests' NET-01 evidence holds in both modes.
 
+Commit 14 (2026-11-11): with Mode own, `/v1/messages` and `/messages` become one chat completion
+(`Protocols/AnthropicMessages`: system, text, pictures, tool_use and tool_result, tools and tool_choice, stop
+sequences, thinking; a server tool gets a 400 that says so) and take the API's whole way (Admission, the prompt log,
+KeyLine, AnswerGate, ModelGateway); the answer comes back as Anthropic's message or its events (thinking, text and
+tool_use blocks, input_json_delta, the stop reason, usage with cache_read_input_tokens), errors in its shape.
+`count_tokens` is counted by llama.cpp's template and tokenizer, vLLM's or SGLang's tokenizer, else estimated.
+AnthropicGatewayTests. Claude Code itself is checked live with clients-check.py at commit 17.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

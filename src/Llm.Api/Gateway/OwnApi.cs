@@ -26,7 +26,7 @@ public static class OwnApi
     {
         var own = http.RequestServices.GetRequiredService<ModelGateway>();
         var path = http.Request.Path.Value ?? "";
-        if (!own.ForApi || path.EndsWith("/count_tokens", StringComparison.Ordinal))
+        if (!own.ForApi)
         {
             return false;
         }
@@ -118,9 +118,78 @@ public static class OwnApi
             }
             return true;
         }
+        if (HttpMethods.IsPost(http.Request.Method) && path.EndsWith("/messages/count_tokens", StringComparison.Ordinal))
+        {
+            await CountTokensAsync(http, routes, ct);
+            return true;
+        }
         // Rerank, moderations, translations, picture edits and variations: no server here serves them.
         await ErrorAsync(http, 404, "model_not_found", "No model here serves this.");
         return true;
+    }
+
+    /// <summary>
+    /// Anthropic's count_tokens: the request as the chat completion it becomes, counted by its engine's tokenizer
+    /// (llama.cpp: its chat template applied, then tokenized; vLLM and SGLang: tokenized with the messages), else about four
+    /// characters a token.
+    /// </summary>
+    private static async Task CountTokensAsync(HttpContext http, IReadOnlyList<Deployment> routes, CancellationToken ct)
+    {
+        JsonObject chat;
+        try
+        {
+            chat = Protocols.AnthropicMessages.ToChat(await JsonNode.ParseAsync(http.Request.Body, cancellationToken: ct) as JsonObject ?? throw new Protocols.AdapterException(400, "The request is not a JSON object."));
+        }
+        catch (Exception e) when (e is JsonException or Protocols.AdapterException)
+        {
+            http.Response.StatusCode = e is Protocols.AdapterException a ? a.Status : 400;
+            await http.Response.WriteAsync(Protocols.AnthropicMessages.Error(http.Response.StatusCode, e.Message), ct);
+            return;
+        }
+        var model = chat["model"]?.ToString();
+        var d = routes.FirstOrDefault(r => r.Name == model);
+        if (d is null)
+        {
+            http.Response.StatusCode = 404;
+            await http.Response.WriteAsync(Protocols.AnthropicMessages.Error(404, $"There is no model {model}."), ct);
+            return;
+        }
+        var counted = await TokenizeAsync(http.RequestServices, d, chat, ct);
+        await http.Response.WriteAsJsonAsync(new { input_tokens = counted ?? (int)Math.Ceiling((chat["messages"]!.ToJsonString().Length + (chat["tools"]?.ToJsonString().Length ?? 0)) / 4.0) }, ct);
+    }
+
+    private static async Task<int?> TokenizeAsync(IServiceProvider services, Deployment d, JsonObject chat, CancellationToken ct)
+    {
+        var root = d.BaseUrl.EndsWith("/v1", StringComparison.Ordinal) ? d.BaseUrl[..^3] : d.BaseUrl;
+        var client = services.GetRequiredService<IHttpClientFactory>().CreateClient(d.VerifyTls == false ? ModelGateway.UpstreamUnchecked : ModelGateway.Upstream);
+        var key = d.EngineKey ? services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Models.EngineOptions>>().Value.ApiKey : d.Key;
+        async Task<JsonNode?> PostAsync(string path, JsonObject body)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, root + path) { Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json") };
+            if (key is { Length: > 0 })
+            {
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+            }
+            using var res = await client.SendAsync(req, ct);
+            return res.IsSuccessStatusCode ? JsonNode.Parse(await res.Content.ReadAsStringAsync(ct)) : null;
+        }
+        try
+        {
+            if (d.Kind == Deployment.LlamaCpp)
+            {
+                var prompt = (await PostAsync("/apply-template", new JsonObject { ["model"] = d.Model, ["messages"] = chat["messages"]!.DeepClone() }))?["prompt"]?.ToString();
+                return prompt is null ? null : (await PostAsync("/tokenize", new JsonObject { ["model"] = d.Model, ["content"] = prompt }))?["tokens"]?.AsArray().Count;
+            }
+            if (Llm.Core.Models.EngineKinds.Priority(d.Kind))
+            {
+                return (await PostAsync("/tokenize", new JsonObject { ["model"] = d.Model, ["messages"] = chat["messages"]!.DeepClone() }))?["count"]?.GetValue<int>();
+            }
+        }
+        catch (Exception e) when (e is HttpRequestException or JsonException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        return null;
     }
 
     private static object Model(Deployment d) => new { id = d.Name, @object = "model", created = 0, owned_by = "arena" };

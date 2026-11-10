@@ -524,11 +524,15 @@ public static class AnswerCacheEndpoints
         {
             return;
         }
-        var ownMode = completions && own.ForApi;
+        // Anthropic's Messages API, turned into a chat completion here and its answer back into Anthropic's shapes.
+        var anthropic = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/messages" or "/messages";
+        var ownMode = (completions || anthropic) && own.ForApi;
         if (ownMode)
         {
             http.Response.Headers.AccessControlAllowOrigin = "*";
         }
+        Task FailAsync(int status, string type, string message, int? retryAfter = null, IReadOnlyDictionary<string, string>? headers = null) =>
+            anthropic ? AnthropicErrorAsync(http, status, message, retryAfter, headers, ct) : OwnErrorAsync(http, status, type, message, retryAfter, headers, ct);
         Admitted? admitted = null;
         if (ownMode)
         {
@@ -539,7 +543,7 @@ public static class AnswerCacheEndpoints
             {
                 if (whole.Length + got > MostPinnedRequest)
                 {
-                    await OwnErrorAsync(http, 413, "invalid_request_error", "The request is too large.", null, null, ct);
+                    await FailAsync(413, "invalid_request_error", "The request is too large.");
                     return;
                 }
                 whole.Write(chunk, 0, got);
@@ -555,8 +559,21 @@ public static class AnswerCacheEndpoints
             }
             if (json is null)
             {
-                await OwnErrorAsync(http, 400, "invalid_request_error", "The request is not a JSON object.", null, null, ct);
+                await FailAsync(400, "invalid_request_error", "The request is not a JSON object.");
                 return;
+            }
+            if (anthropic)
+            {
+                try
+                {
+                    json = Protocols.AnthropicMessages.ToChat(json);
+                }
+                catch (Protocols.AdapterException ex)
+                {
+                    await FailAsync(ex.Status, "invalid_request_error", ex.Message);
+                    return;
+                }
+                completions = true;
             }
             var (letIn, refusal) = await http.RequestServices.GetRequiredService<Admission>().CheckAsync(key, json, ct);
             if (refusal is not null)
@@ -570,13 +587,13 @@ public static class AnswerCacheEndpoints
                         prompts.Begin(holder.UserId, holder.Hash, json)?.End(PromptLogEntry.Refused, refusal.Status, error: refusal.Message);
                     }
                 }
-                await OwnErrorAsync(http, refusal.Status, refusal.Type, refusal.Message, refusal.RetryAfter, refusal.Headers, ct);
+                await FailAsync(refusal.Status, refusal.Type, refusal.Message, refusal.RetryAfter, refusal.Headers);
                 return;
             }
             admitted = letIn;
             // A text the safeguards masked goes masked.
             body = Encoding.UTF8.GetBytes(json.ToJsonString());
-            if (cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
+            if (!anthropic && cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
             {
                 lookup = await cache.LookupAsync(key!, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
             }
@@ -814,7 +831,7 @@ public static class AnswerCacheEndpoints
             // The engine refused or could not be reached: the caller gets its words, in the OpenAI shape.
             var status = ex.Status ?? StatusCodes.Status502BadGateway;
             logged?.End(PromptLogEntry.Failed, status, error: ex.Message);
-            await OwnErrorAsync(http, status, status == 404 ? "model_not_found" : status >= 500 ? "upstream_error" : "invalid_request_error", ex.Message, null, null, ct);
+            await FailAsync(status, status == 404 ? "model_not_found" : status >= 500 ? "upstream_error" : "invalid_request_error", ex.Message);
             return;
         }
         catch (OperationCanceledException) when (StoppedByAdmin())
@@ -844,6 +861,15 @@ public static class AnswerCacheEndpoints
                 http.Response.Headers[AnswerCache.Header] = "miss";
             }
             http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+            // Anthropic's caller: its events as the chat completion's stream comes, or its message (or error) at the end.
+            var claude = anthropic ? new Protocols.AnthropicMessages.Events(json!["model"]?.ToString() ?? "") : null;
+            var claudeStreams = anthropic && res.IsSuccessStatusCode && streamed;
+            using var claudeWhole = anthropic && !claudeStreams ? new MemoryStream() : null;
+            if (anthropic)
+            {
+                http.Response.ContentType = claudeStreams ? "text/event-stream" : "application/json";
+                http.Response.Headers.ContentLength = null;
+            }
             var keep = lookup is not null && res.IsSuccessStatusCode ? new MemoryStream() : null;
             // The prompt log: the answer as it went out, whole (or as far as it went), or the error the caller got.
             var written = logged is not null ? new MemoryStream() : null;
@@ -856,7 +882,18 @@ public static class AnswerCacheEndpoints
                 // Each piece goes on as it comes: a streamed answer reaches the caller word by word.
                 while ((n = await upstream.ReadAsync(buffer, work)) > 0)
                 {
-                    await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
+                    if (claudeStreams)
+                    {
+                        await http.Response.WriteAsync(claude!.Feed(buffer.AsSpan(0, n)), ct);
+                    }
+                    else if (claudeWhole is not null)
+                    {
+                        claudeWhole.Write(buffer, 0, n);
+                    }
+                    else
+                    {
+                        await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
+                    }
                     await http.Response.Body.FlushAsync(ct);
                     if (written is not null && written.Length + n <= MostLoggedAnswer)
                     {
@@ -888,6 +925,24 @@ public static class AnswerCacheEndpoints
                 logged.End(ct.IsCancellationRequested ? PromptLogEntry.Stopped : PromptLogEntry.Failed, ct.IsCancellationRequested ? 499 : (int)res.StatusCode,
                     error: ct.IsCancellationRequested ? "The caller went away before the answer was whole." : $"The answer broke off: {ex.Message}", completion: partial);
                 throw;
+            }
+            if (claudeStreams)
+            {
+                await http.Response.WriteAsync(claude!.End(), ct);
+            }
+            else if (claudeWhole is not null)
+            {
+                var said = Encoding.UTF8.GetString(claudeWhole.ToArray());
+                string message;
+                if (res.IsSuccessStatusCode && (sse ? AnswerCache.Assemble(said, true) : JsonNode.Parse(said) as JsonObject) is { } completion)
+                {
+                    message = Protocols.AnthropicMessages.FromChat(completion, json!["model"]?.ToString() ?? "").ToJsonString();
+                }
+                else
+                {
+                    message = Protocols.AnthropicMessages.Error((int)res.StatusCode, PromptLogWriter.ErrorOf(said) ?? $"The model answered {(int)res.StatusCode}.");
+                }
+                await http.Response.WriteAsync(message, ct);
             }
             if (logged is not null && written is not null)
             {
@@ -940,5 +995,21 @@ public static class AnswerCacheEndpoints
                 await scope.ServiceProvider.GetRequiredService<RateWindows>().AddTokensAsync(a.Key.Hash, row.StartedAt,
                     Math.Max(0, row.PromptTokens - row.CachedTokens) + row.CompletionTokens, CancellationToken.None);
             }) : null);
+    }
+
+    /// <summary>An error as Anthropic's clients read it, with its Retry-After and rate-limit headers.</summary>
+    private static async Task AnthropicErrorAsync(HttpContext http, int status, string message, int? retryAfter, IReadOnlyDictionary<string, string>? headers, CancellationToken ct)
+    {
+        http.Response.StatusCode = status;
+        if (retryAfter is { } after)
+        {
+            http.Response.Headers.RetryAfter = after.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+        {
+            http.Response.Headers[name] = value;
+        }
+        http.Response.ContentType = "application/json";
+        await http.Response.WriteAsync(Protocols.AnthropicMessages.Error(status, message), ct);
     }
 }
