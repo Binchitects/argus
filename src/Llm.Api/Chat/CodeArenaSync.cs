@@ -141,6 +141,17 @@ public static partial class CodeArenaSync
             var (me, refusal) = await CallerAsync(http, people);
             return me is null ? refusal! : await Quality.QualityEndpoints.UnrateForAsync(me, id, messageId, db, ct);
         });
+        // The person's chats' changes as they happen: Code Arena takes in the web chat's at once, instead of asking every few seconds.
+        g.MapGet("/watch", async (HttpContext http, McpPeople people, ChatWatch watch) =>
+        {
+            var (me, refusal) = await CallerAsync(http, people);
+            if (me is null)
+            {
+                await refusal!.ExecuteAsync(http);
+                return;
+            }
+            await watch.StreamAsync(http, me.Id);
+        });
         // The broadcasts that are on for the person, and their dismissing: Code Arena shows them as the Arena does.
         g.MapGet("/broadcasts", async (HttpContext http, McpPeople people, AppDbContext db, Access.AccessService access, TimeProvider clock, CancellationToken ct) =>
         {

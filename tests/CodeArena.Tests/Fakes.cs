@@ -1109,6 +1109,37 @@ public sealed class FakeChats
             }
             chat.Updated = DateTimeOffset.UtcNow;
         }
+        Changed(chat.Id);
+    }
+
+    /// <summary>Whether Arena has the stream of the chats' changes (/api/code-arena/watch); false: an Arena before it (404).</summary>
+    public bool Streams { get; set; } = true;
+
+    private readonly List<System.Threading.Channels.Channel<string>> _watchers = [];
+
+    /// <summary>How many Code Arenas follow the stream now.</summary>
+    public int Following
+    {
+        get
+        {
+            lock (_watchers)
+            {
+                return _watchers.Count;
+            }
+        }
+    }
+
+    /// <summary>Tells the stream's followers a chat changed, as Arena does when it is saved.</summary>
+    public void Changed(string chat)
+    {
+        var line = new JsonObject { ["type"] = "chat", ["id"] = chat, ["what"] = "messages" }.ToJsonString();
+        lock (_watchers)
+        {
+            foreach (var w in _watchers)
+            {
+                w.Writer.TryWrite(line);
+            }
+        }
     }
 
     /// <summary>
@@ -1461,6 +1492,50 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
+            }
+            return;
+        }
+        if (parts is ["watch"] && method == "GET" && Streams)
+        {
+            var channel = System.Threading.Channels.Channel.CreateUnbounded<string>();
+            lock (_watchers)
+            {
+                _watchers.Add(channel);
+            }
+            try
+            {
+                ctx.Response.ContentType = "text/event-stream";
+                ctx.Response.SendChunked = true;
+                async Task Say(string line)
+                {
+                    await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes($"data: {line}\n\n"));
+                    await ctx.Response.OutputStream.FlushAsync();
+                }
+                await Say("""{"type":"watching"}""");
+                while (true)
+                {
+                    using var beat = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    try
+                    {
+                        await Say(await channel.Reader.ReadAsync(beat.Token));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        await ctx.Response.OutputStream.WriteAsync(": still here\n\n"u8.ToArray());
+                        await ctx.Response.OutputStream.FlushAsync();
+                    }
+                }
+            }
+            catch (Exception e) when (e is HttpListenerException or IOException or ObjectDisposedException or InvalidOperationException)
+            {
+                // Code Arena went.
+            }
+            finally
+            {
+                lock (_watchers)
+                {
+                    _watchers.Remove(channel);
+                }
             }
             return;
         }

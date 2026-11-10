@@ -79,6 +79,8 @@ public static partial class ChatEndpoints
         g.MapPost("/conversations", CreateAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapGet("/conversations/{id:guid}", GetAsync);
         g.MapPatch("/conversations/{id:guid}", UpdateAsync);
+        // The person's chats' changes as they happen (server-sent events): the page reads a chat again when it changes.
+        g.MapGet("/watch", async (HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, ChatWatch watch) => await watch.StreamAsync(http, (await Me(p, users)).Id));
         g.MapDelete("/conversations/{id:guid}", DeleteAsync);
         g.MapPost("/conversations/{id:guid}/messages", SendAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapPost("/conversations/{id:guid}/regenerate", RegenerateAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);

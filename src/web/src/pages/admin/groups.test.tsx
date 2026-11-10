@@ -54,6 +54,25 @@ describe('groups', () => {
     expect(screen.queryByRole('button', { name: 'Add people' })).toBeNull()
   })
 
+  it("an app group's page says whether new people join it, and the switch makes it one of the default groups", async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/groups/g1': () => ({ json: { id: 'g1', name: 'Data science', description: null, directory: null, createdAt: '', members: [] } }),
+      'GET /api/admin/access/groups': () => ({
+        json: [
+          { id: 'g1', name: 'Data science', directory: null, scim: false, joinsNewPeople: false, members: [], roles: [], rules: [] },
+          { id: 'g2', name: 'Everyone', directory: null, scim: false, joinsNewPeople: true, members: [], roles: [], rules: [] },
+        ],
+      }),
+      'PUT /api/admin/access/defaults': () => ({ status: 204 }),
+    })
+    renderApp('/admin/groups/g1')
+    const toggle = await screen.findByRole('switch', { name: 'New people join this group' })
+    await waitFor(() => expect(toggle).toBeEnabled())
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/access/defaults')?.body).toEqual({ groups: ['g2', 'g1'] }))
+  })
+
   it('people are added to and removed from an app group', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/groups/g1': () => ({ json: { id: 'g1', name: 'Data science', description: null, directory: null, createdAt: '', members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false }] } }),

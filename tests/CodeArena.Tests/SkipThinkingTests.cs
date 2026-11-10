@@ -50,7 +50,7 @@ public sealed class SkipThinkingTests : IDisposable
         var turn = rt.Agent.RunAsync("think it through", new Spend(), CancellationToken.None);
         await Within(() => _gateway.Requests.Count > 0);
         await Task.Delay(100);
-        Assert.False(turn.IsCompleted);
+        Assert.False(turn.IsCompleted, turn.IsCompleted ? $"ended: {(turn.IsFaulted ? turn.Exception!.InnerException!.ToString() : await turn)} after {_gateway.Requests.Count} requests" : "");
         Assert.True(rt.Agent.SkipThinking());
         // Asked once: a second press says so.
         Assert.False(rt.Agent.SkipThinking());

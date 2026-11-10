@@ -945,7 +945,7 @@ def cmd_installer(a) -> int:
             build_images(engine, profiles)
         stage = Path(tempfile.mkdtemp(prefix="arenactl-bundle-", dir=os.environ.get("TMPDIR") or "/var/tmp"))
         try:
-            step("the installer's bundle from this checkout (its images are the engine's)")
+            step("the installer's files from this checkout, staged in a temporary folder: no bundle is made, the images stay in the engine")
             mk = ["bash", str(SCRIPTS / "make-installer.sh"), "--images-in-engine", "--stage-only", str(stage)]
             if engine.name == "podman":
                 mk.append("--podman")

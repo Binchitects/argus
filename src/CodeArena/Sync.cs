@@ -761,11 +761,32 @@ internal sealed class ChatSync : IAsyncDisposable
             limit is null ? null : $"limit={limit}",
         }.OfType<string>());
 
-    /// <summary>Asks the web chat every <see cref="WatchEvery"/> whether it has news, while someone listens, and tells them.</summary>
+    /// <summary>How long the stream of the chats' changes may be quiet (Arena says something every 15 s) before it is opened again.</summary>
+    public static TimeSpan StreamQuiet { get; set; } = TimeSpan.FromSeconds(45);
+
+    /// <summary>After the stream could not be opened (an Arena before it, a proxy that drops it), how long before it is tried again.</summary>
+    public static TimeSpan StreamRetry { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>Whether the stream of the chats' changes is open now (the web chat's messages come at once), for /status.</summary>
+    public bool Streaming { get; private set; }
+
+    /// <summary>
+    /// The web chat's news while someone listens: from Arena's stream of the person's chats' changes as they happen; while it
+    /// cannot be had, by asking every <see cref="WatchEvery"/>.
+    /// </summary>
     private async Task WatchAsync()
     {
+        var streamAgainAt = DateTimeOffset.MinValue;
         while (!_stop.IsCancellationRequested)
         {
+            if (OnNews is not null && DateTimeOffset.UtcNow >= streamAgainAt)
+            {
+                if (await FollowAsync(_stop.Token))
+                {
+                    continue;
+                }
+                streamAgainAt = DateTimeOffset.UtcNow + StreamRetry;
+            }
             try
             {
                 await Task.Delay(WatchEvery, _stop.Token);
@@ -804,8 +825,13 @@ internal sealed class ChatSync : IAsyncDisposable
     /// listener's to do, between turns), and without its messages. False while this end is busy with Arena (a send, a
     /// take-in): asked next time.
     /// </summary>
+    // Whether the last look settled it: the chat was read (news or none), not put off (the session busy, the web chat
+    // answering, the session's own sends in between).
+    private volatile bool _settled;
+
     internal async Task<bool> LookAsync(CancellationToken ct)
     {
+        _settled = false;
         if (!await _store.Busy.WaitAsync(0, ct))
         {
             return false;
@@ -821,6 +847,7 @@ internal sealed class ChatSync : IAsyncDisposable
             }
             if (conversation is null)
             {
+                _settled = true;
                 return false;
             }
             var read = await SendAsync(HttpMethod.Get, ReadPath(conversation, since, stamp, limit: 0), null, ct, TakeInLimit);
@@ -832,6 +859,7 @@ internal sealed class ChatSync : IAsyncDisposable
             // Answering on the web (its messages come when it ends), or refused: asked again next time.
             if (read.Status != HttpStatusCode.OK || read.Body?.Bool("unchanged") == true)
             {
+                _settled = read.Status == HttpStatusCode.OK;
                 return false;
             }
             var news = read.Body?.Bool("more") == true || read.Body?.Bool("fork") == true
@@ -842,6 +870,7 @@ internal sealed class ChatSync : IAsyncDisposable
                 {
                     return false;
                 }
+                _settled = true;
                 if (!news && !_behind)
                 {
                     // Nothing new as of this branch: the next asks need not read the chat while it stays so.
@@ -1173,6 +1202,106 @@ internal sealed class ChatSync : IAsyncDisposable
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Follows Arena's stream of the person's chats' changes: a change of this session's chat is looked at at once (<see
+    /// cref="LookAsync"/>) and told. True when the stream ended as streams do (opened again at once); false when it could not
+    /// be had, or went quiet past <see cref="StreamQuiet"/> (asking every few seconds meanwhile).
+    /// </summary>
+    private async Task<bool> FollowAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var req = Request(HttpMethod.Get, _base + "/api/code-arena/watch", _key, null);
+            req.Headers.Accept.ParseAdd("text/event-stream");
+            using var open = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            open.CancelAfter(StreamQuiet);
+            using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, open.Token);
+            if (!res.IsSuccessStatusCode || res.Content.Headers.ContentType?.MediaType != "text/event-stream")
+            {
+                return false;
+            }
+            using var reader = new StreamReader(await res.Content.ReadAsStreamAsync(ct));
+            Streaming = true;
+            var opened = System.Diagnostics.Stopwatch.StartNew();
+            // A change heard but not taken in yet (the session was busy, the web chat still answering): looked at again every
+            // few seconds until it is, for a while; the looks are cheap while the chat stays as it was. Opened, what changed
+            // before it is owed so too.
+            var owedUntil = DateTimeOffset.MinValue;
+            if (await LookAsync(ct))
+            {
+                OnNews?.Invoke();
+            }
+            else if (!_settled)
+            {
+                owedUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2);
+            }
+            var heard = DateTimeOffset.UtcNow;
+            var pending = reader.ReadLineAsync(ct).AsTask();
+            while (true)
+            {
+                var owed = DateTimeOffset.UtcNow < owedUntil;
+                var wait = owed ? WatchEvery : StreamQuiet - (DateTimeOffset.UtcNow - heard);
+                if (await Task.WhenAny(pending, Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, ct)) != pending)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (DateTimeOffset.UtcNow - heard >= StreamQuiet)
+                    {
+                        // Quiet past Arena's heartbeat: the stream is gone without a word.
+                        return false;
+                    }
+                    if (owed && OnNews is not null)
+                    {
+                        if (await LookAsync(ct))
+                        {
+                            owedUntil = DateTimeOffset.MinValue;
+                            OnNews?.Invoke();
+                        }
+                        else if (_settled)
+                        {
+                            owedUntil = DateTimeOffset.MinValue;
+                        }
+                    }
+                    continue;
+                }
+                string? line = await pending;
+                heard = DateTimeOffset.UtcNow;
+                pending = line is null ? pending : reader.ReadLineAsync(ct).AsTask();
+                if (line is null)
+                {
+                    // Ended: opened again at once, unless it ends as soon as it opens (a proxy that cuts it): asked meanwhile.
+                    return opened.Elapsed >= TimeSpan.FromSeconds(5);
+                }
+                if (!line.StartsWith("data: ", StringComparison.Ordinal) || Json.ParseObject(line[6..]) is not { } e || e.Str("type") != "chat")
+                {
+                    continue;
+                }
+                if (e.Str("id") is { } id && id == Conversation && OnNews is not null)
+                {
+                    if (await LookAsync(ct))
+                    {
+                        OnNews?.Invoke();
+                    }
+                    else if (!_settled)
+                    {
+                        owedUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return true;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+        finally
+        {
+            Streaming = false;
         }
     }
 

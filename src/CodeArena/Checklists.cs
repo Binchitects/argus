@@ -121,6 +121,50 @@ internal sealed partial class Runtime
         }
     }
 
+    /// <summary>
+    /// The IDE's Checklist: the one on in this session (null: none) and the person's (id and name), or why there are none
+    /// (signed out, no chat in Arena yet, Arena away).
+    /// </summary>
+    public async Task<JsonObject> ChecklistStateAsync(CancellationToken ct)
+    {
+        if (Sync is null || Config.Url is not { Length: > 0 } url || Config.ApiKey is not { Length: > 0 } key)
+        {
+            return new JsonObject { ["on"] = null, ["mine"] = new JsonArray(), ["problem"] = "Checklists are kept in Arena: sign in to it first." };
+        }
+        try
+        {
+            var lists = await ListAsync(url, key, ct);
+            await RefreshChecklistAsync(ct);
+            return new JsonObject
+            {
+                ["on"] = Checklist?.DeepClone(),
+                ["mine"] = new JsonArray([.. lists.Select(c => (JsonNode)new JsonObject { ["id"] = c.Str("id"), ["name"] = c.Str("name") })]),
+                ["problem"] = Sync.Conversation is null ? "This session has no chat in Arena yet: say something first, then turn a checklist on." : null,
+            };
+        }
+        catch (Exception e) when (e is ChecklistError or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return new JsonObject { ["on"] = Checklist?.DeepClone(), ["mine"] = new JsonArray(), ["problem"] = e is ChecklistError ? e.Message : $"Arena did not answer: {e.Message}" };
+        }
+    }
+
+    /// <summary>The IDE turns one of the person's checklists on (by its id), or off (null).</summary>
+    public async Task<JsonObject?> UseChecklistAsync(string? id, CancellationToken ct)
+    {
+        if (id is null)
+        {
+            await CallAsync(HttpMethod.Delete, "", null, ct);
+            Volatile.Write(ref _checklist, null);
+            return null;
+        }
+        var run = await CallAsync(HttpMethod.Put, "", new JsonObject { ["checklistId"] = id }, ct);
+        Volatile.Write(ref _checklist, run);
+        return run;
+    }
+
+    /// <summary>The person ticks an item in the IDE (or takes the tick back).</summary>
+    public Task<JsonObject> TickByPersonAsync(int item, bool done, CancellationToken ct) => TickAsync(item, done, null, "person", ct);
+
     /// <summary>The checklist on in the chat, read again from Arena (the web page may have ticked or changed it); as it was when Arena does not answer.</summary>
     public async Task RefreshChecklistAsync(CancellationToken ct)
     {

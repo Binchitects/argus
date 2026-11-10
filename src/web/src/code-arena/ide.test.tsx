@@ -4842,6 +4842,32 @@ describe('quick open ranking', () => {
     expect(calls.some((c) => c.path === '/api/memory')).toBe(false)
   })
 
+  it('turns one of the checklists kept in Arena on from the Plan view, shows its ticks, and ticks an item by hand', async () => {
+    const run = { name: 'Before a merge', done: 1, total: 2, items: [{ number: 1, text: 'Tests pass', done: true, note: 'dotnet test: 42 passed', by: 'model' }, { number: 2, text: 'Docs updated', done: false }] }
+    let on: typeof run | null = null
+    const { calls } = backend({
+      'GET /api/checklist': () => ({ json: { on, mine: [{ id: 'k1', name: 'Before a merge' }], problem: null } }),
+      'POST /api/checklist': (body) => {
+        const b = body as { id?: string; tick?: number; done?: boolean }
+        if (b.id) on = run
+        if (b.tick) on = { ...run, done: 2, items: run.items.map((i) => (i.number === b.tick ? { ...i, done: !!b.done } : i)) }
+        return { json: { on } }
+      },
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const card = await screen.findByRole('region', { name: 'Checklist' })
+    await userEvent.selectOptions(await within(card).findByRole('combobox', { name: 'Turn a checklist on' }), 'k1')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/checklist')?.body).toEqual({ id: 'k1' }))
+    const items = await within(card).findByRole('list', { name: "Before a merge's items" })
+    expect(items).toHaveTextContent('dotnet test: 42 passed')
+    expect(within(card).getByText('1/2 done')).toBeInTheDocument()
+    await userEvent.click(within(items).getByRole('checkbox', { name: 'Tick 2: Docs updated' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/checklist' && c.method === 'POST').at(-1)?.body).toEqual({ tick: 2, done: true }))
+    expect(await within(card).findByText('2/2 done')).toBeInTheDocument()
+  })
+
   it("shows the agent's plan as it changes: each step with what done means, its check and its files, and where Arena shows it", async () => {
     let plan: CodePlan = {
       title: 'Rename the parser', goal: 'parse_frame everywhere', chat: 'c-42',

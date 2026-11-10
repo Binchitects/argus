@@ -24,6 +24,7 @@ import { useAppIcon } from '@/lib/app-icon'
 import { findNavItem, mayOpen, spaceOf, spaces, spaceTitle, visibleNavigation, type NavItem, type NavSection, type Space } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
+import { useChatWatch } from '@/pages/chat/watch'
 import { productName } from '@/lib/brand'
 
 function readCollapsed(): boolean {
@@ -40,6 +41,8 @@ export function Shell() {
   const location = useLocation()
   const navigate = useNavigate()
   useFollowColorTheme(me.data?.colorTheme)
+  // The person's chats change elsewhere (another device, Code Arena): read again as it happens.
+  useChatWatch(!!me.data)
 
   useEffect(() => {
     if (me.data === null) navigate(`/login?rd=${encodeURIComponent(location.pathname + location.search)}`, { replace: true })

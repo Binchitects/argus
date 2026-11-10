@@ -57,6 +57,54 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     private static object Answer(string text, string? reference = null) => new { role = "assistant", content = text, model = "m", @ref = reference };
 
     [Fact]
+    public async Task Code_Arena_hears_its_chats_changes_as_they_happen_a_web_message_and_a_rename_and_not_another_persons()
+    {
+        await using var f = NewApp();
+        var (browser, key) = await PersonAsync(f);
+        var (other, _) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var chat = await ChatAsync(arena, "watch-1").WaitAsync(TimeSpan.FromSeconds(20));
+        var otherChat = (await other.JsonAsync(await other.PostAsync("/api/chat/conversations", new { }))).GetProperty("id").GetGuid();
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var res = await arena.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/api/code-arena/watch"), HttpCompletionOption.ResponseHeadersRead, stop.Token).WaitAsync(TimeSpan.FromSeconds(20));
+        // Its status only: the body is a stream that does not end.
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        using var reader = new StreamReader(await res.Content.ReadAsStreamAsync(stop.Token));
+        async Task<JsonElement> NextAsync()
+        {
+            while (true)
+            {
+                // A read the server never answers is given up (the test host's stream does not hear the token).
+                var line = await reader.ReadLineAsync(stop.Token).AsTask().WaitAsync(TimeSpan.FromSeconds(20)) ?? throw new InvalidOperationException("The stream ended.");
+                if (line.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    return JsonDocument.Parse(line[6..]).RootElement.Clone();
+                }
+            }
+        }
+        Assert.Equal("watching", (await NextAsync()).GetProperty("type").GetString());
+
+        // Another person's chat changes: not heard here. The person's own, from the web: heard at once.
+        await other.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{otherChat}", UriKind.Relative), new { title = "Not yours" }).WaitAsync(TimeSpan.FromSeconds(20));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await browser.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{chat}", UriKind.Relative), new { title = "Renamed on the web" }).WaitAsync(TimeSpan.FromSeconds(20)));
+        var heard = await NextAsync();
+        Assert.Equal(("chat", chat), (heard.GetProperty("type").GetString(), heard.GetProperty("id").GetGuid()));
+        var sent = await browser.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "From the web" }).WaitAsync(TimeSpan.FromSeconds(30));
+        await sent.Content.ReadAsStringAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        // The chat changed with it (its time), and its messages.
+        JsonElement message;
+        do
+        {
+            message = await NextAsync();
+            Assert.Equal(chat, message.GetProperty("id").GetGuid());
+        }
+        while (message.GetProperty("what").GetString() != "messages");
+        // Code Arena goes: its stream ends (the app is not kept waiting for it).
+        await stop.CancelAsync();
+    }
+
+    [Fact]
     public async Task Code_Arena_rates_an_answer_of_its_chat_with_the_key_as_the_web_does_and_only_the_person_s()
     {
         await using var f = NewApp();

@@ -566,6 +566,26 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/again"):
                 await AgainAsync(req, res, ct);
                 return;
+            case ("GET", "/api/checklist"):
+                await res.JsonAsync(200, await _rt.ChecklistStateAsync(ct), ct);
+                return;
+            case ("POST", "/api/checklist"):
+            {
+                // {id}: turn one on; {off: true}; {tick: N, done}: the person ticks an item.
+                var body = req.Json() ?? new JsonObject();
+                try
+                {
+                    JsonObject? run = body.Int("tick") is { } item
+                        ? await _rt.TickByPersonAsync(item, body.Bool("done") != false, ct)
+                        : await _rt.UseChecklistAsync(body.Bool("off") == true ? null : body.Str("id") ?? throw new ChecklistError("Say which checklist to turn on."), ct);
+                    await res.JsonAsync(200, new JsonObject { ["on"] = run?.DeepClone() }, ct);
+                }
+                catch (ChecklistError e)
+                {
+                    await res.ErrorAsync(409, "checklist", e.Message, ct);
+                }
+                return;
+            }
             case ("POST", "/api/answers/rate"):
                 await RateAsync(req, res, ct);
                 return;

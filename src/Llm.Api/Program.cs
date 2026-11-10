@@ -41,6 +41,8 @@ builder.Services.AddDbContext<AppDbContext>((sp, o) =>
     o.UseOpenIddict<Guid>();
     // The bell's news is pushed to people's devices too, whoever saves it.
     o.AddInterceptors(sp.GetRequiredService<Llm.Api.Notifications.PushOnSave>());
+    // A chat's changes reach its owner's pages and Code Arenas at once, whoever saves them.
+    o.AddInterceptors(sp.GetRequiredService<Llm.Api.Chat.ChatChangesOnSave>());
 });
 builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 builder.Services.AddProblemDetails();

@@ -447,6 +447,9 @@ public static class IdentityWiring
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.RoomHub>();
+        services.AddSingleton<Chat.ChatWatch>();
+        services.AddSingleton<Chat.ChatChangesOnSave>();
+        services.AddHostedService<Chat.ChatWatchStart>();
         services.Configure<Chat.RoomCallOptions>(config.GetSection("Rooms:Calls"));
         services.AddSingleton<Chat.RoomCaptions>();
         services.AddSingleton<Code.ReviewEngine>();

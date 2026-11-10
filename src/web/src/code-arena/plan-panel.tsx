@@ -223,6 +223,123 @@ export function PlanPanel({ arena }: { arena: string | null }) {
           </ol>
         </div>
       )}
+      <ChecklistCard />
     </div>
+  )
+}
+
+interface ChecklistItem {
+  number: number
+  text: string
+  done: boolean
+  note?: string | null
+  by?: string | null
+}
+
+interface ChecklistRun {
+  name: string
+  done: number
+  total: number
+  items: ChecklistItem[]
+}
+
+interface ChecklistState {
+  on: ChecklistRun | null
+  mine: { id: string; name: string }[]
+  problem: string | null
+}
+
+const checklistQuery = {
+  queryKey: ['code', 'checklist'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ChecklistState>('/api/checklist', { signal }),
+  // The model ticks as it works (checklist_check): read again while it does.
+  refetchInterval: 5000,
+}
+
+/**
+ * The session's checklist, kept in Arena (Workspace → Checklists): one of the person's turned on here, the model goes through
+ * it and ticks each item as it does it (the web chat shows the same ticks); the person ticks one too, or turns it off.
+ */
+function ChecklistCard() {
+  const queryClient = useQueryClient()
+  const state = useQuery(checklistQuery)
+  const [busy, setBusy] = useState(false)
+  const act = async (body: Record<string, unknown>) => {
+    setBusy(true)
+    try {
+      const r = await api<{ on: ChecklistRun | null }>('/api/checklist', { body })
+      queryClient.setQueryData<ChecklistState>(checklistQuery.queryKey, (now) => (now ? { ...now, on: r.on } : now))
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const s = state.data
+  const on = s?.on
+  return (
+    <section aria-label="Checklist" className="mx-3 mt-3 mb-3 grid shrink-0 gap-2 border-t pt-3 text-xs">
+      <div className="flex items-center gap-2">
+        <h3 className="flex-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">Checklist</h3>
+        {on && (
+          <span className="tabular-nums text-muted-foreground">
+            {on.done}/{on.total} done
+          </span>
+        )}
+        {on && (
+          <button type="button" disabled={busy} onClick={() => void act({ off: true })} className="text-muted-foreground hover:text-foreground disabled:opacity-50">
+            Turn off
+          </button>
+        )}
+      </div>
+      {!s ? null : on ? (
+        <>
+          <p className="font-medium">{on.name}</p>
+          <ul aria-label={`${on.name}'s items`} className="grid gap-1">
+            {on.items.map((i) => (
+              <li key={i.number} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={i.done}
+                  disabled={busy}
+                  aria-label={`${i.done ? 'Untick' : 'Tick'} ${i.number}: ${i.text}`}
+                  onChange={(e) => void act({ tick: i.number, done: e.target.checked })}
+                  className="mt-0.5"
+                />
+                <span className="grid gap-0.5">
+                  <span className={cn(i.done && 'text-muted-foreground line-through')}>{i.text}</span>
+                  {i.note && <span className="text-muted-foreground">{i.note}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <>
+          {s.problem && <p className="text-muted-foreground">{s.problem}</p>}
+          {s.mine.length === 0 ? (
+            !s.problem && <p className="text-muted-foreground">You have no checklists yet: make them in Arena (Workspace → Checklists).</p>
+          ) : (
+            <label className="grid gap-1">
+              <span className="text-muted-foreground">Turn one on: the model goes through it and ticks each item as it does it.</span>
+              <select
+                value=""
+                disabled={busy || !!s.problem}
+                onChange={(e) => e.target.value && void act({ id: e.target.value })}
+                aria-label="Turn a checklist on"
+                className="rounded border bg-background px-1.5 py-1"
+              >
+                <option value="">Choose a checklist…</option>
+                {s.mine.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </>
+      )}
+    </section>
   )
 }

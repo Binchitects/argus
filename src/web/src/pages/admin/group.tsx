@@ -15,9 +15,11 @@ import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-tabl
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
+import { accessGroupsQuery } from './access-api'
 import { GroupPoliciesCard } from './group-policies'
 import { PriorityBadge } from './groups'
 import { groupQuery, type GroupDetail, type GroupMember } from './groups-api'
@@ -159,6 +161,7 @@ export function GroupPage() {
         </CardContent>
       </Card>
       <div className="mt-6">
+        {app && holds(me, 'access.read') && <JoinsNewPeople groupId={g.id} name={g.name} maySet={holds(me, 'access.defaults')} />}
         <GroupPoliciesCard key={g.id} group={g} maySet={may.policies} />
       </div>
       <EditDialog group={g} open={editing} onOpenChange={setEditing} />
@@ -293,3 +296,41 @@ function AddPeopleDialog({ group, open, onOpenChange }: { group: GroupDetail; op
     </Dialog>
   )
 }
+
+/**
+ * Whether new people join this group when their account is first made (an admin adds them, or their first sign-in from the
+ * directory, company sign-in or SCIM): one of the default groups (Access → Groups sets them all at once).
+ */
+function JoinsNewPeople({ groupId, name, maySet }: { groupId: string; name: string; maySet: boolean }) {
+  const queryClient = useQueryClient()
+  const all = useQuery(accessGroupsQuery)
+  const defaults = new Set((all.data ?? []).filter((g) => g.joinsNewPeople).map((g) => g.id))
+  const on = defaults.has(groupId)
+  const set = useMutation({
+    mutationFn: (join: boolean) => {
+      const next = new Set(defaults)
+      if (join) next.add(groupId)
+      else next.delete(groupId)
+      return api('/api/admin/access/defaults', { method: 'PUT', body: { groups: [...next] } })
+    },
+    onSuccess: async (_r, join) => {
+      toast.success(join ? `New people join ${name} from now on` : `New people no longer join ${name}`)
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'access'] })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  return (
+    <Card>
+      <CardContent className="flex items-center gap-3 pt-5">
+        <div className="grid flex-1 gap-0.5">
+          <label htmlFor={`joins-${groupId}`} className="text-sm font-medium">
+            New people join this group
+          </label>
+          <p className="text-xs text-muted-foreground">When their account is first made: an admin adds them, or they first sign in. Those here already, and those taken out, stay as they are.</p>
+        </div>
+        <Switch id={`joins-${groupId}`} checked={on} disabled={!maySet || !all.data || set.isPending} onCheckedChange={(v) => set.mutate(v === true)} />
+      </CardContent>
+    </Card>
+  )
+}
+

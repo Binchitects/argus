@@ -41,8 +41,54 @@ public sealed class LiveSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task With_Arenas_stream_what_the_web_adds_comes_in_as_it_happens_and_nothing_is_asked_meanwhile()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var typed = new TypedLines();
+        var output = new StringWriter();
+        var screen = TextWriter.Synchronized(output);
+        var env = new CliEnv
+        {
+            In = typed, Out = screen, Err = TextWriter.Synchronized(new StringWriter()), Env = k => h.Env.GetValueOrDefault(k),
+            Cwd = h.Work, Paths = h.Paths, InTerminal = true,
+        };
+        string Out()
+        {
+            lock (screen)
+            {
+                return output.ToString();
+            }
+        }
+        var run = Task.Run(() => Cli.RunAsync(["chat"], env));
+        try
+        {
+            typed.Add("first");
+            await Until(() => _mcp.Chats.All.SingleOrDefault()?.Messages.Count == 2, "the first turn is in Arena");
+            var chat = _mcp.Chats.All.Single();
+            var before = _mcp.Chats.UnchangedReads;
+            await Until(() => _mcp.Chats.Following == 1, "Code Arena follows Arena's stream of the chats' changes");
+            // It looks once as the stream opens (what changed before it); following it, it asks nothing every few seconds.
+            await Until(() => _mcp.Chats.UnchangedReads > before, "the look as the stream opens");
+            var looks = _mcp.Chats.UnchangedReads;
+            await Task.Delay(TimeSpan.FromMilliseconds(600));
+            Assert.Equal(looks, _mcp.Chats.UnchangedReads);
+
+            // The web adds: Arena says so on the stream, and it is in the session at once.
+            _mcp.Chats.Append(chat, Said("user", "asked on the web"), Said("assistant", "answered on the web"));
+            await Until(() => Out().Contains("Taken in from the web chat: 2 messages", StringComparison.Ordinal), "the web's news is said");
+        }
+        finally
+        {
+            typed.Add("/exit");
+            Assert.Equal(0, await run.WaitAsync(Deadline));
+        }
+    }
+
+    [Fact]
     public async Task While_the_prompt_waits_what_the_web_adds_comes_in_at_once_and_the_chat_is_not_read_again_meanwhile()
     {
+        // An Arena without the stream: asked every few seconds instead.
+        _mcp.Chats.Streams = false;
         using var h = new Harness(_gateway, _mcp);
         var typed = new TypedLines();
         var output = new StringWriter();
