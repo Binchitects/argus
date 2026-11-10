@@ -1,11 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 
 const item = {
   id: 'f1', kind: 'problem', text: 'grep fails on Windows', page: 'Code Arena: the IDE', status: 'new', answer: null, answeredAt: null, createdAt: '2026-10-28T10:00:00Z',
-  person: { id: 'p1', userName: 'ann', displayName: 'Ann' }, answeredBy: null,
+  person: { id: 'p1', userName: 'ann', displayName: 'Ann' }, answeredBy: null, images: 2,
 }
 
 describe('feedback', () => {
@@ -18,6 +18,8 @@ describe('feedback', () => {
     const list = await screen.findByRole('list', { name: 'Feedback' })
     expect(within(list).getByText('grep fails on Windows')).toBeInTheDocument()
     expect(within(list).getByText('from Code Arena: the IDE')).toBeInTheDocument()
+    // Its screenshots, each opening full size.
+    expect(within(list).getByRole('link', { name: 'Screenshot 2, full size' })).toHaveAttribute('href', '/api/admin/feedback/f1/images/1')
     expect(screen.getByRole('radio', { name: 'Done (4)' })).toBeInTheDocument()
     await userEvent.type(within(list).getByRole('textbox', { name: 'Answer Ann' }), 'Fixed in the next release.')
     await userEvent.click(within(list).getByRole('button', { name: 'Answer' }))
@@ -37,5 +39,26 @@ describe('feedback', () => {
     await userEvent.type(within(dialog).getByLabelText('What you want to say'), 'The menu is hard to read.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/feedback')?.body).toEqual({ kind: 'problem', text: 'The menu is hard to read.', page: '/account' }))
+  })
+
+  it('sends screenshots with it: a picture picked, shown small, removable, at most three', async () => {
+    let made = 0
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => `blob:shot-${++made}`, revokeObjectURL: () => {} }))
+    const calls = fakeApi(member, { 'POST /api/feedback': () => ({ status: 201, json: { id: 'f3' } }) })
+    renderApp('/account')
+    await userEvent.click(await screen.findByRole('button', { name: /Account menu for/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Send feedback' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Send feedback' })
+    await userEvent.type(within(dialog).getByLabelText('What you want to say'), 'The chart is cut off.')
+    const png = (name: string) => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' })
+    await userEvent.upload(within(dialog).getByLabelText('A screenshot to send'), [png('a.png'), png('b.png')])
+    const shots = await within(dialog).findByRole('list', { name: 'Screenshots to send' })
+    await waitFor(() => expect(within(shots).getAllByRole('img')).toHaveLength(2))
+    await userEvent.click(within(shots).getByRole('button', { name: 'Remove screenshot 1' }))
+    await waitFor(() => expect(within(shots).getAllByRole('img')).toHaveLength(1))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/feedback')?.body).toEqual({ kind: 'idea', text: 'The chart is cut off.', page: '/account', images: [{ data: btoa('\x89PNG') }] }),
+    )
   })
 })

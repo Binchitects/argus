@@ -64,4 +64,55 @@ public sealed class ProductFeedbackTests(AppFixture app)
         Assert.Equal(Llm.Api.Quality.ProductFeedbackEndpoints.PerDay, theirs.Count);
         Assert.All(theirs, i => Assert.Equal("Code Arena: the IDE", i.GetProperty("page").GetString()));
     }
+    [Fact]
+    public async Task Screenshots_go_with_feedback_checked_by_their_bytes_and_only_the_sender_and_the_admins_see_them()
+    {
+        var f = app.Factory;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        string Person() => "fs" + Guid.NewGuid().ToString("N")[..8];
+        var (name, other) = (Person(), Person());
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var otherMade = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = other, email = $"{other}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        var stranger = await new TestBrowser(f).SignedInAsync(other, otherMade.GetProperty("password").GetString()!);
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        byte[] jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 9, 9];
+        object Shot(byte[] b) => new { data = Convert.ToBase64String(b) };
+
+        // Not a picture, an SVG (a document that can carry script), too many, too large: refused, nothing kept.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await person.PostAsync("/api/feedback", new { kind = "problem", text = "x", images = new[] { Shot("hello"u8.ToArray()) } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await person.PostAsync("/api/feedback", new { kind = "problem", text = "x", images = new[] { Shot("<svg xmlns=\"http://www.w3.org/2000/svg\"/>"u8.ToArray()) } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await person.PostAsync("/api/feedback", new { kind = "problem", text = "x", images = new[] { Shot(png), Shot(png), Shot(png), Shot(png) } }));
+        var big = new byte[Llm.Api.Quality.ProductFeedbackEndpoints.MaxImageBytes + 1];
+        png.CopyTo(big, 0);
+        await StatusAssert.Is(HttpStatusCode.RequestEntityTooLarge, await person.PostAsync("/api/feedback", new { kind = "problem", text = "x", images = new[] { Shot(big) } }));
+        Assert.Empty((await person.JsonAsync(await person.GetAsync("/api/feedback/mine"))).EnumerateArray());
+
+        await StatusAssert.Is(HttpStatusCode.Created, await person.PostAsync("/api/feedback", new { kind = "problem", text = "The chart is cut off.", page = "/usage", images = new[] { Shot(png), Shot(jpeg) } }));
+        var mine = (await person.JsonAsync(await person.GetAsync("/api/feedback/mine"))).EnumerateArray().Single();
+        Assert.Equal(2, mine.GetProperty("images").GetInt32());
+        var id = mine.GetProperty("id").GetGuid();
+        // Each as the picture it is, in its order; never run as a page.
+        var first = await person.GetAsync($"/api/feedback/{id}/images/0");
+        Assert.Equal("image/png", first.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(png, await first.Content.ReadAsByteArrayAsync());
+        Assert.Contains("sandbox", first.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        Assert.Equal("nosniff", first.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("image/jpeg", (await person.GetAsync($"/api/feedback/{id}/images/1")).Content.Headers.ContentType?.MediaType);
+        await StatusAssert.Is(HttpStatusCode.NotFound, await person.GetAsync($"/api/feedback/{id}/images/2"));
+        // Another person sees none of it; the admins do.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await stranger.GetAsync($"/api/feedback/{id}/images/0"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await stranger.GetAsync($"/api/admin/feedback/{id}/images/0"));
+        var item = (await admin.JsonAsync(await admin.GetAsync("/api/admin/feedback?status=all"))).GetProperty("items").EnumerateArray().Single(i => i.GetProperty("id").GetGuid() == id);
+        Assert.Equal(2, item.GetProperty("images").GetInt32());
+        Assert.Equal(jpeg, await (await admin.GetAsync($"/api/admin/feedback/{id}/images/1")).Content.ReadAsByteArrayAsync());
+
+        // Code Arena sends them as it got them, with the person's key.
+        var codeArena = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+        codeArena.DefaultRequestHeaders.Authorization = new("Bearer", made.GetProperty("apiKey").GetString()!);
+        codeArena.DefaultRequestHeaders.Add("X-Requested-With", "code-arena");
+        await StatusAssert.Is(HttpStatusCode.Created, await codeArena.PostAsJsonAsync("/api/code-arena/feedback", new { kind = "idea", text = "Show it bigger.", page = "the IDE", images = new[] { Shot(jpeg) } }));
+        var fromIde = (await person.JsonAsync(await person.GetAsync("/api/feedback/mine"))).EnumerateArray().First();
+        Assert.Equal(("Code Arena: the IDE", 1), (fromIde.GetProperty("page").GetString(), fromIde.GetProperty("images").GetInt32()));
+    }
 }

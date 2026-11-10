@@ -162,6 +162,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         app._server.BodyLimit = (method, path) => method != "POST" ? HttpServer.MaxBody
             : path == InstallPath ? EditorExtensions.MaxVsix
             : path == UploadPath ? IdeFiles.MaxUpload
+            // Feedback with its screenshots (3 of at most 2 MB, in base64): Arena checks them.
+            : path == FeedbackPath ? 12 * 1024 * 1024
             // A file relayed to Arena: as large as Arena takes (its config says), with room for the form around it.
             : path == ArenaRelay.Upload ? (int)Math.Min(int.MaxValue, (rt.ArenaChat.Long("maxUploadBytes") ?? ArenaRelay.DefaultUpload) + 1024 * 1024)
             : HttpServer.MaxBody;
@@ -555,6 +557,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             case ("POST", "/api/again"):
                 await AgainAsync(req, res, ct);
+                return;
+            case ("POST", "/api/answers/rate"):
+                await RateAsync(req, res, ct);
                 return;
             case ("GET", "/api/rewind"):
                 await RewindPreviewAsync(req, res, ct);
@@ -1386,6 +1391,58 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         && _rt.Session.Read(d => place < d.Stream.Count && d.Stream[place].Message.Str("role") == "user" && d.Stream[place].Kind is null)
             ? place
             : null;
+
+    /// <summary>
+    /// POST /api/answers/rate {message: "m12", up, reason, comment, share} (clear: true takes it back): the person's thumbs on an
+    /// answer, kept by Arena on the chat the session is kept with, as the web chat's are (the admins read them on Quality), and
+    /// beside the answer here. An answer Arena has not been sent yet cannot be rated.
+    /// </summary>
+    private async Task RateAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json() ?? new JsonObject();
+        var id = body.Str("message");
+        var found = id is { Length: > 1 } && id[0] == 'm' && int.TryParse(id.AsSpan(1), out var place) && place >= 0
+            ? _rt.Session.Read(d => place < d.Stream.Count && d.Stream[place].Message.Str("role") == "assistant"
+                ? (d.Conversation, d.Stream[place].Id, d.Stream[place].Key)
+                : ((string?)null, (string?)null, -1))
+            : (null, null, -1);
+        if (found.Item3 < 0)
+        {
+            await res.ErrorAsync(400, "invalid", "Say which answer to rate: its id (m12).", ct);
+            return;
+        }
+        if (_rt.Config.Url is not { Length: > 0 } url || _rt.Config.ApiKey is not { Length: > 0 } key)
+        {
+            await res.ErrorAsync(409, "signed_out", "Sign in to Arena first: ratings are kept there.", ct);
+            return;
+        }
+        if (found.Item1 is not { Length: > 0 } chat || found.Item2 is not { Length: > 0 } message)
+        {
+            await res.ErrorAsync(409, "not_synced", "This answer is not in Arena yet: rate it once the session is kept there.", ct);
+            return;
+        }
+        var clear = body.Bool("clear") == true;
+        var address = $"{url.TrimEnd('/')}/api/code-arena/chats/{Uri.EscapeDataString(chat)}/messages/{Uri.EscapeDataString(message)}/feedback";
+        using var send = ChatSync.Request(clear ? HttpMethod.Delete : HttpMethod.Put, address, key, clear ? null : new JsonObject
+        {
+            ["up"] = body.Bool("up") == true, ["reason"] = body.Str("reason"), ["comment"] = body.Str("comment"), ["share"] = body.Bool("share") == true,
+        });
+        using var answer = await _rt.Http.SendAsync(send, ct);
+        var said = await answer.Content.ReadAsStringAsync(ct);
+        if (!answer.IsSuccessStatusCode)
+        {
+            await res.ErrorAsync((int)answer.StatusCode, "arena", Json.ParseObject(said)?.Str("error") ?? $"Arena answered {(int)answer.StatusCode}.", ct);
+            return;
+        }
+        var kept = clear ? null : Json.ParseObject(said);
+        _rt.Session.Rated(found.Item3, kept);
+        if (kept is null)
+        {
+            await res.NoContentAsync(ct);
+            return;
+        }
+        await res.JsonAsync(200, kept, ct);
+    }
 
     /// <summary>A path of the folder as the page names it.</summary>
     private string Relative(string full) => Path.GetRelativePath(_rt.Workspace.Root, full).Replace('\\', '/');
@@ -2634,6 +2691,7 @@ internal static partial class History
                 ["status"] = status,
                 ["error"] = null,
                 ["model"] = role == "assistant" ? entry.Model : null,
+                ["feedback"] = role == "assistant" ? entry.Rating?.DeepClone() : null,
                 ["promptTokens"] = usage?.Prompt,
                 ["cachedTokens"] = usage?.Cached,
                 ["completionTokens"] = usage?.Completion,

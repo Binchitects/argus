@@ -11,8 +11,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Quality;
 
-/// <summary>What a person sends about Arena: idea, problem, praise or other; its words; the page it was sent from.</summary>
-public sealed record ProductFeedbackRequest(string? Kind, string? Text, string? Page);
+/// <summary>What a person sends about Arena: idea, problem, praise or other; its words; the page it was sent from; screenshots.</summary>
+public sealed record ProductFeedbackRequest(string? Kind, string? Text, string? Page, List<ProductFeedbackScreenshot>? Images = null);
+
+/// <summary>A screenshot: its bytes in base64 (its type is read from them).</summary>
+public sealed record ProductFeedbackScreenshot(string? Data);
 
 /// <summary>An admin marks it (new, read, done), answers it, or both.</summary>
 public sealed record ProductFeedbackChange(string? Status = null, string? Answer = null);
@@ -26,6 +29,9 @@ public static class ProductFeedbackEndpoints
 {
     public const int MaxText = 4000;
     public const int PerDay = 20;
+    /// <summary>Screenshots with one feedback, and the largest each may be.</summary>
+    public const int MaxImages = 3;
+    public const int MaxImageBytes = 2 * 1024 * 1024;
 
     public static void MapProductFeedback(this IEndpointRouteBuilder app)
     {
@@ -35,13 +41,78 @@ public static class ProductFeedbackEndpoints
         mine.MapGet("/mine", async (ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db) =>
         {
             var me = (await users.GetUserAsync(p))!;
-            return Results.Ok(await db.ProductFeedback.AsNoTracking().Where(f => f.UserId == me.Id).OrderByDescending(f => f.CreatedAt).Take(100)
-                .Select(f => new { f.Id, f.Kind, f.Text, f.Page, f.Status, f.Answer, f.AnsweredAt, f.CreatedAt }).ToListAsync());
+            var list = await db.ProductFeedback.AsNoTracking().Where(f => f.UserId == me.Id).OrderByDescending(f => f.CreatedAt).Take(100).ToListAsync();
+            var images = await ImageCountsAsync(db, list.Select(f => f.Id).ToList());
+            return Results.Ok(list.Select(f => new { f.Id, f.Kind, f.Text, f.Page, f.Status, f.Answer, f.AnsweredAt, f.CreatedAt, images = images.GetValueOrDefault(f.Id) }));
+        });
+        // A screenshot of one's own feedback.
+        mine.MapGet("/{id:guid}/images/{n:int}", async (Guid id, int n, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, HttpContext http) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            return await db.ProductFeedback.AnyAsync(f => f.Id == id && f.UserId == me.Id) ? await ImageAsync(id, n, db, http) : Results.NotFound();
         });
 
         var admin = app.MapGroup("/api/admin/feedback").RequirePermissions(Llm.Core.Access.Permissions.FeedbackManage, Llm.Core.Access.Permissions.FeedbackManage);
         admin.MapGet("", ListAsync);
         admin.MapPut("/{id:guid}", ChangeAsync);
+        admin.MapGet("/{id:guid}/images/{n:int}", (Guid id, int n, AppDbContext db, HttpContext http) => ImageAsync(id, n, db, http));
+    }
+
+    /// <summary>How many screenshots each of these has.</summary>
+    private static async Task<Dictionary<Guid, int>> ImageCountsAsync(AppDbContext db, List<Guid> ids) =>
+        ids.Count == 0 ? [] : await db.ProductFeedbackImages.Where(i => ids.Contains(i.FeedbackId)).GroupBy(i => i.FeedbackId)
+            .Select(g => new { g.Key, n = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.n);
+
+    /// <summary>
+    /// A screenshot, as the picture it is (its type read from its bytes when it came), never run: no sniffing, a sandbox, kept
+    /// only by the browser that asked.
+    /// </summary>
+    private static async Task<IResult> ImageAsync(Guid id, int n, AppDbContext db, HttpContext http)
+    {
+        if (await db.ProductFeedbackImages.AsNoTracking().FirstOrDefaultAsync(i => i.FeedbackId == id && i.Position == n) is not { } image)
+        {
+            return Results.NotFound();
+        }
+        http.Response.Headers.CacheControl = "private, max-age=3600";
+        http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return Results.File(image.Data, image.ContentType);
+    }
+
+    /// <summary>The screenshots sent, read: each base64 of a PNG, JPEG, GIF or WebP no larger than <see cref="MaxImageBytes"/>.</summary>
+    public static (List<(string Type, byte[] Data)> Images, IResult? Refusal) ReadImages(List<ProductFeedbackScreenshot>? sent)
+    {
+        var images = new List<(string, byte[])>();
+        if (sent is not { Count: > 0 })
+        {
+            return (images, null);
+        }
+        if (sent.Count > MaxImages)
+        {
+            return (images, AuthEndpoints.Problem(400, "images", $"Send at most {MaxImages} screenshots."));
+        }
+        foreach (var image in sent)
+        {
+            byte[] data;
+            try
+            {
+                data = Convert.FromBase64String(image.Data ?? "");
+            }
+            catch (FormatException)
+            {
+                return (images, AuthEndpoints.Problem(400, "images", "A screenshot is its bytes in base64."));
+            }
+            if (data.Length > MaxImageBytes)
+            {
+                return (images, AuthEndpoints.Problem(413, "images", $"A screenshot may be at most {MaxImageBytes / 1024 / 1024} MB."));
+            }
+            if (Chat.Attachments.ImageType("", data) is not { } type)
+            {
+                return (images, AuthEndpoints.Problem(400, "images", "A screenshot is a PNG, JPEG, GIF or WebP picture."));
+            }
+            images.Add((type, data));
+        }
+        return (images, null);
     }
 
     /// <summary>Kept, and the admins told; refused past <see cref="PerDay"/> a day, or without words or a kind.</summary>
@@ -60,6 +131,11 @@ public static class ProductFeedbackEndpoints
         {
             return AuthEndpoints.Problem(400, "text", $"Say it in at most {MaxText:N0} characters.");
         }
+        var (images, refused) = ReadImages(body.Images);
+        if (refused is not null)
+        {
+            return refused;
+        }
         var since = clock.GetUtcNow().AddDays(-1);
         if (await db.ProductFeedback.CountAsync(f => f.UserId == me.Id && f.CreatedAt >= since) >= PerDay)
         {
@@ -68,10 +144,11 @@ public static class ProductFeedbackEndpoints
         var page = body.Page?.Trim() is { Length: > 0 } pg ? pg[..Math.Min(500, pg.Length)] : null;
         var f = new ProductFeedback { UserId = me.Id, Kind = kind, Text = text, Page = page, CreatedAt = clock.GetUtcNow() };
         db.ProductFeedback.Add(f);
+        db.ProductFeedbackImages.AddRange(images.Select((x, n) => new ProductFeedbackImage { FeedbackId = f.Id, Position = n, ContentType = x.Type, Data = x.Data }));
         await db.SaveChangesAsync();
-        await audit.WriteAsync("feedback.sent", me.UserName, detail: $"{kind}{(page is null ? "" : $" from {page}")}", actor: me);
+        await audit.WriteAsync("feedback.sent", me.UserName, detail: $"{kind}{(page is null ? "" : $" from {page}")}{(images.Count > 0 ? $", {images.Count} screenshot(s)" : "")}", actor: me);
         await notifier.ToAdminsAsync(new News("feedback", $"Feedback from {me.DisplayName ?? me.UserName}: {kind}", text.Length > 200 ? text[..199] + "…" : text, "/admin/feedback"));
-        return Results.Created($"/api/feedback/{f.Id}", new { f.Id, f.Kind, f.Text, f.Page, f.Status, f.CreatedAt });
+        return Results.Created($"/api/feedback/{f.Id}", new { f.Id, f.Kind, f.Text, f.Page, f.Status, f.CreatedAt, images = images.Count });
     }
 
     /// <summary>What was sent, the newest first, by status; from and to: only what was sent in that window (the counts too).</summary>
@@ -90,12 +167,13 @@ public static class ProductFeedbackEndpoints
         var list = await rows.OrderByDescending(f => f.CreatedAt).Take(500).ToListAsync();
         var ids = list.Select(f => f.UserId).Concat(list.Where(f => f.AnsweredBy != null).Select(f => f.AnsweredBy!.Value)).Distinct().ToList();
         var people = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => new { u.Id, u.UserName, u.DisplayName });
+        var images = await ImageCountsAsync(db, list.Select(f => f.Id).ToList());
         var counts = await sent.GroupBy(f => f.Status).Select(g => new { g.Key, n = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.n);
         return Results.Ok(new
         {
             items = list.Select(f => new
             {
-                f.Id, f.Kind, f.Text, f.Page, f.Status, f.Answer, f.AnsweredAt, f.CreatedAt,
+                f.Id, f.Kind, f.Text, f.Page, f.Status, f.Answer, f.AnsweredAt, f.CreatedAt, images = images.GetValueOrDefault(f.Id),
                 person = people.GetValueOrDefault(f.UserId), answeredBy = f.AnsweredBy is { } a ? people.GetValueOrDefault(a) : null,
             }),
             counts = ProductFeedback.Statuses.ToDictionary(x => x, x => counts.GetValueOrDefault(x)),

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, use, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
+import { SendFeedbackDialog } from '@/components/app/send-feedback'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -90,7 +91,7 @@ import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
-import { ownPage } from './http'
+import { api as ideApi, ownPage } from './http'
 import { PortNotices, PortsPanel } from './ports-panel'
 import { wholePath } from './whole-path'
 import { detachedView, useWindows } from './windows'
@@ -564,6 +565,7 @@ function Workbench({
   // The editor sent lines to the chat: it shows, if hidden.
   const showChat = useCallback(() => change({ chatOpen: true }), [change])
   const [about, setAbout] = useState(false)
+  const [feedback, setFeedback] = useState(false)
   // The folder being opened (Open Folder): code-arena starts again on it, and the page loads it.
   const [opening, setOpening] = useState<string | null>(null)
   const openHelp = useOpenHelp()
@@ -1426,6 +1428,7 @@ function Workbench({
     { id: 'workbench.trust.manage', category: 'Workspaces', title: 'Manage Workspace Trust', run: () => void askTrust('Choose whether the programs this folder holds may run here.') },
     { id: 'codeArena.help', category: 'Help', title: 'Show Help', run: () => openHelp?.() },
     { id: 'codeArena.about', category: 'Help', title: 'About Code Arena', run: () => setAbout(true) },
+    { id: 'codeArena.sendFeedback', category: 'Help', title: 'Send Feedback…', run: () => setFeedback(true) },
   ]
   useCommands(workbenchCommands)
   // The editor groups' own: split, join, move to a group, focus one by its place.
@@ -1716,6 +1719,7 @@ function Workbench({
         }}
       />
       <About open={about} onOpenChange={setAbout} state={state} />
+      {feedback && <SendFeedbackDialog page="the IDE" send={(body) => ideApi('/api/account/feedback', { body })} onClose={() => setFeedback(false)} />}
       {palette && <CommandPalette open={palette} onOpenChange={setPalette} editor={editorPalette()} recent={recent} onRan={ran} />}
     </div>
   )

@@ -13,7 +13,7 @@ import { conversationQuery } from './api'
 import { feedbackReasons } from './quality'
 import type { Conversation, Feedback, FeedbackReason, Message } from './types'
 
-interface Rating {
+export interface Rating {
   up: boolean
   reason?: FeedbackReason | null
   comment?: string | null
@@ -21,35 +21,50 @@ interface Rating {
 }
 
 /**
- * Thumbs up or down on an answer (its last message). Either is kept at once, and opens a box for more: words and whether to
- * share the chat with the admins, and for a down vote a reason. The thumb that is on takes the rating back.
+ * Thumbs up or down on an answer (its last message) of a chat in the Arena: <see cref="RatingButtons"/> with the chat's own
+ * calls, and the chat's copy kept up to date (the answer shows it again after a branch switch or a reload).
  */
 export function FeedbackButtons({ chatId, message }: { chatId: string; message: Message }) {
   const queryClient = useQueryClient()
-  const [mine, setMine] = useState<Feedback | null>(message.feedback ?? null)
+  const url = `/api/chat/conversations/${chatId}/messages/${message.id}/feedback`
+  return (
+    <RatingButtons
+      initial={message.feedback ?? null}
+      send={async (rating) => {
+        const saved = rating ? await api<Feedback>(url, { method: 'PUT', body: rating }) : (await api(url, { method: 'DELETE' }), null)
+        queryClient.setQueryData<Conversation>(conversationQuery(chatId).queryKey, (c) =>
+          c ? { ...c, messages: c.messages.map((m) => (m.id === message.id ? { ...m, feedback: saved } : m)) } : c,
+        )
+        return saved
+      }}
+    />
+  )
+}
+
+/**
+ * Thumbs up or down on an answer. Either is kept at once, and opens a box for more: words and whether to share the chat with
+ * the admins, and for a down vote a reason. The thumb that is on takes the rating back. <paramref name="send"/> keeps it (null:
+ * taken back) and says what was kept: the Arena's call, or Code Arena's, which takes it there with the person's key.
+ */
+export function RatingButtons({ initial, send }: { initial: Feedback | null; send: (rating: Rating | null) => Promise<Feedback | null> }) {
+  const [mine, setMine] = useState<Feedback | null>(initial)
   const [open, setOpen] = useState<'up' | 'down' | null>(null)
-  const [reason, setReason] = useState<FeedbackReason | null>(message.feedback?.reason ?? null)
-  const [comment, setComment] = useState(message.feedback?.comment ?? '')
-  const [share, setShare] = useState(message.feedback?.shared ?? false)
+  const [reason, setReason] = useState<FeedbackReason | null>(initial?.reason ?? null)
+  const [comment, setComment] = useState(initial?.comment ?? '')
+  const [share, setShare] = useState(initial?.shared ?? false)
   const [busy, setBusy] = useState(false)
   const shareId = useId()
-  const url = `/api/chat/conversations/${chatId}/messages/${message.id}/feedback`
 
   const save = async (rating: Rating | null): Promise<boolean> => {
     setBusy(true)
     try {
-      const saved = rating ? await api<Feedback>(url, { method: 'PUT', body: rating }) : (await api(url, { method: 'DELETE' }), null)
-      setMine(saved)
+      setMine(await send(rating))
       if (!rating) {
         // Taken back: its words go with it.
         setReason(null)
         setComment('')
         setShare(false)
       }
-      // The chat's copy too: the answer shows it again after a branch switch or a reload.
-      queryClient.setQueryData<Conversation>(conversationQuery(chatId).queryKey, (c) =>
-        c ? { ...c, messages: c.messages.map((m) => (m.id === message.id ? { ...m, feedback: saved } : m)) } : c,
-      )
       return true
     } catch (e) {
       toast.error(errorMessage(e))

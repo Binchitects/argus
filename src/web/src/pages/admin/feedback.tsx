@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { FeedbackScreenshots } from '@/components/app/feedback-screenshots'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
@@ -34,6 +35,8 @@ interface Item {
   createdAt: string
   person: Person | null
   answeredBy: Person | null
+  /** How many screenshots came with it. */
+  images: number
 }
 
 const kindLabel: Record<Item['kind'], string> = { idea: 'Idea', problem: 'Problem', praise: 'Praise', other: 'Other' }
@@ -68,6 +71,7 @@ function FeedbackItem({ item }: { item: Item }) {
         <p dir="auto" className="text-sm whitespace-pre-wrap">
           {item.text}
         </p>
+        <FeedbackScreenshots base={`/api/admin/feedback/${item.id}`} count={item.images} />
         {item.answer && item.answeredAt && (
           <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
             <span className="text-xs text-muted-foreground">

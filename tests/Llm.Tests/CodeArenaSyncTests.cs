@@ -57,6 +57,33 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     private static object Answer(string text, string? reference = null) => new { role = "assistant", content = text, model = "m", @ref = reference };
 
     [Fact]
+    public async Task Code_Arena_rates_an_answer_of_its_chat_with_the_key_as_the_web_does_and_only_the_person_s()
+    {
+        await using var f = NewApp();
+        var (browser, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var chat = await ChatAsync(arena, "rate-1");
+        var ids = await SendAsync(arena, chat, null, [User("a question", "s:0"), Answer("an answer", "s:1")]);
+
+        // The question is not an answer.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await arena.PutAsJsonAsync($"/api/code-arena/chats/{chat}/messages/{ids[0]}/feedback", new { up = true }));
+        var rated = await arena.PutAsJsonAsync($"/api/code-arena/chats/{chat}/messages/{ids[1]}/feedback", new { up = false, reason = "wrong", comment = "It missed the test." });
+        await StatusAssert.Is(HttpStatusCode.OK, rated);
+        // The web chat shows it on the answer, as its own thumbs would.
+        var read = await browser.JsonAsync(await browser.GetAsync($"/api/chat/conversations/{chat}"));
+        var feedback = read.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == ids[1]).GetProperty("feedback");
+        Assert.Equal((false, "wrong"), (feedback.GetProperty("up").GetBoolean(), feedback.GetProperty("reason").GetString()));
+
+        // Another person's key rates none of it.
+        var (_, otherKey) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).PutAsJsonAsync($"/api/code-arena/chats/{chat}/messages/{ids[1]}/feedback", new { up = true }));
+
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.DeleteAsync($"/api/code-arena/chats/{chat}/messages/{ids[1]}/feedback"));
+        read = await browser.JsonAsync(await browser.GetAsync($"/api/chat/conversations/{chat}"));
+        Assert.Equal(JsonValueKind.Null, read.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == ids[1]).GetProperty("feedback").ValueKind);
+    }
+
+    [Fact]
     public async Task Code_Arena_reads_when_the_person_s_chats_compact_with_their_key()
     {
         await using var f = NewApp();

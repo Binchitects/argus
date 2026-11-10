@@ -2211,6 +2211,35 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("product_feedback", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.ProductFeedbackImage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("FeedbackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FeedbackId", "Position")
+                        .IsUnique();
+
+                    b.ToTable("product_feedback_images", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.PromptLogEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8813,6 +8842,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ProductFeedbackImage", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.ProductFeedback", null)
+                        .WithMany()
+                        .HasForeignKey("FeedbackId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

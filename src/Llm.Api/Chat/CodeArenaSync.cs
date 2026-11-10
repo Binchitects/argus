@@ -130,6 +130,17 @@ public static partial class CodeArenaSync
         g.MapGet("/security", SecurityAsync);
         g.MapGet("/me", MeAsync);
         g.MapPost("/sign-out", SignOutAsync);
+        // Thumbs on an answer of the chat a session is kept with: as the web's, with the person's key.
+        g.MapPut("/chats/{id:guid}/messages/{messageId:guid}/feedback", async (Guid id, Guid messageId, Quality.FeedbackRequest body, HttpContext http, McpPeople people, AppDbContext db, CancellationToken ct) =>
+        {
+            var (me, refusal) = await CallerAsync(http, people);
+            return me is null ? refusal! : await Quality.QualityEndpoints.RateForAsync(me, id, messageId, body, db, ct);
+        });
+        g.MapDelete("/chats/{id:guid}/messages/{messageId:guid}/feedback", async (Guid id, Guid messageId, HttpContext http, McpPeople people, AppDbContext db, CancellationToken ct) =>
+        {
+            var (me, refusal) = await CallerAsync(http, people);
+            return me is null ? refusal! : await Quality.QualityEndpoints.UnrateForAsync(me, id, messageId, db, ct);
+        });
         g.MapPost("/feedback", async (HttpContext http, McpPeople people, Quality.ProductFeedbackRequest body, AppDbContext db, Notifications.Notifier notifier, Identity.Audit audit, TimeProvider clock) =>
         {
             // Send feedback from Code Arena: as from Arena's pages, from "Code Arena" (and its own page there, when it says).

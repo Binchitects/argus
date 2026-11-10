@@ -1550,7 +1550,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
     let menu = await screen.findByRole('menu')
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/Ctrl.*$/, '').trim())).toEqual(['Settings', 'Keyboard Shortcuts', 'Color Theme', 'Extensions', 'Command Palette'])
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/Ctrl.*$/, '').trim())).toEqual(['Settings', 'Keyboard Shortcuts', 'Color Theme', 'Extensions', 'Command Palette', 'Send Feedback…'])
     // Settings, one click away.
     await userEvent.click(within(menu).getByRole('menuitem', { name: /^Settings/ }))
     expect(await screen.findByRole('region', { name: 'Settings' })).toBeInTheDocument()
@@ -1563,6 +1563,25 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ toolMode: 'code' }))
     await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
     expect(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: 'As code' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('sends feedback from the gear (and the command palette), with a screenshot, to Arena through code-arena', async () => {
+    let made = 0
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => `blob:shot-${++made}`, revokeObjectURL: () => {} }))
+    const { calls } = backend({ 'POST /api/account/feedback': () => ({ json: { id: 'f1' } }) })
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Send Feedback…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Send feedback' })
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'A problem' }))
+    await userEvent.type(within(dialog).getByLabelText('What you want to say'), 'The diff is cut off.')
+    await userEvent.upload(within(dialog).getByLabelText('A screenshot to send'), new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'a.png', { type: 'image/png' }))
+    await within(dialog).findByRole('img', { name: 'Screenshot 1' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/account/feedback')?.body).toEqual({ kind: 'problem', text: 'The diff is cut off.', page: 'the IDE', images: [{ data: btoa('\x89PNG') }] }),
+    )
   })
 
   it('accepts a change from the diff tab, and all of them from the list', async () => {

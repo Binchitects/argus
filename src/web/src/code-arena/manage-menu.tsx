@@ -71,6 +71,7 @@ export function ManageMenu({ state, edge, compact = false }: { state: CodeState;
         <DropdownMenuItem onSelect={() => runCommand('workbench.action.showCommands')}>
           Command Palette {keys.palette && <DropdownMenuShortcut>{keys.palette}</DropdownMenuShortcut>}
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => runCommand('codeArena.sendFeedback')}>Send Feedback…</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">{`${state.model}'s tools`}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={state.toolModeSet ? (state.toolMode ?? 'both') : 'arena'} onValueChange={(v) => void setToolMode(v === 'arena' ? null : (v as 'direct' | 'code' | 'both'))}>

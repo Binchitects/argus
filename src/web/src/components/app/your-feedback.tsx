@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation } from 'react-router'
+import { FeedbackScreenshots } from '@/components/app/feedback-screenshots'
 import { SendFeedbackDialog } from '@/components/app/send-feedback'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,7 @@ interface Mine {
   answer: string | null
   answeredAt: string | null
   createdAt: string
+  images: number
 }
 
 const status: Record<Mine['status'], string> = { new: 'Sent', read: 'Read', done: 'Done' }
@@ -55,6 +57,7 @@ export function YourFeedback() {
                   {f.answer}
                 </p>
               )}
+              <FeedbackScreenshots base={`/api/feedback/${f.id}`} count={f.images} />
             </li>
           ))}
         </ul>

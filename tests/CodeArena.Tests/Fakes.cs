@@ -810,6 +810,17 @@ public sealed class FakeChats
         }
     }
 
+    /// <summary>Each rating Code Arena sent, in order: the chat, the message, and the rating (null: taken back).</summary>
+    public List<(string Chat, string Message, JsonObject? Rating)> Ratings { get; } = [];
+
+    public List<(string Chat, string Message, JsonObject? Rating)> RatingsSent()
+    {
+        lock (_gate)
+        {
+            return [.. Ratings];
+        }
+    }
+
     /// <summary>Each goal Code Arena sent, in order: the chat, and the goal (null: dropped).</summary>
     public List<(string Chat, JsonObject? Goal)> Goals { get; } = [];
 
@@ -1445,6 +1456,24 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
+            }
+            return;
+        }
+        if (parts is ["chats", var ratedChat, "messages", var ratedMessage, "feedback"] && method is "PUT" or "DELETE")
+        {
+            var rating = method == "PUT" ? Json.ParseObject(body) : null;
+            lock (_gate)
+            {
+                Ratings.Add((ratedChat, ratedMessage, rating));
+            }
+            ctx.Response.StatusCode = rating is null ? 204 : 200;
+            if (rating is not null)
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject
+                {
+                    ["up"] = rating.Bool("up") == true, ["reason"] = rating.Str("reason"), ["comment"] = rating.Str("comment"), ["shared"] = rating.Bool("share") == true,
+                }.ToJsonString()));
             }
             return;
         }

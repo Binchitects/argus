@@ -110,6 +110,17 @@ public sealed class ProductFeedback
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>A screenshot sent with feedback (at most <c>ProductFeedbackEndpoints.MaxImages</c>): PNG, JPEG, GIF or WebP, read from its bytes.</summary>
+public sealed class ProductFeedbackImage
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid FeedbackId { get; set; }
+    /// <summary>Its place among the feedback's screenshots, from 0.</summary>
+    public int Position { get; set; }
+    public required string ContentType { get; set; }
+    public required byte[] Data { get; set; }
+}
+
 /// <summary>
 /// Arena: one question answered by two models, side by side and blind (Model A and
 /// Model B), and the person's vote, after which the names are shown. Votes make the

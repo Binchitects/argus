@@ -16,9 +16,10 @@ import { MediaPlayer } from '@/pages/chat/media'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
 import type { Quote } from '@/pages/chat/quote'
 import { QuotePartDialog } from '@/pages/chat/quote-parts'
+import { RatingButtons } from '@/pages/chat/feedback'
 import { AnswerAgainMenu, type AgainChange } from '@/pages/chat/turns'
 import type { AgentWork, ChatConfig, Message } from '@/pages/chat/types'
-import type { FileDiff } from './api'
+import { rateAnswer, type FileDiff } from './api'
 import { FileIcon } from './file-icon'
 import { nameOf, parentOf, rawFileUrl } from './ide-api'
 import { mediaNamed } from './media'
@@ -646,6 +647,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               <QuotePartDialog text={text} open={quoting} onOpenChange={setQuoting} onQuote={onQuote} />
             </>
           )}
+          {last.id.startsWith('m') && <RatingButtons initial={last.feedback ?? null} send={(rating) => rateAnswer(last.id, rating)} />}
           {question && onAgain && (
             <AnswerAgainMenu
               config={config}

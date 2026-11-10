@@ -89,6 +89,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Gateway.GatewayRequest> GatewayRequests => Set<Gateway.GatewayRequest>();
     public DbSet<Gateway.ApiKey> ApiKeys => Set<Gateway.ApiKey>();
     public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
+    public DbSet<ProductFeedbackImage> ProductFeedbackImages => Set<ProductFeedbackImage>();
     public DbSet<PromptLogEntry> PromptLog => Set<PromptLogEntry>();
     public DbSet<PromptLogFile> PromptLogFiles => Set<PromptLogFile>();
     public DbSet<Checklist> Checklists => Set<Checklist>();
@@ -976,6 +977,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ProductFeedbackImage>(e =>
+        {
+            e.ToTable("product_feedback_images");
+            e.Property(x => x.ContentType).HasMaxLength(32);
+            e.HasIndex(x => new { x.FeedbackId, x.Position }).IsUnique();
+            e.HasOne<ProductFeedback>().WithMany().HasForeignKey(x => x.FeedbackId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Code.CodeFix>(e =>
         {

@@ -473,6 +473,24 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', text: 'Change two to II', quote: null }))
   })
 
+  it('rates an answer as the web chat does: down with a reason, kept by Arena through Code Arena, and taken back', async () => {
+    const { calls } = backend({
+      session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },
+      extra: {
+        'POST /api/answers/rate': (body) => ((body as { clear?: boolean }).clear ? { status: 204 } : { json: { up: false, reason: null, comment: null, shared: false } }),
+      },
+    })
+    renderCode()
+    const answerId = saved.findLast((m: { role: string }) => m.role === 'assistant')!.id
+    await userEvent.click(await screen.findByRole('button', { name: 'Bad answer' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/answers/rate')?.body).toEqual({ message: answerId, up: false }))
+    const box = await screen.findByRole('dialog', { name: 'What was wrong' })
+    await userEvent.click(within(box).getByRole('button', { name: 'Wrong' }))
+    await userEvent.click(within(box).getByRole('button', { name: 'Take back' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/answers/rate').at(-1)?.body).toEqual({ message: answerId, clear: true }))
+    expect(screen.getByRole('button', { name: 'Bad answer' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('rewinds to a question as /rewind does: the files that would change first, then the code, the conversation, or both', async () => {
     const { calls, now } = backend({
       session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },

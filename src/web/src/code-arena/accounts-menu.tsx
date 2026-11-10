@@ -159,7 +159,7 @@ export function AccountsMenu({ edge, compact = false }: { edge: 'left' | 'right'
           {!a?.codeStudio && <DropdownMenuItem onSelect={() => setSigningIn(true)}>{a?.signedIn ? 'Sign in as someone else…' : 'Sign in with user name and password…'}</DropdownMenuItem>}
           {a?.arena && <DropdownMenuItem onSelect={() => open(`${a.arena!.replace(/\/$/, '')}/account`)}>Your account in Arena</DropdownMenuItem>}
           {a?.arena && a.account?.managesPeople && <DropdownMenuItem onSelect={() => open(`${a.arena!.replace(/\/$/, '')}/admin/people`)}>People (Admin)</DropdownMenuItem>}
-          {a?.signedIn && <DropdownMenuItem onSelect={() => setFeedback(true)}>Send feedback…</DropdownMenuItem>}
+          {a?.signedIn && <DropdownMenuItem onSelect={() => setFeedback(true)}>Send Feedback…</DropdownMenuItem>}
           {!a?.codeStudio && a?.signedIn && (
             <>
               <DropdownMenuSeparator />

@@ -9,6 +9,9 @@ namespace CodeArena;
 /// </summary>
 internal sealed partial class WebApp
 {
+    /// <summary>Send feedback: to Arena, with its screenshots.</summary>
+    internal const string FeedbackPath = "/api/account/feedback";
+
     // A sign-in waiting for its second factor: Arena's half-signed-in session, kept for 5 minutes.
     private (ArenaSignIn SignIn, string Url, DateTimeOffset Until)? _signingIn;
 
@@ -83,7 +86,7 @@ internal sealed partial class WebApp
                 }
                 return true;
             }
-            case ("POST", "/api/account/feedback"):
+            case ("POST", FeedbackPath):
             {
                 // Send feedback: to Arena with the person's key, as from its own pages (Admin → Feedback reads it).
                 if (_rt.Config.Url is not { Length: > 0 } url || _rt.Config.ApiKey is not { Length: > 0 } key)
@@ -92,7 +95,12 @@ internal sealed partial class WebApp
                 }
                 var body = Body(req);
                 using var send = ChatSync.Request(HttpMethod.Post, url.TrimEnd('/') + "/api/code-arena/feedback", key,
-                    new JsonObject { ["kind"] = body.Str("kind"), ["text"] = body.Str("text"), ["page"] = body.Str("page") });
+                    new JsonObject
+                    {
+                        ["kind"] = body.Str("kind"), ["text"] = body.Str("text"), ["page"] = body.Str("page"),
+                        // The screenshots as they came (Arena reads their types and sizes).
+                        ["images"] = body["images"] is JsonArray images ? images.DeepClone() : null,
+                    });
                 using var answer = await _rt.Http.SendAsync(send, ct);
                 var said = await answer.Content.ReadAsStringAsync(ct);
                 if (!answer.IsSuccessStatusCode)

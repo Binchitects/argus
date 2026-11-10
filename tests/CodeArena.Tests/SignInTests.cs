@@ -18,6 +18,8 @@ internal sealed class FakeArena : FakeServer
     public List<string> Revoked { get; } = [];
     public List<string> Calls { get; } = [];
     public bool SignedOut { get; private set; }
+    /// <summary>The feedback sent to it, and the key it came with.</summary>
+    public List<(JsonNode Body, string? Key)> Feedback { get; } = [];
     private string? _session;
     private bool _half;
 
@@ -65,6 +67,13 @@ internal sealed class FakeArena : FakeServer
                 return;
             case ("GET", "/api/code-arena/me"):
                 await WriteJson(ctx, Keys.ContainsValue(bearer ?? "") ? new JsonObject { ["userName"] = "mo", ["displayName"] = "Mo", ["managesPeople"] = true } : new JsonObject { ["error"] = "no" }, Keys.ContainsValue(bearer ?? "") ? 200 : 401);
+                return;
+            case ("POST", "/api/code-arena/feedback"):
+                lock (Feedback)
+                {
+                    Feedback.Add((json!, bearer));
+                }
+                await WriteJson(ctx, new JsonObject { ["id"] = "f1" }, 201);
                 return;
             case ("POST", "/api/code-arena/sign-out"):
                 var name = Keys.FirstOrDefault(k => k.Value == bearer).Key;
@@ -180,5 +189,23 @@ public sealed class SignInTests : IDisposable
         Assert.True(signedOut["revoked"]!.GetValue<bool>());
         Assert.Contains(ArenaSignIn.KeyName, _arena.Revoked);
         Assert.Null(config()["apiKey"]);
+    }
+
+    [Fact]
+    public async Task Feedback_from_the_ide_goes_to_arena_with_the_key_and_its_screenshots_even_three_large_ones()
+    {
+        using var gateway = new FakeGateway();
+        using var h = new Harness(gateway, config: c => c["url"] = _arena.BaseUrl);
+        await using var web = await WebRun.StartAsync(h);
+        // Three screenshots of nearly 2 MB: past the 8 MB an IDE request may hold, in base64.
+        var shot = Convert.ToBase64String(new byte[2 * 1024 * 1024 - 100]);
+        var images = new JsonArray(new JsonObject { ["data"] = shot }, new JsonObject { ["data"] = shot }, new JsonObject { ["data"] = shot });
+        var sent = await web.PostAsync("/api/account/feedback", new JsonObject { ["kind"] = "problem", ["text"] = "The diff is cut off.", ["page"] = "the IDE", ["images"] = images });
+        Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
+        var (body, key) = Assert.Single(_arena.Feedback);
+        Assert.Equal(FakeGateway.Key, key);
+        Assert.Equal(("problem", "The diff is cut off.", "the IDE"), (body["kind"]!.GetValue<string>(), body["text"]!.GetValue<string>(), body["page"]!.GetValue<string>()));
+        Assert.Equal(3, body["images"]!.AsArray().Count);
+        Assert.Equal(shot, body["images"]![2]!["data"]!.GetValue<string>());
     }
 }

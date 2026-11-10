@@ -45,6 +45,8 @@ internal sealed class SyncEntry
     public JsonArray? Agents { get; init; }
     /// <summary>What filled the request an answer was written for, by kind in characters (<see cref="Agent.Measure"/>): the page's context gauge.</summary>
     public JsonObject? Context { get; init; }
+    /// <summary>The person's rating of this answer, as Arena kept it (thumbs in the IDE); null: none.</summary>
+    public JsonObject? Rating { get; set; }
 
     /// <summary>A tool result's tool: the call it answers, in the messages before it.</summary>
     public static string? ToolName(IReadOnlyList<SyncEntry> stream, int index)
@@ -238,6 +240,13 @@ internal sealed class SessionData
                         }
                         e.Id ??= "";
                     }
+                }
+                break;
+            case "rated":
+                // The rating of the answer of this number, as Arena kept it (none: taken back).
+                if (entry.Int("key") is { } rated && Stream.FindLastIndex(e => e.Key == rated) is var ratedAt and >= 0)
+                {
+                    Stream[ratedAt].Rating = entry["rating"] as JsonObject is { } r ? (JsonObject)r.DeepClone() : null;
                 }
                 break;
             case "sent":
@@ -504,6 +513,9 @@ internal sealed class SessionStore
             });
         }
     }
+
+    /// <summary>The person rated an answer (by its number), as Arena kept it; null: taken back.</summary>
+    public void Rated(int key, JsonObject? rating) => Write(new JsonObject { ["type"] = "rated", ["key"] = key, ["rating"] = rating?.DeepClone() });
 
     /// <summary>The chat in Arena the session is kept with (null: none any more, it was deleted there).</summary>
     public void Link(string? conversation) => Write(new JsonObject { ["type"] = "sync", ["conversation"] = conversation });

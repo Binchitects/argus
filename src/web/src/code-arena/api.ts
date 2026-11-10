@@ -1,6 +1,6 @@
 import { api } from './http'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
-import type { Attachment, ChatEvent, ChatTool, MeasuredContext, Message } from '@/pages/chat/types'
+import type { Attachment, ChatEvent, ChatTool, Feedback, MeasuredContext, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
 import type { CodeGoal } from './tasks-api'
 
@@ -507,3 +507,12 @@ const place = (m: Message) => (/^m\d+$/.test(m.id) ? Number(m.id.slice(1)) : Num
 /** The messages in order. The results of calls made at once may arrive in any order; their places say where they go. */
 export const inOrder = (messages: Message[]) => [...messages].sort((a, b) => place(a) - place(b))
 
+
+/** The person's thumbs on an answer (by its id, m12): kept by Arena on the session's chat, and beside the answer here; null takes it back. */
+export async function rateAnswer(message: string, rating: { up: boolean; reason?: string | null; comment?: string | null; share?: boolean } | null): Promise<Feedback | null> {
+  if (!rating) {
+    await api('/api/answers/rate', { body: { message, clear: true } })
+    return null
+  }
+  return api<Feedback>('/api/answers/rate', { body: { message, ...rating } })
+}

@@ -49,9 +49,12 @@ public static class QualityEndpoints
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
     /// <summary>Thumbs up or down on an answer of one's own chat: one per person per answer, changed by rating again.</summary>
-    private static async Task<IResult> RateAsync(Guid id, Guid messageId, FeedbackRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> RateAsync(Guid id, Guid messageId, FeedbackRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await RateForAsync(await Me(p, users), id, messageId, body, db, ct);
+
+    /// <summary>The person's rating of an answer of their chat (the web's thumbs, or Code Arena's on its synced chat).</summary>
+    public static async Task<IResult> RateForAsync(AppUser me, Guid id, Guid messageId, FeedbackRequest body, AppDbContext db, CancellationToken ct)
     {
-        var me = await Me(p, users);
         if (!await db.Conversations.AnyAsync(c => c.Id == id && c.UserId == me.Id, ct))
         {
             return Results.NotFound();
@@ -84,9 +87,12 @@ public static class QualityEndpoints
         return Results.Ok(ChatQuality.Shape(f));
     }
 
-    private static async Task<IResult> UnrateAsync(Guid id, Guid messageId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> UnrateAsync(Guid id, Guid messageId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await UnrateForAsync(await Me(p, users), id, messageId, db, ct);
+
+    /// <summary>The rating taken back.</summary>
+    public static async Task<IResult> UnrateForAsync(AppUser me, Guid id, Guid messageId, AppDbContext db, CancellationToken ct)
     {
-        var me = await Me(p, users);
         if (!await db.Conversations.AnyAsync(c => c.Id == id && c.UserId == me.Id, ct))
         {
             return Results.NotFound();
