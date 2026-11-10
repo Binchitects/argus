@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, holds, type Me } from '@/lib/api'
-import { ago, money, when } from '@/lib/format'
+import { ago, formatValue, money, when } from '@/lib/format'
 import { maxRequests, maxTokens, parseLimit, type KeyLimits } from '@/lib/rate-limits'
 import { PersonDataRequests } from './data-requests'
 import { LegalHoldCard } from './legal-hold'
@@ -87,6 +87,7 @@ export function PersonPage() {
           <CreditsCard key={creditKinds.map((k) => p.credits[k.kind].credit).join('-')} p={p} standing={standing} maySet={holds(me, 'credits.manage')} />
           <ApiKeyCard p={p} keys={keys} onSecret={setSecret} mayChange={holds(me, 'people.keys')} />
           {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}-${atOnce?.own}`} p={p} limits={limits} atOnce={atOnce} maySet={holds(me, 'people.limits')} />}
+          {holds(me, 'usage.read') && <PersonUsageCard p={p} />}
         </div>
         <div className="grid content-start gap-6">
           {/* Each button its own permission: only an Owner makes or unmakes an admin (Owner), people.disable disables, people.passwords resets sign-in. */}
@@ -428,6 +429,65 @@ function ApiKeyCard({ p, keys, onSecret, mayChange }: { p: Person; keys: PersonD
 }
 
 const limitText = (v: number | null) => (v === null ? '' : String(v))
+
+/** What the usage of the prompts gives for one person: their totals in the time asked. */
+interface UsageTotals {
+  totals: { prompts: number; prompt: number; cached: number; completion: number; cost: number }
+}
+
+/**
+ * What they used in the last 30 days, every source together (chat, the API, Code Arena…): their requests, the input the
+ * prompt cache did not hold, what it held, the output, and the spend at the prices.
+ */
+function PersonUsageCard({ p }: { p: Person }) {
+  const days = 30
+  const window = useState(() => {
+    const to = new Date()
+    return { from: new Date(to.getTime() - days * 86_400_000).toISOString(), to: to.toISOString() }
+  })[0]
+  const usage = useQuery({
+    queryKey: ['admin', 'usage', 'person', p.id, window.from],
+    queryFn: ({ signal }) =>
+      api<UsageTotals>(`/api/admin/usage/prompts?${new URLSearchParams({ from: window.from, to: window.to, person: p.id, limit: '1' })}`, { signal }),
+  })
+  const t = usage.data?.totals
+  const n = (v: number) => formatValue(v, 'short')
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Usage</CardTitle>
+        <CardDescription>The last {days} days, every source together: input the prompt cache did not hold, what it held, and output.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {usage.isError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {errorMessage(usage.error)}
+          </p>
+        ) : (
+          <dl aria-label="Their usage" aria-busy={usage.isPending} className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+            {[
+              ['Requests', t ? n(t.prompts) : '…'],
+              ['In', t ? n(Math.max(0, t.prompt - t.cached)) : '…'],
+              ['Cached', t ? n(t.cached) : '…'],
+              ['Out', t ? n(t.completion) : '…'],
+              ['Spend', t ? money(t.cost) : '…'],
+            ].map(([label, value]) => (
+              <div key={label} className="grid gap-0.5">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="font-medium tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </CardContent>
+      <CardFooter>
+        <Button variant="link" size="sm" className="px-0" asChild>
+          <Link to="/usage">Every prompt in Usage</Link>
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}
 
 /** Their API keys' requests and tokens a minute: what applies now, and their own (empty: their groups' or the company's; 0: no limit). */
 /** maySet: people.limits; without it the limits are read, not set. */

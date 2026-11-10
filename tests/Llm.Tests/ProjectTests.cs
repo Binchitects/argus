@@ -496,9 +496,9 @@ public sealed class ProjectTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, xlsx);
         var sheets = Llm.Api.Insights.TabularFiles.Read("report.xlsx", await xlsx.Content.ReadAsByteArrayAsync());
         var people = sheets.Single(s => s.Name == "report People");
-        Assert.Equal(["Person", "Requests", "Tokens", "Cost", "Agent time (hours)", "Active time (hours)", "Messages"], people.Header);
+        Assert.Equal(["Person", "Requests", "Tokens", "In", "Cached", "Out", "Cost", "Agent time (hours)", "Active time (hours)", "Messages"], people.Header);
         Assert.Equal(6.0, Convert.ToDouble(people.Rows[0][1], System.Globalization.CultureInfo.InvariantCulture));
-        Assert.Equal(1.5, Convert.ToDouble(people.Rows[0][3], System.Globalization.CultureInfo.InvariantCulture), 6);
+        Assert.Equal(1.5, Convert.ToDouble(people.Rows[0][6], System.Globalization.CultureInfo.InvariantCulture), 6);
         Assert.Contains(sheets, s => s.Name == "report Summary");
 
         var csv = await ben.GetAsync($"/api/projects/{id}/report/export?format=csv&{window}");
@@ -509,7 +509,7 @@ public sealed class ProjectTests(AppFixture app)
         // A viewer's export has their own row only, and says so.
         var at = Array.IndexOf(lines, "People");
         Assert.StartsWith("Only your own row", lines[at + 1], StringComparison.Ordinal);
-        Assert.Equal("Person,Requests,Tokens,Cost ($),Agent time (hours),Active time (hours),Messages", lines[at + 2]);
+        Assert.Equal("Person,Requests,Tokens,In,Cached,Out,Cost ($),Agent time (hours),Active time (hours),Messages", lines[at + 2]);
         Assert.Equal("", lines[at + 3]);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ann.GetAsync($"/api/projects/{id}/report/export?format=docx&{window}"));
 

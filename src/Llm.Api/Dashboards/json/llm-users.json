@@ -93,7 +93,7 @@
     },
     {
       "type": "stat",
-      "title": "Total tokens",
+      "title": "Tokens: in, cached, out",
       "datasource": {
         "type": "postgres",
         "uid": "gateway-db"
@@ -113,7 +113,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(sum(total_tokens),0) AS \"Tokens\" from requests WHERE $__timeFilter(started_at)"
+          "rawSql": "SELECT COALESCE(sum(greatest(prompt_tokens - cached_tokens, 0)),0) AS \"In\", COALESCE(sum(cached_tokens),0) AS \"Cached\", COALESCE(sum(completion_tokens),0) AS \"Out\" from requests WHERE $__timeFilter(started_at)"
         }
       ],
       "fieldConfig": {
@@ -145,7 +145,8 @@
         "textMode": "auto",
         "graphMode": "none",
         "colorMode": "value"
-      }
+      },
+      "description": "Input not read from the prompt cache (In), input read from it (Cached), and output (Out), in the time chosen."
     },
     {
       "type": "stat",
@@ -1120,7 +1121,7 @@
     },
     {
       "type": "stat",
-      "title": "Tokens (attributed)",
+      "title": "Tokens (attributed): in, cached, out",
       "datasource": {
         "type": "postgres",
         "uid": "gateway-db"
@@ -1141,7 +1142,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(sum(s.total_tokens),0) as v from requests s where $__timeFilter(s.started_at)"
+          "rawSql": "select coalesce(sum(greatest(s.prompt_tokens - s.cached_tokens, 0)),0) as \"In\", coalesce(sum(s.cached_tokens),0) as \"Cached\", coalesce(sum(s.completion_tokens),0) as \"Out\" from requests s where $__timeFilter(s.started_at)"
         }
       ],
       "fieldConfig": {
@@ -1256,7 +1257,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.cost),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.key_alias, s.surface)) as \"Keys used\", string_agg(distinct case s.surface when 'chat' then 'Chat' when 'app' then 'Arena itself' when 'studio' then 'Code Studio' when 'media' then 'Pictures, video, sound' else 'API / agent' end, ', ') as \"Surfaces\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by 5 desc nulls last"
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(greatest(s.prompt_tokens - s.cached_tokens, 0)),0) as \"In\", coalesce(sum(s.cached_tokens),0) as \"Cached\", coalesce(sum(s.completion_tokens),0) as \"Out\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.cost),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.key_alias, s.surface)) as \"Keys used\", string_agg(distinct case s.surface when 'chat' then 'Chat' when 'app' then 'Arena itself' when 'studio' then 'Code Studio' when 'media' then 'Pictures, video, sound' else 'API / agent' end, ', ') as \"Surfaces\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by 6 desc nulls last"
         }
       ],
       "fieldConfig": {

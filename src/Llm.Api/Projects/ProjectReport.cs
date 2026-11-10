@@ -12,7 +12,9 @@ public sealed record ProjectTotals(long Requests, long Input, long Cached, long 
 public sealed record ProjectBucket(DateTimeOffset At, long Input, long Output, decimal Cost);
 
 /// <summary>A person's share: their requests and what they cost, the model's time on them (agent) and their own time in the chats (active).</summary>
-public sealed record ProjectPerson(Guid? Id, string Name, string? Email, long Requests, long Tokens, decimal Cost, double AgentSeconds, double ActiveSeconds, int Messages);
+/// <param name="Input">Input not read from the prompt cache; <paramref name="Cached"/> read from it; <paramref name="Output"/> the answers' (adding up to <paramref name="Tokens"/>).</param>
+public sealed record ProjectPerson(Guid? Id, string Name, string? Email, long Requests, long Tokens, decimal Cost, double AgentSeconds, double ActiveSeconds, int Messages,
+    long Input = 0, long Cached = 0, long Output = 0);
 
 public sealed record ProjectUse(string Name, long Requests, long Tokens, decimal Cost);
 
@@ -73,7 +75,8 @@ public static class ProjectReport
             {Where} group by 1 order by 1
             """, p, ct);
         var byPerson = await sql.QueryAsync($"""
-            select r.user_id, max(r.person), count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0), coalesce(sum(r.duration_ms),0)
+            select r.user_id, max(r.person), count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0), coalesce(sum(r.duration_ms),0),
+                   coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0), coalesce(sum(r.cached_tokens),0), coalesce(sum(r.completion_tokens),0)
             {Where} group by 1
             """, p, ct);
         var byModel = await sql.QueryAsync($"select r.model, count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0) {Where} group by 1 order by 4 desc, 2 desc", p, ct);
@@ -100,7 +103,7 @@ public static class ProjectReport
             var id = Id(r[0]);
             var (messages, secs) = id is { } i && seconds.TryGetValue(i, out var s) ? s : (0, 0d);
             var known = id is { } k && names.TryGetValue(k, out var n) ? n : null;
-            people.Add(new ProjectPerson(id, known?.Name ?? (r[1] as string) ?? "(no one)", known?.Email ?? r[1] as string, Num(r[2]), Num(r[3]), Dec(r[4]), Num(r[5]) / 1000.0, secs, messages));
+            people.Add(new ProjectPerson(id, known?.Name ?? (r[1] as string) ?? "(no one)", known?.Email ?? r[1] as string, Num(r[2]), Num(r[3]), Dec(r[4]), Num(r[5]) / 1000.0, secs, messages, Num(r[6]), Num(r[7]), Num(r[8])));
         }
         foreach (var (id, (messages, secs)) in seconds.Where(s => people.All(x => x.Id != s.Key)))
         {
@@ -194,9 +197,9 @@ public static class ProjectReport
         var shown = everyone ? n.People : [.. n.People.Where(x => x.Id == me)];
         var tables = new List<ReportTable>
         {
-            new("People", [new("Person", Width: 2.2), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("Cost", ReportKind.Money), new("Agent time", ReportKind.Hours),
-                    new("Active time", ReportKind.Hours), new("Messages", ReportKind.Number, 0.8)],
-                [.. shown.Select(x => (object?[])[x.Name, x.Requests, x.Tokens, x.Cost, x.AgentSeconds, x.ActiveSeconds, x.Messages])],
+            new("People", [new("Person", Width: 2.2), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("In", ReportKind.Number), new("Cached", ReportKind.Number),
+                    new("Out", ReportKind.Number), new("Cost", ReportKind.Money), new("Agent time", ReportKind.Hours), new("Active time", ReportKind.Hours), new("Messages", ReportKind.Number, 0.8)],
+                [.. shown.Select(x => (object?[])[x.Name, x.Requests, x.Tokens, x.Input, x.Cached, x.Output, x.Cost, x.AgentSeconds, x.ActiveSeconds, x.Messages])],
                 everyone ? null : "Only your own row: each person's share is for the project's owners."),
             new("Models", [new("Model", Width: 2.4), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("Cost", ReportKind.Money)],
                 [.. n.Models.Select(m => (object?[])[m.Name, m.Requests, m.Tokens, m.Cost])]),

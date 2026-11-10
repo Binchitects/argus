@@ -46,8 +46,9 @@ public sealed class CostOptions
 }
 
 /// <summary>One person's, group's, cost centre's, project's, model's, source's or kind's share of the window; a group's members under it.</summary>
+/// <param name="Tokens">All of them, in and out; <paramref name="Input"/> the input not read from the prompt cache, <paramref name="Cached"/> the input read from it, <paramref name="Output"/> the answers'.</param>
 public sealed record AccountRow(string Kind, Guid? Id, string Name, string? Email, string? CostCentre, int People, long Requests, long Tokens, double ModelHours, decimal Charged, double Share,
-    decimal Cost, decimal? Credit = null, IReadOnlyList<AccountRow>? Members = null);
+    decimal Cost, decimal? Credit = null, IReadOnlyList<AccountRow>? Members = null, long Input = 0, long Cached = 0, long Output = 0);
 
 /// <summary>The running cost of a window, from the settings and the GPUs' measured power.</summary>
 public sealed record RunningCost(double Hours, double? GpuKwh, double OtherKwh, double Kwh, decimal Power, decimal Hardware, decimal Service, decimal Total);
@@ -56,7 +57,7 @@ public sealed record RunningCost(double Hours, double? GpuKwh, double OtherKwh, 
 public sealed record AccountBucket(DateTimeOffset At, decimal Power, decimal Hardware, decimal Service, decimal Total, decimal Charged, long Tokens, long Requests, double Kwh);
 
 /// <summary>What was used in a window: requests, tokens, the model's time, the spend at the prices, the people who used it.</summary>
-public sealed record AccountUse(long Requests, long Tokens, double ModelHours, decimal Charged, int People);
+public sealed record AccountUse(long Requests, long Tokens, double ModelHours, decimal Charged, int People, long Input = 0, long Cached = 0, long Output = 0);
 
 /// <summary>The same numbers for the window before, as long as this one, and the change to this one (null: nothing to compare).</summary>
 public sealed record AccountBefore(DateTimeOffset From, DateTimeOffset To, decimal Total, AccountUse Used, double? TotalChange, double? ChargedChange, double? TokensChange);
@@ -125,7 +126,7 @@ public static class Accounting
     /// <summary>How much b is more (or less) than a, as a fraction; null when a is nothing.</summary>
     public static double? Change(double before, double now) => before > 0 ? Math.Round((now - before) / before, 4) : null;
 
-    private sealed record Used(string? Person, Guid? Project, string Model, string Surface, string Kind, long Requests, long Tokens, double Seconds, decimal Charged);
+    private sealed record Used(string? Person, Guid? Project, string Model, string Surface, string Kind, long Requests, long Tokens, double Seconds, decimal Charged, long Input, long Cached, long Output);
 
     private static async Task<IResult> JsonAsync(DateTimeOffset from, DateTimeOffset to, string? basis, LedgerSql sql, AppDbContext db, Credit credit, PromDatasource prom,
         IOptionsMonitor<CostOptions> costs, TimeProvider clock, ILoggerFactory logs, CancellationToken ct)
@@ -161,13 +162,14 @@ public static class Accounting
         var window = new Dictionary<string, object> { ["from"] = from.ToUniversalTime(), ["to"] = to.ToUniversalTime(), ["secs"] = interval.TotalSeconds };
         var table = await sql.QueryAsync("""
             select r.person, r.project_id, coalesce(r.model, ''), coalesce(r.surface, ''), coalesce(r.credit_kind, ''), count(*),
-                   coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.duration_ms),0) / 1000.0, coalesce(sum(r.cost),0)
+                   coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.duration_ms),0) / 1000.0, coalesce(sum(r.cost),0),
+                   coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0), coalesce(sum(r.cached_tokens),0), coalesce(sum(r.completion_tokens),0)
             from gateway.requests r
             where r.started_at >= @from and r.started_at < @to and r.status <> 'refused'
             group by 1, 2, 3, 4, 5
             """, window, ct);
         var rows = table.Rows.Select(r => new Used(((string?)r[0])?.ToLowerInvariant(), r[1] is Guid g ? g : null, (string)r[2]!, (string)r[3]!, (string)r[4]!, Num(r[5]), Num(r[6]),
-            Dbl(r[7]), Dec(r[8]))).ToList();
+            Dbl(r[7]), Dec(r[8]), Num(r[9]), Num(r[10]), Num(r[11]))).ToList();
         var byTime = (await sql.QueryAsync("""
             select floor(extract(epoch from r.started_at)/@secs)*@secs, count(*), coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.cost),0)
             from gateway.requests r
@@ -210,7 +212,7 @@ public static class Accounting
             var charged = u.Sum(x => x.Charged);
             var share = ShareOf(by, tokens, seconds, charged, allTokens, allSeconds, allCharged);
             return new AccountRow(kind, id, name, email, centre, people, requests, tokens, Math.Round(seconds / 3600, 2), Math.Round(charged, 4), Math.Round(share, 6),
-                Math.Round(running.Total * (decimal)share, 2), creditOf, members);
+                Math.Round(running.Total * (decimal)share, 2), creditOf, members, u.Sum(x => x.Input), u.Sum(x => x.Cached), u.Sum(x => x.Output));
         }
         static List<AccountRow> Ordered(IEnumerable<AccountRow> r) => [.. r.OrderBy(x => x.Name.StartsWith('(')).ThenByDescending(x => x.Cost).ThenByDescending(x => x.Requests)];
 
@@ -285,17 +287,18 @@ public static class Accounting
         if (length <= DashboardEndpoints.MaxRange)
         {
             var prev = (await sql.QueryAsync("""
-                select count(*), coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.duration_ms),0) / 1000.0, coalesce(sum(r.cost),0), count(distinct lower(r.person))
+                select count(*), coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.duration_ms),0) / 1000.0, coalesce(sum(r.cost),0), count(distinct lower(r.person)),
+                       coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0), coalesce(sum(r.cached_tokens),0), coalesce(sum(r.completion_tokens),0)
                 from gateway.requests r
                 where r.started_at >= @from and r.started_at < @to and r.status <> 'refused'
                 """, new Dictionary<string, object> { ["from"] = prevFrom.ToUniversalTime(), ["to"] = from.ToUniversalTime() }, ct)).Rows[0];
-            var prevUse = new AccountUse(Num(prev[0]), Num(prev[1]), Math.Round(Dbl(prev[2]) / 3600, 2), Math.Round(Dec(prev[3]), 4), (int)Num(prev[4]));
+            var prevUse = new AccountUse(Num(prev[0]), Num(prev[1]), Math.Round(Dbl(prev[2]) / 3600, 2), Math.Round(Dec(prev[3]), 4), (int)Num(prev[4]), Num(prev[5]), Num(prev[6]), Num(prev[7]));
             var prevWatts = await ScalarAsync(prom, $"sum(avg_over_time(nvidia_smi_power_draw_watts[{(long)Math.Max(60, length.TotalSeconds)}s]))", from, log, ct);
             var prevCost = Cost(o, prevFrom, from, prevWatts is { } pw ? pw * length.TotalHours / 1000 : null);
             before = new AccountBefore(prevFrom, from, prevCost.Total, prevUse, Change((double)prevCost.Total, (double)running.Total), Change((double)prevUse.Charged, (double)allCharged),
                 Change(prevUse.Tokens, allTokens));
         }
-        return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, Math.Round(allCharged, 4), active), unit, health, before, interval, series,
+        return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, Math.Round(allCharged, 4), active, rows.Sum(r => r.Input), rows.Sum(r => r.Cached), rows.Sum(r => r.Output)), unit, health, before, interval, series,
             Ordered(people), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(projects), Ordered(models), Ordered(sources), Ordered(kinds));
     }
 
@@ -409,7 +412,7 @@ public static class Accounting
             new("A month at this rate", m(r.Health.MonthlyRunning), $"Spend at the prices {m(r.Health.MonthlyCharged)} a month"),
             new("Spend at the prices", m(r.Used.Charged), r.Health.Recovered is { } rec ? $"{Pct(rec)} of the running cost" : "No running cost set"),
             new("GPU idle", r.Health.IdleCost is { } idle ? m(idle) : "–", r.Health.GpuBusy is { } b ? $"Busy {Pct(b)} of the time" : "The GPUs not measured"),
-            new("A million tokens", r.Unit.PerMillionTokens is { } t ? m(t) : "–", $"{ReportFiles.Compact(r.Used.Tokens)} tokens, {r.Used.Requests:#,##0} requests, {r.Used.People} people"),
+            new("A million tokens", r.Unit.PerMillionTokens is { } t ? m(t) : "–", $"{ReportFiles.Compact(r.Used.Tokens)} tokens ({ReportFiles.Compact(r.Used.Input)} in, {ReportFiles.Compact(r.Used.Cached)} cached, {ReportFiles.Compact(r.Used.Output)} out), {r.Used.Requests:#,##0} requests, {r.Used.People} people"),
         };
         var charts = new List<ReportChart>
         {
@@ -417,9 +420,9 @@ public static class Accounting
             new("Spend at the prices", ["Spend"], [.. r.Series.Select(b => (b.At, new[] { (double)b.Charged }))], ReportKind.Money),
         };
         ReportTable Shares(string title, string first, IEnumerable<AccountRow> rows, string? note = null) => new(title,
-            [new(first, Width: 2.4), new("People", ReportKind.Number, 0.7), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("Model hours", ReportKind.Number, 0.9),
+            [new(first, Width: 2.4), new("People", ReportKind.Number, 0.7), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("In", ReportKind.Number), new("Cached", ReportKind.Number), new("Out", ReportKind.Number), new("Model hours", ReportKind.Number, 0.9),
                 new("Spend", ReportKind.Money), new("Share (%)", ReportKind.Number, 0.8), new("Cost", ReportKind.Money)],
-            [.. rows.Select(x => (object?[])[x.Name, x.People, x.Requests, x.Tokens, x.ModelHours, x.Charged, Math.Round(x.Share * 100, 2), x.Cost])], note);
+            [.. rows.Select(x => (object?[])[x.Name, x.People, x.Requests, x.Tokens, x.Input, x.Cached, x.Output, x.ModelHours, x.Charged, Math.Round(x.Share * 100, 2), x.Cost])], note);
         var tables = new List<ReportTable>
         {
             Shares("Groups", "Group", r.Groups, "A person in two groups counts in both, so the groups can add up to more than the whole."),

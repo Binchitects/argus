@@ -85,6 +85,10 @@ export interface ProjectPerson {
   email: string | null
   requests: number
   tokens: number
+  /** Input not read from the prompt cache, input read from it, output. */
+  input: number
+  cached: number
+  output: number
   cost: number
   agentSeconds: number
   activeSeconds: number

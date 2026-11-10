@@ -5,7 +5,7 @@ import { admin, fakeApi, renderApp } from '@/test/utils'
 import type { AccountingReport, AccountRow } from './accounting'
 
 const row = (kind: AccountRow['kind'], id: string | null, name: string, share: number, cost: number, more: Partial<AccountRow> = {}): AccountRow => ({
-  kind, id, name, email: kind === 'person' ? `${name.toLowerCase()}@example.test` : null, costCentre: null, people: 1, requests: 10, tokens: 5000, modelHours: 0.5, charged: 2 * share, share, cost, ...more,
+  kind, id, name, email: kind === 'person' ? `${name.toLowerCase()}@example.test` : null, costCentre: null, people: 1, requests: 10, tokens: 5000, input: 1200, cached: 3000, output: 800, modelHours: 0.5, charged: 2 * share, share, cost, ...more,
 })
 
 const ann = row('person', 'p1', 'Ann', 0.75, 1175.19)
@@ -17,10 +17,10 @@ const report = (basis: AccountingReport['basis']): AccountingReport => ({
   basis,
   settings: { powerPricePerKwh: 0.2, pue: 1.4, otherPowerWatts: 300, hardwarePrice: 36000, hardwareMonths: 36, servicePerMonth: 500, personHourly: 50 },
   running: { hours: 720, gpuKwh: 100, otherKwh: 216, kwh: 442.4, power: 88.48, hardware: 985.63, service: 492.81, total: 1566.92 },
-  used: { requests: 20, tokens: 10000, modelHours: 1, charged: 2, people: 2 },
+  used: { requests: 20, tokens: 10000, input: 2400, cached: 6000, output: 1600, modelHours: 1, charged: 2, people: 2 },
   unit: { perMillionTokens: 156692, perRequest: 78.35, perPerson: 783.46, perModelHour: 1566.5 },
   health: { gpuBusy: 0.25, idleCost: 1175.19, monthlyRunning: 1589.77, monthlyCharged: 2.03, recovered: 0.0013 },
-  before: { from: '2026-09-09T00:00:00Z', to: '2026-10-09T00:00:00Z', total: 1400, used: { requests: 10, tokens: 8000, modelHours: 0.5, charged: 1, people: 1 }, totalChange: 0.1192, chargedChange: 1, tokensChange: 0.25 },
+  before: { from: '2026-09-09T00:00:00Z', to: '2026-10-09T00:00:00Z', total: 1400, used: { requests: 10, tokens: 8000, input: 2000, cached: 4800, output: 1200, modelHours: 0.5, charged: 1, people: 1 }, totalChange: 0.1192, chargedChange: 1, tokensChange: 0.25 },
   series: [{ at: '2026-11-01T00:00:00Z', power: 3, hardware: 32.85, service: 16.43, total: 52.28, charged: 0.5, tokens: 1000, requests: 3, kwh: 15 }],
   people: [ann, zed, row('person', null, '(attributed to nobody)', 0.05, 78.35)],
   groups: [row('group', 'g1', 'Research', 0.95, 1488.57, { people: 2, credit: 100, costCentre: 'CC-7', members: [ann, zed] }), row('group', null, '(in no group)', 0, 0, { members: [] })],
@@ -49,6 +49,9 @@ describe('accounting', () => {
     expect(screen.queryByText(/Set the costs/)).not.toBeInTheDocument()
     const before = screen.getByRole('table', { name: 'Against the time before' })
     expect(within(within(before).getByText('Tokens').closest('tr')!).getByText('+25.0%')).toBeInTheDocument()
+    // The tokens in, from the cache and out, each against the time before.
+    expect(within(within(before).getByText('Input, cached').closest('tr')!).getByText('+25.0%')).toBeInTheDocument()
+    expect(totals).toHaveTextContent(/2\.4 K in, 6 K cached, 1\.6 K out/)
 
     // A group opens to its people; its credit and cost centre show.
     const groups = screen.getByRole('table', { name: 'Groups' })
@@ -66,6 +69,8 @@ describe('accounting', () => {
     expect(names()).toEqual(['Zed', 'Ann', '(attributed to nobody)'])
     await userEvent.type(screen.getByRole('textbox', { name: 'Find a person' }), 'ann')
     expect(names()).toEqual(['Ann'])
+    // Each person's tokens: in, from the cache, out.
+    expect(within(people).getAllByRole('button').map((b) => b.textContent)).toEqual(expect.arrayContaining(['In', 'Cached', 'Out']))
 
     await userEvent.click(screen.getByRole('tab', { name: 'Cost centres' }))
     expect(screen.getByText(/No group has a cost centre/)).toBeInTheDocument()

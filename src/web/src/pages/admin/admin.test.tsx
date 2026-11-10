@@ -127,6 +127,18 @@ describe('people', () => {
     expect(screen.getByRole('switch')).toBeDisabled()
   })
 
+  it("a person's page shows what they used: requests, input not cached, cached, output and spend, for those who may read usage", async () => {
+    const calls = fakeApi({ ...member, permissions: ['people.read', 'usage.read'] }, {
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }),
+      'GET /api/admin/usage/prompts': () => ({ json: { items: [], totals: { prompts: 42, prompt: 12_000, cached: 9000, completion: 1500, cost: 0.37, unpriced: 0, blind: 0 } } }),
+    })
+    renderApp('/admin/people/p1')
+    const list = await screen.findByLabelText('Their usage')
+    await waitFor(() => expect(list).toHaveTextContent('Requests42In3 KCached9 KOut1.5 KSpend$0.37'))
+    const asked = new URLSearchParams(calls.find((c) => c.path.startsWith('/api/admin/usage/prompts?'))!.path.split('?')[1])
+    expect(asked.get('person')).toBe('p1')
+  })
+
   it('one who may reset passwords sees those buttons alone on a person', async () => {
     fakeApi({ ...member, permissions: ['people.read', 'people.passwords'] }, {
       'GET /api/admin/people/p1': () => ({ json: { person: people[0], standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }),

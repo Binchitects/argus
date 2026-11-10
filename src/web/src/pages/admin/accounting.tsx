@@ -29,6 +29,10 @@ export interface AccountRow {
   people: number
   requests: number
   tokens: number
+  /** Input not read from the prompt cache, input read from it, and output (adding up to tokens). */
+  input: number
+  cached: number
+  output: number
   modelHours: number
   charged: number
   share: number
@@ -42,6 +46,9 @@ export interface AccountRow {
 export interface AccountUse {
   requests: number
   tokens: number
+  input: number
+  cached: number
+  output: number
   modelHours: number
   charged: number
   people: number
@@ -169,7 +176,7 @@ export function AccountingPage() {
               value={maybe(health.idleCost, money)}
               hint={health.gpuBusy === null ? 'The GPUs not measured' : `The GPUs busy ${pct(health.gpuBusy)} of the time: the rest is room for more`}
             />
-            <Stat icon={Hash} label="A million tokens" value={maybe(unit.perMillionTokens, money)} hint={<>{n(used.tokens)} tokens · <Change value={before?.tokensChange ?? null} /></>} />
+            <Stat icon={Hash} label="A million tokens" value={maybe(unit.perMillionTokens, money)} hint={<>{n(used.tokens)} tokens ({n(used.input)} in, {n(used.cached)} cached, {n(used.output)} out) · <Change value={before?.tokensChange ?? null} /></>} />
             <Stat icon={Zap} label="A request" value={maybe(unit.perRequest, money)} hint={`${n(used.requests)} requests`} />
             <Stat icon={Users} label="A person" value={maybe(unit.perPerson, money)} hint={`${used.people} ${used.people === 1 ? 'person' : 'people'} used it`} />
             <Stat icon={Gauge} label="A model hour" value={maybe(unit.perModelHour, money)} hint={`${formatValue(used.modelHours * 3600, 'dtdurations')} of the models’ time`} />
@@ -350,6 +357,9 @@ function Compare({ report: r, before: b }: { report: AccountingReport; before: N
     { label: 'Spend at the prices', was: b.used.charged, now: r.used.charged, f: money },
     { label: 'Requests', was: b.used.requests, now: r.used.requests, f: n },
     { label: 'Tokens', was: b.used.tokens, now: r.used.tokens, f: n },
+    { label: 'Input, not cached', was: b.used.input, now: r.used.input, f: n },
+    { label: 'Input, cached', was: b.used.cached, now: r.used.cached, f: n },
+    { label: 'Output', was: b.used.output, now: r.used.output, f: n },
     { label: 'Model hours', was: b.used.modelHours, now: r.used.modelHours, f: (v) => v.toFixed(1) },
     { label: 'People', was: b.used.people, now: r.used.people, f: (v) => String(v) },
   ]
@@ -389,12 +399,15 @@ function Compare({ report: r, before: b }: { report: AccountingReport; before: N
   )
 }
 
-type SortKey = 'name' | 'people' | 'requests' | 'tokens' | 'modelHours' | 'charged' | 'share' | 'cost'
+type SortKey = 'name' | 'people' | 'requests' | 'tokens' | 'input' | 'cached' | 'output' | 'modelHours' | 'charged' | 'share' | 'cost'
 
 const columns: { key: SortKey; title: string }[] = [
   { key: 'people', title: 'People' },
   { key: 'requests', title: 'Requests' },
   { key: 'tokens', title: 'Tokens' },
+  { key: 'input', title: 'In' },
+  { key: 'cached', title: 'Cached' },
+  { key: 'output', title: 'Out' },
   { key: 'modelHours', title: 'Model hours' },
   { key: 'charged', title: 'Spend' },
   { key: 'share', title: 'Share' },
@@ -495,6 +508,9 @@ function Cells({ row: x, most }: { row: AccountRow; most: number }) {
       <td className="py-1.5 pr-3 text-right tabular-nums">{x.people}</td>
       <td className="py-1.5 pr-3 text-right tabular-nums">{n(x.requests)}</td>
       <td className="py-1.5 pr-3 text-right tabular-nums">{n(x.tokens)}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums">{n(x.input)}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums">{n(x.cached)}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums">{n(x.output)}</td>
       <td className="py-1.5 pr-3 text-right tabular-nums">{x.modelHours.toFixed(2)}</td>
       <td className="py-1.5 pr-3 text-right tabular-nums">{money(x.charged)}</td>
       <td className="py-1.5 pr-3 text-right tabular-nums">{pct(x.share)}</td>
