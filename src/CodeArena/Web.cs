@@ -105,6 +105,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private long _lastUsed;
     private JsonObject? _lastWindow;
     private JsonObject? _lastContext;
+    // The next request as it was when the running turn began: what fills the window while it runs, when not asked for before.
+    private ContextView.Snapshot? _beforeTurn;
     // What code-arena update did from the IDE: said in place of the notice, until Code Arena starts again.
     private string? _updated;
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
@@ -390,11 +392,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             case ("GET", "/api/context"):
                 // What fills the window, piece by piece: of the next request while no turn runs, else as it was before the turn.
-                if (Current() is null)
+                // (Sending the session to Arena is no turn: the window is as it is.)
+                if (!Busy())
                 {
                     _lastContext = await ContextView.WindowAsync(_rt, ct);
                 }
-                await res.JsonAsync(200, new JsonObject { ["window"] = _lastContext?.DeepClone(), ["running"] = Current() is not null }, ct);
+                else if (_lastContext is null && _beforeTurn is { } before)
+                {
+                    // First asked while a turn runs (a long one): the window as the turn found it.
+                    _lastContext = await ContextView.WindowAsync(_rt, before, ct);
+                }
+                await res.JsonAsync(200, new JsonObject { ["window"] = _lastContext?.DeepClone(), ["running"] = Busy() }, ct);
                 return;
             case ("POST", "/api/update"):
                 var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct, caFile: Net.CaFile(null, _rt.Config.Ca, _rt.Env.Env));
@@ -1727,6 +1735,15 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         var turn = new Spend();
         _rt.Turn = turn;
         _answerId = null;
+        // What fills the window as the turn finds it (before it adds to it), for a Context view first opened while it runs.
+        try
+        {
+            (_beforeTurn, _lastContext) = (ContextView.Snap(_rt), null);
+        }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException)
+        {
+            _beforeTurn = null;
+        }
         using var limit = goal ? _rt.GoalLimit(turn) : null;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(job.Stop.Token, limit?.Token ?? CancellationToken.None);
         var stop = linked.Token;

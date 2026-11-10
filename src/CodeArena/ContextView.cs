@@ -16,16 +16,28 @@ internal static class ContextView
     /// <summary>How long Arena has to count.</summary>
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
-    public static async Task<JsonObject> WindowAsync(Runtime rt, CancellationToken ct)
+    public static Task<JsonObject> WindowAsync(Runtime rt, CancellationToken ct) => WindowAsync(rt, Snap(rt), ct);
+
+    /// <summary>The next request as it is now, and what it holds: taken before a turn changes it, to show while the turn runs.</summary>
+    public sealed record Snapshot(JsonObject Request, List<WindowPiece> Pieces, long Estimate, bool Compactable);
+
+    public static Snapshot Snap(Runtime rt)
     {
         var agent = rt.Agent;
         var request = agent.NextRequest();
-        var pieces = agent.Pieces(request);
+        return new Snapshot(request, agent.Pieces(request), agent.Estimate(), agent.Messages.Count >= 3);
+    }
+
+    /// <summary>The window of a request taken before (<see cref="Snap"/>), counted by Arena where it can.</summary>
+    public static async Task<JsonObject> WindowAsync(Runtime rt, Snapshot snap, CancellationToken ct)
+    {
+        var agent = rt.Agent;
+        var (request, pieces) = (snap.Request, snap.Pieces);
         var (counts, total, by) = await CountAsync(rt, request, pieces, ct);
         // Estimated: the next request's tokens as the status bar has them (the gateway's last count and what was added since).
-        var (tokens, format) = ContextWindow.Count(pieces, counts, total ?? (counts is null ? agent.Estimate() : null), agent.CharsPerToken);
+        var (tokens, format) = ContextWindow.Count(pieces, counts, total ?? (counts is null ? snap.Estimate : null), agent.CharsPerToken);
         var freeable = ContextWindow.Freeable(pieces, tokens, rt.Model.Context, group => rt.Tools.All.Any(t => ToolBox.SwitchOf(t) == group) && !rt.Demand.IsOff(group),
-            leaveOut: false, dropFiles: false, compact: agent.Messages.Count >= 3);
+            leaveOut: false, dropFiles: false, compact: snap.Compactable);
         return ContextWindow.Shape(pieces, tokens, format, rt.Model.Context, agent.Reserve, counts is not null, by, freeable);
     }
 

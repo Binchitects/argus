@@ -78,6 +78,31 @@ public sealed class ContextViewTests : IDisposable
         Assert.Contains(ContextWindow.Lines(window), l => l.StartsWith("Estimated from characters", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task First_opened_while_a_long_turn_runs_it_shows_the_window_as_the_turn_found_it_not_nothing()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Say("the first answer");
+        await (await web.SendAsync("a first question")).RestAsync();
+        // A turn that goes on (the model thinks for long): the view was never opened before it.
+        _gateway.Hang = true;
+        var asked = _gateway.Requests.Count;
+        _ = await web.SendAsync("a second question");
+        for (var waited = 0; waited < 10_000 && _gateway.Requests.Count == asked; waited += 50)
+        {
+            await Task.Delay(50);
+        }
+        var said = (await web.GetJsonAsync("/api/context")).AsObject();
+        Assert.True(said!["running"]!.GetValue<bool>());
+        var window = said["window"]!.AsObject();
+        // The pieces as they were: the first question and its answer, each listed in its part.
+        Assert.Contains(Part(window, "you")!["items"]!.AsArray(), i => i!["preview"]?.GetValue<string>() == "a first question");
+        Assert.Contains(Part(window, "answers")!["items"]!.AsArray(), i => i!["preview"]?.GetValue<string>() == "the first answer");
+        Assert.NotEmpty(Part(window, "tools")!["items"]!.AsArray());
+        _gateway.Hang = false;
+    }
+
     public void Dispose()
     {
         _gateway.Dispose();

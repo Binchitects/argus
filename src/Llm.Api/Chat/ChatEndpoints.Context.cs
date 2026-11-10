@@ -21,7 +21,7 @@ public static partial class ChatEndpoints
     /// which), adding up to what the engine counted, with the room kept for the answer, what is free and what could be freed.
     /// What changed since (a message or file left out, a compaction) is said: the next answer counts it.
     /// </summary>
-    private static async Task<IResult> ContextWindowAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> ContextWindowAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ChatModels models, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me, Need.Read) is not { } c)
@@ -30,6 +30,12 @@ public static partial class ChatEndpoints
         }
         var branch = await Tools.ChatHistoryTool.BranchAsync(db, c, ct);
         var at = branch.FindLastIndex(m => m.WindowJson is not null);
+        // A later answer that kept only its measure (failed, stopped, or from before the window was kept): rebuilt from the chat.
+        var measured = branch.FindLastIndex(m => m.Role == "assistant" && m.ContextJson is not null);
+        if (measured > at && await RebuiltWindowAsync(branch, measured, models, ct) is { } rebuilt)
+        {
+            return Results.Ok(new { window = rebuilt, at = branch[measured].Id, model = branch[measured].Model, compactedSince = branch.Skip(measured + 1).Any(m => m.Summary is not null), rebuilt = true });
+        }
         if (at < 0 || JsonNode.Parse(branch[at].WindowJson!) is not JsonObject window)
         {
             return Results.Ok(new { window = (object?)null, compactedSince = false });
@@ -76,6 +82,65 @@ public static partial class ChatEndpoints
             // A compaction since: the next request starts from its summary.
             compactedSince = branch.Skip(at + 1).Any(m => m.Summary is not null),
         });
+    }
+
+    /// <summary>
+    /// The window of an answer that kept no record of its request, only what filled it by kind (its measure): the chat's own
+    /// messages before it, each a piece, and the rest (the system prompt, the tools, the instructions, memory, skills, files)
+    /// one piece each at its measured size, estimated to add up to the tokens the engine counted. Null: nothing to go on.
+    /// </summary>
+    internal static async Task<JsonObject?> RebuiltWindowAsync(List<ChatMessage> branch, int answer, ChatModels models, CancellationToken ct)
+    {
+        var last = branch[answer];
+        if (JsonNode.Parse(last.ContextJson!) is not JsonObject kinds)
+        {
+            return null;
+        }
+        long Chars(string kind) => kinds[kind] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
+        var pieces = new List<WindowPiece>();
+        foreach (var (part, name) in new[]
+        {
+            ("system", "System prompt and tool notes"), ("tools", "Tool definitions"), ("instructions", "Your instructions"),
+            ("memory", "Memory"), ("skills", "Skills"), ("files", "Files"),
+        })
+        {
+            if (Chars(part) > 0)
+            {
+                pieces.Add(new WindowPiece(part, name, "", Weight: Chars(part)));
+            }
+        }
+        // From the latest compaction before it: its summary, then what came after.
+        var from = branch.FindLastIndex(answer - 1, answer, m => m.Summary is not null);
+        if (from >= 0)
+        {
+            pieces.Add(new WindowPiece("summary", "Summary of earlier messages", branch[from].Summary!, branch[from].Id.ToString(), Preview: ContextWindow.Preview(branch[from].Summary!)));
+        }
+        for (var i = Math.Max(0, from + 1); i < answer; i++)
+        {
+            var m = branch[i];
+            if (m.LeftOut || m.Content is not { Length: > 0 } text)
+            {
+                continue;
+            }
+            var (part, name) = m.Role switch
+            {
+                "user" => ("you", "Your message"),
+                "tool" => ("toolResults", $"{m.ToolName ?? "A tool"} (result)"),
+                _ => ("answers", "An answer"),
+            };
+            pieces.Add(new WindowPiece(part, name, text, m.Id.ToString(), m.ToolName, At: i, Preview: ContextWindow.Preview(text)));
+        }
+        if (pieces.Count == 0)
+        {
+            return null;
+        }
+        var model = await models.ResolveAsync(last.Model, ct);
+        var context = model?.Context ?? 0;
+        var reserve = context > 0 ? PromptBudget.Room(context, model?.MaxOutput, null) : 0;
+        var limit = Math.Max(context, (last.PromptTokens ?? 0) + reserve);
+        var window = ModelTokens.Window(pieces, new ModelTokens.Counted(null, last.PromptTokens, "rebuilt from the chat: this answer kept no record of its request"),
+            last.PromptTokens, limit, reserve, []);
+        return window;
     }
 
     /// <summary>The file of a message by its name, and whether the person left it out.</summary>

@@ -416,7 +416,7 @@ public static partial class ContextWindow
     private static string Cut(string s, int most) => s.Length <= most ? s : s[..(most - 1)] + "…";
 
     /// <summary>A text's start on one line, for an item's preview.</summary>
-    private static string Preview(string text)
+    public static string Preview(string text)
     {
         var line = string.Join(' ', text.Split((char[])['\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
         return line.Length <= 80 ? line : line[..80] + "…";

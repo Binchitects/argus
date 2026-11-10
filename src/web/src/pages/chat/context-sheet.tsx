@@ -12,6 +12,8 @@ export interface ChatContextWindow {
   at?: string
   model?: string | null
   compactedSince: boolean
+  /** The answer kept no record of its request (an older one, or one that failed): rebuilt from the chat, estimated. */
+  rebuilt?: boolean
 }
 
 const contextWindowQuery = (chat: string, stamp: string | null | undefined) => ({
@@ -96,6 +98,11 @@ export function ContextSheet({
             <p className="text-muted-foreground">What fills the window is shown from the first answer on.</p>
           ) : (
             <>
+              {data.rebuilt && (
+                <p className="rounded-md border bg-muted/40 p-2 text-xs">
+                  This answer kept no record of its request: what filled it is rebuilt from the chat, its messages piece by piece and the rest by how much it held.
+                </p>
+              )}
               {data.compactedSince && (
                 <p className="rounded-md border bg-muted/40 p-2 text-xs">The chat compacted since this answer: the next request starts from the summary, and counts it.</p>
               )}

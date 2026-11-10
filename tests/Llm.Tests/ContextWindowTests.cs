@@ -66,6 +66,36 @@ public sealed class ContextWindowTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_answer_that_kept_no_window_is_shown_rebuilt_from_the_chat_with_its_pieces()
+    {
+        var f = app.Factory;
+        var b = await PersonAsync(f);
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { }))).GetProperty("id").GetGuid();
+        await SendAsync(b, id, "How many legs has a spider?");
+        await SendAsync(b, id, "And an ant?");
+        // As answers from before 8.0 left it: what filled the request by kind (the gauge's), no window piece by piece.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            foreach (var m in db.ChatMessages.Where(m => m.ConversationId == id && m.Role == "assistant"))
+            {
+                (m.WindowJson, m.ContextJson) = (null, """{"system":1200,"tools":3000,"you":40,"answers":60}""");
+            }
+            await db.SaveChangesAsync();
+        }
+        var shown = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}/context"));
+        Assert.True(shown.GetProperty("rebuilt").GetBoolean());
+        var window = shown.GetProperty("window");
+        Assert.Equal("estimate", window.GetProperty("counted").GetString());
+        // Each message before the last answer, in its part; the rest at its measured size, one piece each.
+        var you = Part(window, "you").GetProperty("items").EnumerateArray().Select(i => i.GetProperty("preview").GetString()).ToList();
+        Assert.Equal(["And an ant?", "How many legs has a spider?"], you.Order(StringComparer.Ordinal));
+        Assert.Single(Part(window, "answers").GetProperty("items").EnumerateArray());
+        Assert.Equal("Tool definitions", Part(window, "tools").GetProperty("items")[0].GetProperty("name").GetString());
+        Assert.Equal(await LastPromptAsync(b, id), Sum(window));
+    }
+
+    [Fact]
     public async Task Counted_with_the_engines_tokenizer_the_pieces_add_up_to_the_requests_tokens()
     {
         await using var f = await EngineAppAsync();
