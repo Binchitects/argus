@@ -725,9 +725,14 @@ internal sealed class LanguageServerRun
     }
 
     /// <summary>
-    /// Stops the server, once: shutdown, then exit, as a client that is done does; whatever is left 2 s later (it, and
-    /// every process it started) is killed. <paramref name="why"/>: what its page is told (null: its page is gone).
+    /// Stops the server, once: shutdown, then exit, as a client that is done does; whatever is left 2 s later (at least 1 s
+    /// after exit; it, and every process it started) is killed. <paramref name="why"/>: what its page is told (null: its page is gone).
     /// </summary>
+    /// <summary>How long a server that was sent exit has to end before it is killed, at the least.</summary>
+    private static readonly TimeSpan ExitGrace = TimeSpan.FromSeconds(1);
+
+    private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
+
     public async Task StopAsync(string? why)
     {
         if (Interlocked.Exchange(ref _stopping, 1) == 1)
@@ -741,12 +746,14 @@ internal sealed class LanguageServerRun
         if (!_ended.Task.IsCompleted)
         {
             await _stop.CancelAsync();
+            var exitSent = false;
             if (await SendAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = ShutdownId, ["method"] = "shutdown" }))
             {
                 await Task.WhenAny(_shutDown.Task, _child.Exited, Task.Delay(Left()));
-                await SendAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "exit" });
+                exitSent = await SendAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "exit" });
             }
-            await Task.WhenAny(_child.Exited, Task.Delay(Left()));
+            // Exit gets a moment of its own to be read and acted on, even when shutdown took the whole wait unanswered.
+            await Task.WhenAny(_child.Exited, Task.Delay(exitSent ? Max(Left(), ExitGrace) : Left()));
         }
         _child.Kill();
         await Task.WhenAny(_ended.Task, Task.Delay(TimeSpan.FromSeconds(3)));
