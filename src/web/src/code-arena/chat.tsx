@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, Network, PanelRightClose, Paperclip, PictureInPicture2, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -93,6 +93,8 @@ import { useShownTheme } from './theme'
 import { AssistantPicker } from './assistant-picker'
 import { GoalBar, GoalDialog, LoopsDialog } from './goal'
 import { TasksPanel } from './tasks-panel'
+import { Splitter } from './splitter'
+import { bounds as layoutBounds, defaults as layoutDefaults } from './workbench-layout'
 import { cancelGoal, dropGoal, goalActive, nextGoal, pauseGoal, resumeGoal } from './tasks-api'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
@@ -421,6 +423,8 @@ export function Thread({
   onShow,
   onEvent,
   onTurnEnd,
+  tasksWidth,
+  onTasksWidth,
 }: {
   state: CodeState
   config: ChatConfig
@@ -432,8 +436,14 @@ export function Thread({
   onShow?: () => void
   onEvent?: (e: CodeEvent) => void
   onTurnEnd?: () => void
+  /** The task list's width beside the thread (the workbench keeps it); a window of its own keeps it here. */
+  tasksWidth?: number
+  onTasksWidth?: (width: number) => void
 }) {
   const [customizing, setCustomizing] = useState(false)
+  const [ownTasksWidth, setOwnTasksWidth] = useState(layoutDefaults.tasks)
+  const tasksW = tasksWidth ?? ownTasksWidth
+  const setTasksW = onTasksWidth ?? setOwnTasksWidth
   const queryClient = useQueryClient()
   const session = useQuery(sessionQuery)
   // Lines of the folder's files to go with the next message (from the editor: Add to chat), and a nudge to the box.
@@ -1221,7 +1231,13 @@ export function Thread({
       )}
       </div>
       {tasksOpen && (
-        <div className="absolute inset-0 z-20 flex animate-enter shadow-lg @3xl:static @3xl:w-80 @3xl:shrink-0 @3xl:border-l @3xl:shadow-none">
+        // Over the thread while the chat is narrow; beside it, as wide as the person dragged it, once it is wide.
+        <div className="hidden @3xl:flex">
+          <Splitter label="Resize the tasks" orientation="vertical" value={tasksW} min={layoutBounds.tasks[0]} max={layoutBounds.tasks[1]} grow={-1} onChange={setTasksW} />
+        </div>
+      )}
+      {tasksOpen && (
+        <div style={{ '--tasks-w': `${tasksW}px` } as CSSProperties} className="absolute inset-0 z-20 flex animate-enter shadow-lg @3xl:static @3xl:w-(--tasks-w) @3xl:shrink-0 @3xl:shadow-none">
           <TasksPanel selected={taskShown} onSelect={setTaskShown} onClose={() => setTasksOpen(false)} plan={state.mode === 'plan'} />
         </div>
       )}

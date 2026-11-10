@@ -19,6 +19,8 @@ export interface Layout {
   side: number
   chat: number
   panel: number
+  /** The agent's task list beside the chat, when the chat is wide enough to hold both. */
+  tasks: number
   sideOpen: boolean
   chatOpen: boolean
   panelOpen: boolean
@@ -42,6 +44,7 @@ export const defaults: Layout = {
   side: 264,
   chat: 440,
   panel: 280,
+  tasks: 320,
   sideOpen: true,
   chatOpen: true,
   panelOpen: false,
@@ -55,7 +58,7 @@ export const defaults: Layout = {
 }
 
 /** The panels' sizes, smallest and largest (the panel's largest also follows the window). */
-export const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000] } as const
+export const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000], tasks: [240, 720] } as const
 
 const isView = (x: unknown): x is View => typeof x === 'string' && (allViews as readonly string[]).includes(x)
 const isTab = (x: unknown): x is PanelTab => isView(x) || (typeof x === 'string' && (panelParts as readonly string[]).includes(x))
@@ -64,7 +67,7 @@ const isTab = (x: unknown): x is PanelTab => isView(x) || (typeof x === 'string'
 export function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout: Layout = { ...defaults, order: [...defaults.order], panelTabs: [...defaults.panelTabs], hidden: [] }
   if (!saved) return layout
-  for (const k of ['side', 'chat', 'panel'] as const) {
+  for (const k of ['side', 'chat', 'panel', 'tasks'] as const) {
     const size = saved[k]
     if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
   }

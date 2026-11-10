@@ -3227,7 +3227,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
     await waitFor(() =>
       expect(now.preferences.layout).toEqual({
-        view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
+        view: 'explorer', side: 300, chat: 960, panel: 280, tasks: 320, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
         sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output', 'ports'], hidden: [], activityBar: 'default',
       }),
     )
@@ -4688,6 +4688,11 @@ describe('Code Arena, the help', () => {
     await userEvent.click(within(await screen.findByRole('complementary', { name: 'Tasks' })).getByRole('button', { name: 'New task' }))
     await screen.findByRole('form', { name: 'New task' })
     for (const r of regionsShown()) seen.add(r)
+    // Its edge resizes it (the arrow keys too), and the workbench keeps the width.
+    const edge = screen.getByRole('separator', { name: 'Resize the tasks' })
+    edge.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(edge).toHaveAttribute('aria-valuenow', '336')
     await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
     await screen.findByRole('region', { name: 'Debug Console' })
     for (const r of regionsShown()) seen.add(r)
