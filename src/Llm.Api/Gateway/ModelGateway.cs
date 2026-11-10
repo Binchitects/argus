@@ -14,8 +14,9 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Gateway;
 
 /// <summary>Who a call is for, as the ledger books it: the person, where in the app it came from, its tag, chat and project.</summary>
+/// <param name="Booked">Told the call's line once it is written for the ledger (an API key's tokens then count to its minute).</param>
 public sealed record GatewayCaller(string Person, string Surface = "chat", string? Tag = null, Guid? Conversation = null, Guid? Project = null, string? KeyHash = null,
-    string? KeyAlias = null);
+    string? KeyAlias = null, Action<GatewayRequest>? Booked = null);
 
 /// <summary>The modes of Gateway:Mode: LiteLLM answers all (litellm); the app answers its own chat (chat); the app answers all it serves (own).</summary>
 public static class GatewayModes
@@ -58,6 +59,18 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
 
     /// <summary>Whether the app answers its own chat calls itself (Gateway:Mode chat or own).</summary>
     public bool ForChat => options.CurrentValue.Mode is GatewayModes.Chat or GatewayModes.Own;
+
+    /// <summary>Whether the app answers the API keys' requests itself too (Gateway:Mode own).</summary>
+    public bool ForApi => options.CurrentValue.Mode == GatewayModes.Own;
+
+    /// <summary>A request refused before anything was sent, in the ledger with why (it counts as no request and no failure).</summary>
+    public void Refused(GatewayCaller caller, string? model, int status, string reason, string message)
+    {
+        EnsureWriter();
+        var row = Row(caller, model ?? "", null, null, 0, clock.GetUtcNow());
+        (row.Status, row.HttpStatus, row.Refusal, row.Error, row.EndedAt) = (GatewayRequest.Refused, (short)status, reason.Length <= 16 ? reason : reason[..16], Short(message), row.StartedAt);
+        _ledger.Writer.TryWrite(row);
+    }
 
     /// <summary>The routes are built again at the next call (a model loaded, a server or price changed).</summary>
     public void Invalidate() => _table = null;
@@ -162,7 +175,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     /// response returned as it comes, booked when its stream ends or it is disposed. A refusal throws
     /// <see cref="ChatGatewayException"/> with the engine's words, after it is booked.
     /// </summary>
-    public async Task<HttpResponseMessage> ChatAsync(JsonObject body, GatewayCaller caller, IReadOnlyList<string> fallbacks, CancellationToken ct)
+    public async Task<HttpResponseMessage> ChatAsync(JsonObject body, GatewayCaller caller, IReadOnlyList<string> fallbacks, CancellationToken ct, bool passErrors = false)
     {
         EnsureWriter();
         var asked = body["model"]?.GetValue<string>() ?? throw new ChatGatewayException("The request names no model.", 400);
@@ -228,7 +241,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                 var metered = new MeteredStream(inner, meter, ended =>
                 {
                     Release();
-                    Book(row, meter, d, ended);
+                    Book(row, meter, d, ended, caller);
                 });
                 var content = new StreamContent(metered);
                 foreach (var h in res.Content.Headers)
@@ -259,6 +272,11 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         failed.EndedAt = clock.GetUtcNow();
         failed.DurationMs = (int)(failed.EndedAt - started).TotalMilliseconds;
         _ledger.Writer.TryWrite(failed);
+        // An API caller gets the engine's own error as it came (its status and body: the context's size, its own words).
+        if (passErrors && lastStatus is { } code and not 404 && lastError is { } said)
+        {
+            return new HttpResponseMessage((System.Net.HttpStatusCode)code) { Content = new StringContent(said, Encoding.UTF8, "application/json") };
+        }
         throw lastStatus == 404 && lastError?.StartsWith("There is no model", StringComparison.Ordinal) == true
             ? new ChatGatewayException(lastError, 404)
             : ChatGatewayException.From(lastError ?? "", lastStatus);
@@ -268,14 +286,15 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
 
     private static GatewayRequest Row(GatewayCaller caller, string model, Deployment? d, string? fallbackFrom, short attempts, DateTimeOffset started) => new()
     {
-        StartedAt = started, Surface = caller.Surface, Call = "chat", Protocol = "openai", CreditKind = "chat", Person = caller.Person.Trim().ToLowerInvariant(),
+        StartedAt = started, Surface = caller.Surface, Call = "chat", Protocol = "openai", CreditKind = caller.Surface is "api" or "studio" ? "api" : "chat",
+        Person = caller.Person.Trim().ToLowerInvariant(),
         KeyHash = caller.KeyHash, KeyAlias = caller.KeyAlias ?? Chat.ChatKey.Alias, Tag = caller.Tag, ConversationId = caller.Conversation, ProjectId = caller.Project,
         Model = model, Deployment = d is null ? null : Uri.TryCreate(d.BaseUrl, UriKind.Absolute, out var u) ? u.Authority : d.BaseUrl,
         FallbackFrom = fallbackFrom, Attempts = attempts, Status = GatewayRequest.Done, HttpStatus = 200,
     };
 
     /// <summary>The call's line in the ledger, as its stream ended (<paramref name="whole"/>: to [DONE], else the caller went away).</summary>
-    private void Book(GatewayRequest row, SseMeter meter, Deployment d, bool whole)
+    private void Book(GatewayRequest row, SseMeter meter, Deployment d, bool whole, GatewayCaller caller)
     {
         row.EndedAt = clock.GetUtcNow();
         row.DurationMs = (int)Math.Max(0, (row.EndedAt - row.StartedAt).TotalMilliseconds);
@@ -299,6 +318,14 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             (row.Status, row.HttpStatus) = (GatewayRequest.Stopped, 499);
         }
         _ledger.Writer.TryWrite(row);
+        try
+        {
+            caller.Booked?.Invoke(row);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            LogNotBooked(logger, 1, ex.Message);
+        }
     }
 
     private void EnsureWriter()

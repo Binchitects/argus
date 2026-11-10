@@ -768,6 +768,15 @@ it but for twelve tests that check LiteLLM's wire: `metadata.tags` on what reach
 Deck, SecurityReview, Review: the tag is in the ledger now), the chat key, the connection waits and the
 `X-LLM-User-Email` header. They are rewritten in commit 19, when the mode is the only one.
 
+Commit 11 (2026-11-11): with `Gateway:Mode` `own`, API keys' chat completions are let in by `Admission` (the key known
+and not expired, its person enabled and with API access, the model there and theirs, the requests and tokens a minute
+in `gateway.rate_windows` with Retry-After and the `x-ratelimit-*` headers and the sentence Code Arena reads, the own
+key's 30-day budget with "Budget has been exceeded!", credit, the safeguards with masked texts sent masked, room for the
+model), each refusal booked as refused; then the answer cache, the prompt log, KeyLine and AnswerGate as before, and
+ModelGateway instead of LiteLLM, the engine's own error passed through. AdmissionTests. In the mode, six API tests check
+LiteLLM's behaviour, not the app's: a model the fake LiteLLM took without its being registered (now 404), the chat key on
+the wire, 401 for a key whose API access is off (now 403 with why), and LiteLLM's budget error from the fake engine.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

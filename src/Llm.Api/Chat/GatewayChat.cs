@@ -140,7 +140,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         var tags = (request["metadata"]?["tags"] as JsonArray ?? []).Select(t => t is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>().ToList();
         Guid? Id(string prefix) => tags.FirstOrDefault(t => t.StartsWith(prefix, StringComparison.Ordinal)) is { } t && Guid.TryParse(t[prefix.Length..], out var g) ? g : null;
         var tag = tags.FirstOrDefault(t => !t.StartsWith(Projects.ProjectTags.ChatPrefix, StringComparison.Ordinal) && !t.StartsWith(Projects.ProjectTags.ProjectPrefix, StringComparison.Ordinal));
-        return new Gateway.GatewayCaller(personEmail, "chat", tag, Id(Projects.ProjectTags.ChatPrefix) ?? conversation, Id(Projects.ProjectTags.ProjectPrefix));
+        return new Gateway.GatewayCaller(personEmail, tag is null ? "chat" : "app", tag, Id(Projects.ProjectTags.ChatPrefix) ?? conversation, Id(Projects.ProjectTags.ProjectPrefix));
     }
 
     /// <summary>One picture from an image model at the gateway, as PNG bytes. The spend is the person's, as in chat.</summary>

@@ -399,6 +399,8 @@ public static class AnswerCacheEndpoints
         services.AddSingleton<KeyBook>();
         services.AddSingleton<KeyPeople>();
         services.AddSingleton<PromptLogWriter>();
+        services.AddScoped<Admission>();
+        services.AddScoped<RateWindows>();
         services.Configure<Tags.TagOptions>(config.GetSection("Tags"));
         services.AddScoped<Tags.TagSummaries>();
         services.AddScoped<OwnKeys>();
@@ -515,7 +517,63 @@ public static class AnswerCacheEndpoints
         byte[]? body = null;
         JsonObject? json = null;
         CacheLookup? lookup = null;
-        if (completions && cache.Options.On && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostCachedRequest && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
+        // The app's own gateway (Gateway:Mode own): the request read whole and let in here (Admission), then sent to the
+        // engine by ModelGateway instead of LiteLLM, booked in the ledger.
+        var own = http.RequestServices.GetRequiredService<ModelGateway>();
+        var ownMode = completions && own.ForApi;
+        Admitted? admitted = null;
+        if (ownMode)
+        {
+            using var whole = new MemoryStream();
+            var chunk = new byte[64 * 1024];
+            int got;
+            while ((got = await request.Body.ReadAsync(chunk, ct)) > 0)
+            {
+                if (whole.Length + got > MostPinnedRequest)
+                {
+                    await OwnErrorAsync(http, 413, "invalid_request_error", "The request is too large.", null, null, ct);
+                    return;
+                }
+                whole.Write(chunk, 0, got);
+            }
+            body = whole.ToArray();
+            try
+            {
+                json = JsonNode.Parse(body) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                json = null;
+            }
+            if (json is null)
+            {
+                await OwnErrorAsync(http, 400, "invalid_request_error", "The request is not a JSON object.", null, null, ct);
+                return;
+            }
+            var (letIn, refusal) = await http.RequestServices.GetRequiredService<Admission>().CheckAsync(key, json, ct);
+            if (refusal is not null)
+            {
+                var holder = key is { Length: > 0 } ? await http.RequestServices.GetRequiredService<KeyBook>().ForAsync(key, ct) : null;
+                if (holder is not null)
+                {
+                    own.Refused(new GatewayCaller(holder.Email, "api", KeyHash: holder.Hash, KeyAlias: holder.Alias), json["model"]?.ToString(), refusal.Status, refusal.Reason, refusal.Message);
+                    if (cache.Options.LogPrompts)
+                    {
+                        prompts.Begin(holder.UserId, holder.Hash, json)?.End(PromptLogEntry.Refused, refusal.Status, error: refusal.Message);
+                    }
+                }
+                await OwnErrorAsync(http, refusal.Status, refusal.Type, refusal.Message, refusal.RetryAfter, refusal.Headers, ct);
+                return;
+            }
+            admitted = letIn;
+            // A text the safeguards masked goes masked.
+            body = Encoding.UTF8.GetBytes(json.ToJsonString());
+            if (cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
+            {
+                lookup = await cache.LookupAsync(key!, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
+            }
+        }
+        if (completions && body is null && cache.Options.On && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostCachedRequest && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
         {
             body = new byte[request.ContentLength.Value];
             var read = 0;
@@ -738,7 +796,18 @@ public static class AnswerCacheEndpoints
         HttpResponseMessage res;
         try
         {
-            res = await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, work);
+            res = ownMode && admitted is not null
+                ? await own.ChatAsync(json!, OwnCaller(admitted, json!, http.RequestServices.GetRequiredService<IServiceScopeFactory>()),
+                    route.FallbackOf(json!["model"]?.ToString()) is { } fb ? [fb] : [], work, passErrors: true)
+                : await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, work);
+        }
+        catch (Chat.ChatGatewayException ex) when (ownMode)
+        {
+            // The engine refused or could not be reached: the caller gets its words, in the OpenAI shape.
+            var status = ex.Status ?? StatusCodes.Status502BadGateway;
+            logged?.End(PromptLogEntry.Failed, status, error: ex.Message);
+            await OwnErrorAsync(http, status, status == 404 ? "model_not_found" : status >= 500 ? "upstream_error" : "invalid_request_error", ex.Message, null, null, ct);
+            return;
         }
         catch (OperationCanceledException) when (StoppedByAdmin())
         {
@@ -829,5 +898,39 @@ public static class AnswerCacheEndpoints
                 await cache.StoreAsync(lookup!, answer, CancellationToken.None);
             }
         }
+    }
+
+    /// <summary>An error as the OpenAI clients read it, with its Retry-After and rate-limit headers.</summary>
+    private static async Task OwnErrorAsync(HttpContext http, int status, string type, string message, int? retryAfter, IReadOnlyDictionary<string, string>? headers, CancellationToken ct)
+    {
+        http.Response.StatusCode = status;
+        if (retryAfter is { } after)
+        {
+            http.Response.Headers.RetryAfter = after.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+        {
+            http.Response.Headers[name] = value;
+        }
+        await http.Response.WriteAsJsonAsync(new { error = new { message, type, code = status.ToString(System.Globalization.CultureInfo.InvariantCulture) } }, ct);
+    }
+
+    /// <summary>
+    /// Who an API key's request is for, as the ledger books it: the key's person, a workspace's key as Code Studio's, its tag,
+    /// chat and project (Code Arena names them: chat:ID, project:ID); its tokens count to the key's minute once it ends.
+    /// </summary>
+    private static GatewayCaller OwnCaller(Admitted a, JsonObject json, IServiceScopeFactory scopes)
+    {
+        var tags = (json["metadata"]?["tags"] as JsonArray ?? []).Select(t => t is JsonValue v && v.TryGetValue<string>(out var x) ? x : null).OfType<string>().ToList();
+        Guid? Id(string prefix) => tags.FirstOrDefault(t => t.StartsWith(prefix, StringComparison.Ordinal)) is { } t && Guid.TryParse(t[prefix.Length..], out var g) ? g : null;
+        var tag = tags.FirstOrDefault(t => !t.StartsWith(Projects.ProjectTags.ChatPrefix, StringComparison.Ordinal) && !t.StartsWith(Projects.ProjectTags.ProjectPrefix, StringComparison.Ordinal));
+        var limited = a.TokensPerMinute is not null;
+        return new GatewayCaller(a.Key.Email, a.Key.Kind == Llm.Core.Gateway.ApiKey.Studio ? "studio" : "api", tag, Id(Projects.ProjectTags.ChatPrefix), Id(Projects.ProjectTags.ProjectPrefix),
+            a.Key.Hash, a.Key.Alias, limited ? row => _ = Task.Run(async () =>
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<RateWindows>().AddTokensAsync(a.Key.Hash, row.StartedAt,
+                    Math.Max(0, row.PromptTokens - row.CachedTokens) + row.CompletionTokens, CancellationToken.None);
+            }) : null);
     }
 }
