@@ -18,6 +18,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     {
         Config = config;
         Ui = ui;
+        ui.Rings = config.TerminalBell;
         Env = env;
         Http = http;
         Gateway = gateway;

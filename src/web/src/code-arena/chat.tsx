@@ -93,6 +93,7 @@ import { useShownTheme } from './theme'
 import { AssistantPicker } from './assistant-picker'
 import { GoalBar, GoalDialog, LoopsDialog } from './goal'
 import { TasksPanel } from './tasks-panel'
+import { useTurnNotices } from './turn-notices'
 import { Splitter } from './splitter'
 import { bounds as layoutBounds, defaults as layoutDefaults } from './workbench-layout'
 import { cancelGoal, dropGoal, goalActive, nextGoal, pauseGoal, resumeGoal } from './tasks-api'
@@ -425,6 +426,7 @@ export function Thread({
   onTurnEnd,
   tasksWidth,
   onTasksWidth,
+  shown = true,
 }: {
   state: CodeState
   config: ChatConfig
@@ -439,8 +441,15 @@ export function Thread({
   /** The task list's width beside the thread (the workbench keeps it); a window of its own keeps it here. */
   tasksWidth?: number
   onTasksWidth?: (width: number) => void
+  /** Whether the chat is on screen (the workbench may hide it): when not, what the agent says goes in a bubble. */
+  shown?: boolean
 }) {
   const [customizing, setCustomizing] = useState(false)
+  // The bubbles' hands into the thread (set at each drawing: the stream's callback was made once).
+  const told = useRef<(e: CodeEvent) => void>(() => {})
+  const ended = useRef<(failed: string | null) => void>(() => {})
+  const noticesAnswered = useRef<(callId: string) => void>(() => {})
+  const sendRef = useRef<(text: string) => Promise<boolean>>(async () => false)
   const [ownTasksWidth, setOwnTasksWidth] = useState(layoutDefaults.tasks)
   const tasksW = tasksWidth ?? ownTasksWidth
   const setTasksW = onTasksWidth ?? setOwnTasksWidth
@@ -701,6 +710,7 @@ export function Thread({
             if (event.type === 'error') failed = event.message
             watch?.(event)
             onEvent?.(event)
+            told.current(event)
             events.push(event)
           },
           new AbortController().signal,
@@ -723,6 +733,8 @@ export function Thread({
           setLive(null)
           // A compaction asked for here says its own (a toast).
           if (failed && start.mode !== 'compact') setError(failed)
+          // The person looking elsewhere is told: ready, or failed.
+          if (received && start.mode !== 'compact') ended.current(failed)
         }
         onTurnEnd?.()
       }
@@ -965,6 +977,7 @@ export function Thread({
   // The same function at each drawing: the answers are not drawn again for it.
   const decide = useCallback((callId: string, answer: 'allow' | 'always' | 'deny') => {
     setLive((s) => (s ? { ...s, waiting: (s.waiting ?? []).filter((w) => w !== callId) } : s))
+    noticesAnswered.current(callId)
     void answerApproval(callId, answer).catch((e) => toast.error(errorMessage(e)))
   }, [])
 
@@ -980,6 +993,23 @@ export function Thread({
   const stop = () => void stopTurn().catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e)))
   // The same function at each drawing: the answer is not drawn again for it.
   const skip = useCallback(() => void skipThinking().catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e))), [])
+
+  // What the agent says while the person looks elsewhere: waiting for them, ready, failed (a bubble, a desktop notification).
+  const notices = useTurnNotices({ chatShown: shown, onDecide: decide, onReply: (text) => void sendRef.current(text), onShowChat: onShow })
+  // After each drawing: the stream's callback (made once) reaches the thread as it is now.
+  useLayoutEffect(() => {
+    sendRef.current = send
+    noticesAnswered.current = notices.answered
+    told.current = (e: CodeEvent) => {
+      if (e.type === 'approval') notices.notify({ id: `approval-${e.id}`, kind: 'approval', callId: e.id, title: `Waiting for you: ${e.title}`, detail: e.risk ?? null, always: e.always ?? null })
+      else if (e.type === 'tool_result') notices.answered(e.id)
+      else if (e.type === 'vm_login') notices.notify({ id: `sign-in-${e.id}`, kind: 'sign-in', title: `Waiting for ${e.vm}'s sign-in`, detail: 'Code Arena asks for the guest’s user and password.' })
+    }
+    ended.current = (failed: string | null) =>
+      failed
+        ? notices.notify({ id: `failed-${Date.now()}`, kind: 'failed', title: 'The turn failed', detail: failed })
+        : notices.notify({ id: `ready-${Date.now()}`, kind: 'ready', title: 'Ready: the agent finished', detail: 'Its answer is in the chat; reply here, or open it.' })
+  })
 
   const empty = turns.length === 0
   const lastTurn = turns.length - 1
@@ -1245,6 +1275,7 @@ export function Thread({
       <GoalDialog key={goalKey} open={goalOpen} onOpenChange={setGoalOpen} onSet={goalChanged} initial={goalText} queued={goalActive(state.goal)} />
       <LoopsDialog key={`loop-${loopKey}`} open={loopOpen} onOpenChange={setLoopOpen} initial={loopText} />
       <RewindDialog question={rewinding} onClose={() => setRewinding(null)} onRewound={(said, chat) => rewinding && void rewound(rewinding, said, chat)} />
+      {notices.bubbles}
     </section>
   )
 }

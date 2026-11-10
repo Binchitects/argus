@@ -225,6 +225,8 @@ internal sealed class Config
     public bool Window { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
+    /// <summary>The terminal's bell when it waits for the person (a tool to allow) and when a long turn ends: on unless false.</summary>
+    public bool TerminalBell { get; set; } = true;
     /// <summary>A plan proposed in plan mode is read again with fresh eyes before the person reviews it: on unless false.</summary>
     public bool PlanCritique { get; set; } = true;
     /// <summary>Earlier tool results the model has used are summarised before each step, kept whole for read_result: on unless false.</summary>
@@ -390,6 +392,7 @@ internal sealed class Config
         };
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
+        config.TerminalBell = raw.Bool("terminalBell") ?? true;
         config.PlanCritique = raw.Bool("planCritique") ?? true;
         config.CondenseResults = raw.Bool("condenseResults") ?? true;
         config.Python = raw.Str("python");
@@ -537,6 +540,7 @@ internal sealed class Config
         Set("providers", Providers.Count == 0 ? null : new JsonObject(Providers.Select(p => KeyValuePair.Create(p.Name, (JsonNode?)p.ToJson()))));
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
+        Set("terminalBell", TerminalBell ? null : false);
         Set("planCritique", PlanCritique ? null : false);
         Set("condenseResults", CondenseResults ? null : false);
         Set("python", Python);

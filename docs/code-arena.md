@@ -3403,6 +3403,16 @@ until they end: the turn that carries on then commits them.
 `"commitName"` and `"commitEmail"` change the co-author's name and address
 (Code Arena, `code-arena@` the Arena's host, as installed).
 
+Looking at another window meanwhile? The terminal rings its bell when Code Arena
+asks to allow a tool and when a turn of more than ten seconds ends
+(`"terminalBell": false` turns it off). The IDE says the same in a bubble in its
+corner while the chat is out of sight or its window is not in front: **Waiting
+for you** (Allow, Always or Deny right there), a VM's sign-in it waits for,
+**Ready** (reply from the bubble) and a turn that failed; and on the desktop
+while its window is hidden, once **Desktop Notifications** is on in its gear
+menu. The admins' broadcasts show above the workbench and under the terminal's
+banner.
+
 ## The person's own MCP servers
 
 Under `"mcpServers"` in `config.json`, in the shape Claude Code and others use:
@@ -3431,7 +3441,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"codeIntelTools": false`
 (no Farzan Graph MCP), `"toolChars"` (tools on demand, above), `"codeIntelUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"condenseResults"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"terminalBell"`, `"planCritique"`, `"condenseResults"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"`,
 `"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_CODE_INTEL_URL` in the environment gives Farzan Graph's address
 for one run.

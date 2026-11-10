@@ -63,6 +63,23 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         }
     }
 
+    /// <summary>Whether it rings the terminal's bell when it waits for the person, or a long turn ends (config terminalBell; a terminal only).</summary>
+    public bool Rings { get; set; }
+
+    /// <summary>The terminal's bell, for one looking elsewhere: it waits for them, or it is ready. Nothing when output is not a terminal.</summary>
+    public void Bell()
+    {
+        if (!Rings || !Color || Quiet)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            Out.Write('\a');
+            Out.Flush();
+        }
+    }
+
     /// <summary>A line of progress: tool calls, notices. Starts on a fresh line.</summary>
     public void Line(string text = "")
     {
@@ -331,6 +348,8 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         }
         try
         {
+            // Waiting for them: the bell, for one looking at another window.
+            Bell();
             while (true)
             {
                 var prompt = $"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ";

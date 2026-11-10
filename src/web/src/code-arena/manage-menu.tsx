@@ -1,8 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Settings } from 'lucide-react'
 import { toast } from '@/components/ui/toaster'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -14,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
+import { desktopState, setDesktop, type DesktopState } from '@/lib/desktop'
 import { cn } from '@/lib/utils'
 import { changeSettings, stateQuery, type CodeState } from './api'
 import { runCommand } from './commands'
@@ -27,6 +30,7 @@ const toolModes = { direct: 'Direct', code: 'As code', both: 'Both' } as const
  */
 export function ManageMenu({ state, edge, compact = false }: { state: CodeState; edge: 'left' | 'right'; compact?: boolean }) {
   const queryClient = useQueryClient()
+  const [desktop, setDesktopNow] = useState<DesktopState>(desktopState)
   const keys = {
     settings: useKeyFor('workbench.action.openSettings'),
     keybindings: useKeyFor('workbench.action.openGlobalKeybindings'),
@@ -72,6 +76,16 @@ export function ManageMenu({ state, edge, compact = false }: { state: CodeState;
           Command Palette {keys.palette && <DropdownMenuShortcut>{keys.palette}</DropdownMenuShortcut>}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => runCommand('codeArena.sendFeedback')}>Send Feedback…</DropdownMenuItem>
+        {desktop !== 'unsupported' && (
+          <DropdownMenuCheckboxItem
+            checked={desktop === 'on'}
+            disabled={desktop === 'blocked'}
+            onCheckedChange={(on) => void setDesktop(on === true).then(setDesktopNow)}
+            title={desktop === 'blocked' ? 'The browser blocks them for this page: allow them in its site settings.' : 'Waiting for you, ready, failed: said on the desktop while the window is hidden.'}
+          >
+            Desktop Notifications
+          </DropdownMenuCheckboxItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">{`${state.model}'s tools`}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={state.toolModeSet ? (state.toolMode ?? 'both') : 'arena'} onValueChange={(v) => void setToolMode(v === 'arena' ? null : (v as 'direct' | 'code' | 'both'))}>

@@ -758,6 +758,9 @@ internal sealed partial class Repl(Runtime rt)
     /// A turn: the person's message (null: carrying on after commands that ended). <paramref name="turn"/> counts what it
     /// spends, <paramref name="limit"/> also stops it (a goal's budget). Whether it was stopped (Ctrl+C, or the limit).
     /// </summary>
+    /// <summary>A turn this long rings the bell as it ends.</summary>
+    internal static TimeSpan LongTurn { get; set; } = TimeSpan.FromSeconds(10);
+
     private async Task<bool> TurnAsync(string? input, CancellationToken ct, Spend? turn = null, CancellationToken limit = default)
     {
         if (input is null)
@@ -777,6 +780,7 @@ internal sealed partial class Repl(Runtime rt)
         }
         turn ??= new Spend();
         rt.Turn = turn;
+        var began = System.Diagnostics.Stopwatch.StartNew();
         var planBefore = rt.Context.Plan;
         var stopped = false;
         using var key = rt.Env.Cancel.BeginTurn();
@@ -834,6 +838,11 @@ internal sealed partial class Repl(Runtime rt)
         if (turn.Requests > 0)
         {
             Ui.Info(turn.Describe(Ui) + " · " + ContextUse());
+        }
+        // A long turn over: the bell, for one who went to another window meanwhile.
+        if (!stopped && began.Elapsed >= LongTurn)
+        {
+            Ui.Bell();
         }
         if (rt.Context.Plan.Review == WorkPlan.Proposed && !ReferenceEquals(rt.Context.Plan, planBefore))
         {

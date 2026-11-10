@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { makeQueryClient, Providers } from '@/app/providers'
 import { blank } from '@/pages/chat/live'
 import type { ChatConfig, Message } from '@/pages/chat/types'
@@ -231,6 +231,41 @@ describe('Code Arena in the browser', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/stop')).toBe(true)
     end()
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
+  it('while the person looks elsewhere, a bubble says it waits for them (Allow there), and that it is ready (a reply from there)', async () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    onTestFinished(() => focus.mockRestore())
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    let asked = 0
+    const { calls } = backend({
+      extra: {
+        'POST /api/messages': () =>
+          ++asked === 1
+            ? {
+                events: [
+                  { type: 'question', id: 'm0', parentId: null },
+                  { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+                  { type: 'tool_call', id: 'c1', name: 'run_shell', arguments: '{"command":"npm test"}', tool: 'local' },
+                  { type: 'approval', id: 'c1', name: 'run_shell', arguments: '{"command":"npm test"}', tool: 'local', title: 'run_shell', always: 'for `npm test …`' },
+                ],
+                until: over,
+              }
+            : { events: [{ type: 'question', id: 'm2', parentId: 'm1' }, { type: 'assistant', id: 'm3', parentId: 'm2', model: 'model-a' }, { type: 'content', text: 'Done.' }] },
+      },
+    })
+    renderCode()
+    await ask('Run the tests')
+    const bubbles = await screen.findByRole('list', { name: 'Code Arena tells you' })
+    const waiting = within(bubbles).getByRole('alertdialog', { name: 'Waiting for you: run_shell' })
+    await userEvent.click(within(waiting).getByRole('button', { name: 'Allow' }))
+    expect(calls.find((c) => c.path === '/api/approvals')?.body).toEqual({ id: 'c1', answer: 'allow' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Waiting for you: run_shell' })).toBeNull())
+    end()
+    const ready = await screen.findByRole('status', { name: 'Ready: the agent finished' })
+    await userEvent.type(within(ready).getByRole('textbox', { name: 'Reply to the agent' }), 'now the docs{Enter}')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/messages').at(-1)?.body).toMatchObject({ text: 'now the docs' }))
   })
 
   it('a message typed while an answer is written waits pending in the thread, to edit, cancel or clear, and the answer is not stopped', async () => {

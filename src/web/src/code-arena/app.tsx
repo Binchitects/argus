@@ -1689,6 +1689,7 @@ function Workbench({
         onTurnEnd={onTurnEnd}
         tasksWidth={layout.tasks}
         onTasksWidth={(size) => change({ tasks: size })}
+        shown={layout.chatOpen}
       />
     </aside>
   )
