@@ -1984,6 +1984,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// Asks the page for a VM's sign-in (a dialog with the password unseen) and waits for it; Stop ends the wait. The
     /// question says no secret, and what comes back is answered to nobody: it goes to the hypervisor only.
     /// </summary>
+    /// <summary>How long a VM's sign-in waits for the person in the IDE.</summary>
+    internal static TimeSpan LoginWait { get; set; } = TimeSpan.FromMinutes(5);
+
     private async Task<LoginAnswer?> AskLoginAsync(LoginQuestion q, CancellationToken ct)
     {
         var id = $"login_{Guid.NewGuid():N}";
@@ -2002,7 +2005,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 ["canSave"] = q.CanSave,
                 ["keyring"] = q.Keyring,
             });
-            return await answer.Task.WaitAsync(ct);
+            try
+            {
+                return await answer.Task.WaitAsync(LoginWait, ct);
+            }
+            catch (TimeoutException)
+            {
+                // Nobody answered (the page was away, or the person did not see it): the tool says so, instead of waiting for ever.
+                _rt.Ui.Info($"No one gave {q.Vm}'s sign-in within {Fmt.Duration(LoginWait)}.");
+                return null;
+            }
         }
         finally
         {

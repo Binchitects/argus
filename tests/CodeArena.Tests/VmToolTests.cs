@@ -49,7 +49,7 @@ public sealed class VmToolTests : IDisposable
           if [ -f "$d/running" ]; then echo 'VMState="running"'; else echo 'VMState="poweroff"'; fi
           echo 'ostype="Ubuntu (64-bit)"'
           echo 'GuestAdditionsVersion="7.0.20 r163906"'
-          echo 'GuestAdditionsRunLevel=2';;
+          if [ -f "$d/runlevel" ]; then echo "GuestAdditionsRunLevel=$(cat "$d/runlevel")"; else echo 'GuestAdditionsRunLevel=2'; fi;;
         startvm) touch "$d/running";;
         controlvm)
           case "$2" in
@@ -199,6 +199,32 @@ public sealed class VmToolTests : IDisposable
         Assert.False(File.Exists(File.ReadAllText(Path.Combine(bin, "password-file")).Trim()));
         Assert.Contains("lookup service code-arena-vm vm virtualbox:test-vm", File.ReadAllText(Path.Combine(bin, "keyring.log")), StringComparison.Ordinal);
         NowhereIsThePassword(h);
+    }
+
+    [Fact]
+    public async Task A_guest_whose_tools_do_not_answer_is_said_so_at_once_and_a_command_failing_again_and_again_is_not_run_a_third_time()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        VBoxManage(bin);
+        SecretTool(bin, "tester", Password);
+        File.WriteAllText(Path.Combine(bin, "running"), "");
+        // Still booting: its Guest Additions not up.
+        File.WriteAllText(Path.Combine(bin, "runlevel"), "0");
+        Calls(("vm_run", """{"vm":"test-vm","command":"whoami"}"""));
+        Assert.Equal(0, await h.Run("", "-p", "who are you there", "--mode", "yolo"));
+        Assert.Contains("guest tools do not answer yet", Results()[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("guestcontrol", File.ReadAllText(Path.Combine(bin, "vbox.log")), StringComparison.Ordinal);
+
+        // Up now; a command that fails each time is run twice, then refused, with what to do instead.
+        File.Delete(Path.Combine(bin, "runlevel"));
+        Calls(("vm_run", """{"vm":"test-vm","command":"false"}"""), ("vm_run", """{"vm":"test-vm","command":"false"}"""), ("vm_run", """{"vm":"test-vm","command":"false"}"""));
+        Assert.Equal(0, await h.Run("", "-p", "try it", "--mode", "yolo"));
+        var results = Results();
+        Assert.StartsWith("Exit code 1", results[0], StringComparison.Ordinal);
+        Assert.StartsWith("Exit code 1", results[1], StringComparison.Ordinal);
+        Assert.Contains("failed 2 times in a row", results[2], StringComparison.Ordinal);
+        Assert.Contains("vm_screenshot", results[2], StringComparison.Ordinal);
     }
 
     [Fact]

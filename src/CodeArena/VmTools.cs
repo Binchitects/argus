@@ -438,7 +438,7 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
 
     private async Task<ToolResult> CopyAsync(JsonObject a, ToolContext c, CancellationToken ct)
     {
-        var vm = await Running(a.Str("vm"), ct);
+        var vm = await Answering(a.Str("vm"), ct);
         var from = Required(a, "from");
         var to = Required(a, "to");
         if (Required(a, "direction") == "out")
@@ -492,30 +492,103 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
         return vm.Running ? vm : throw new ToolError($"{vm.Name} is not running: start it first (vm_power), and give its guest time to boot.");
     }
 
+    // Each guest's tools found answering, and when (asked again a minute later at most).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _ready = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A running VM whose guest tools answer (what commands and files in it need): said at once when they do not, rather than
+    /// a command waiting for its time limit and the model trying again and again.
+    /// </summary>
+    private async Task<VmInfo> Answering(string? name, CancellationToken ct)
+    {
+        var vm = await Running(name, ct);
+        var key = $"{vm.Host.Title}\n{vm.Id}";
+        if (_ready.TryGetValue(key, out var at) && DateTime.UtcNow - at < TimeSpan.FromMinutes(1))
+        {
+            return vm;
+        }
+        bool ready;
+        try
+        {
+            using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            within.CancelAfter(TimeSpan.FromSeconds(20));
+            ready = await vm.Host.ReadyAsync(vm, null, within.Token);
+        }
+        catch (Exception e) when (e is ToolError or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            // The hypervisor did not say: the command is tried, and says itself.
+            return vm;
+        }
+        if (!ready)
+        {
+            _ready.TryRemove(key, out _);
+            throw new ToolError($"{vm.Name}'s guest tools do not answer yet: it may still be booting, or its guest tools (VirtualBox's Guest Additions, " +
+                "VMware Tools, the QEMU guest agent, Hyper-V's integration services) are not installed or not running. A command now would only wait. " +
+                "Wait for it (vm_list with vm says when they answer), look at its screen with vm_screenshot, or ask the person; do not keep retrying.");
+        }
+        _ready[key] = DateTime.UtcNow;
+        return vm;
+    }
+
+    // The commands that failed in a guest, by VM and command: how often in a row, and the last time.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int Times, DateTime At, string Said)> _failed = new(StringComparer.Ordinal);
+
+    /// <summary>The most times the same command may fail in a row in a guest before it is refused (a quarter of an hour apart resets it).</summary>
+    public const int MostFailures = 2;
+
     private async Task<ToolResult> RunToolAsync(JsonObject a, CancellationToken ct)
     {
         var vm = await Running(a.Str("vm"), ct);
         if (a.Bool("processes") == true)
         {
+            vm = await Answering(vm.Name, ct);
             var list = await AsGuestAsync(vm, GuestNeed.Run, ct, async login => login?.Hide(await vm.Host.ProcessesAsync(vm, login, ct)) ?? await vm.Host.ProcessesAsync(vm, login, ct));
             return new ToolResult(Cut(list)) { Display = $"{list.Split('\n').Length} lines" };
         }
         var command = Required(a, "command");
+        var failedKey = $"{vm.Id}\n{command.Trim()}";
+        if (_failed.TryGetValue(failedKey, out var before) && before.Times >= MostFailures && DateTime.UtcNow - before.At < TimeSpan.FromMinutes(15))
+        {
+            throw new ToolError($"`{Fmt.OneLine(command, 80)}` failed {before.Times} times in a row in {vm.Name} already ({before.Said}): it is not run again. " +
+                "Something else is wrong: look at the guest's screen (vm_screenshot), check it with vm_list, try another way, or ask the person.");
+        }
+        vm = await Answering(vm.Name, ct);
         var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout") ?? DefaultSeconds, 1, MostSeconds));
         var clock = Stopwatch.StartNew();
-        var (run, hidden) = await AsGuestAsync(vm, GuestNeed.Run, ct, async login =>
+        GuestRun run;
+        string hidden;
+        try
         {
-            var r = await vm.Host.RunAsync(vm, login, command, timeout, ct);
-            return (r, login?.Hide(r.Output) ?? r.Output);
-        });
+            (run, hidden) = await AsGuestAsync(vm, GuestNeed.Run, ct, async login =>
+            {
+                var r = await vm.Host.RunAsync(vm, login, command, timeout, ct);
+                return (r, login?.Hide(r.Output) ?? r.Output);
+            });
+        }
+        catch (ToolError e)
+        {
+            Failed(failedKey, Fmt.OneLine(e.Message, 120));
+            throw;
+        }
         var said = run.TimedOut
             ? $"Gave up after {Fmt.Duration(timeout)} (it may still run in the guest)."
             : $"Exit code {run.ExitCode}, after {Fmt.Duration(clock.Elapsed)}.";
+        if (run.TimedOut || run.ExitCode != 0)
+        {
+            Failed(failedKey, run.TimedOut ? "timed out" : $"exit {run.ExitCode}");
+        }
+        else
+        {
+            _failed.TryRemove(failedKey, out _);
+        }
         return new ToolResult($"{said}\n{Cut(hidden)}".TrimEnd(), run.TimedOut || run.ExitCode != 0)
         {
             Display = (run.TimedOut ? "timed out" : $"exit {run.ExitCode}") + (hidden.Length > 0 ? "\n" + Fmt.Tail(hidden, 6) : ""),
         };
     }
+
+    private void Failed(string key, string said) =>
+        _failed.AddOrUpdate(key, _ => (1, DateTime.UtcNow, said), (_, was) => (DateTime.UtcNow - was.At < TimeSpan.FromMinutes(15) ? was.Times + 1 : 1, DateTime.UtcNow, said));
 
     private static string Cut(string text) =>
         text.Length <= MostOutput ? text : text[..(MostOutput * 2 / 3)] + $"\n… ({text.Length - MostOutput:N0} characters cut) …\n" + text[^(MostOutput / 3)..];
