@@ -303,6 +303,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.ChatKey>();
         // The app's own gateway (Gateway:Mode): its clients to the engines, one that checks certificates and one that does not
         // (a server whose VerifyTls is off), as the remote servers' clients are.
+        services.AddSingleton<Gateway.GatewayMetrics>();
         services.AddSingleton<Gateway.ModelGateway>();
         services.AddHttpClient(Gateway.ModelGateway.Upstream, c => c.Timeout = Timeout.InfiniteTimeSpan);
 #pragma warning disable CA5359 // A server the admin chose not to check (Admin → Servers: Check the certificate off), as RemoteServerClient.Unchecked.

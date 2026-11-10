@@ -36,7 +36,7 @@ public static class GatewayModes
 /// through as it comes; the usage is read beside it.
 /// </summary>
 public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClientFactory clients, IOptions<EngineOptions> engine, IOptionsMonitor<LiteLlmOptions> options,
-    TimeProvider clock, ILogger<ModelGateway> logger) : IDisposable
+    TimeProvider clock, ILogger<ModelGateway> logger, GatewayMetrics metrics) : IDisposable
 {
     /// <summary>The client that checks certificates; and the one for an https server whose certificate is not checked (VerifyTls off).</summary>
     public const string Upstream = "gateway-upstream";
@@ -50,6 +50,72 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     private readonly ConcurrentDictionary<string, int> _busy = new(StringComparer.Ordinal);
     private readonly Channel<GatewayRequest> _ledger = Channel.CreateBounded<GatewayRequest>(new BoundedChannelOptions(10_000) { FullMode = BoundedChannelFullMode.DropOldest });
     private Task? _writer;
+
+    /// <summary>A line for the ledger, counted for the metrics as it goes.</summary>
+    private void Write(GatewayRequest row)
+    {
+        metrics.Booked(row);
+        _ledger.Writer.TryWrite(row);
+    }
+
+    /// <summary>The gateway's metrics as Prometheus reads them.</summary>
+    public string Metrics() => metrics.Render(_busy.GroupBy(b => b.Key.Split('|')[0]).ToDictionary(g => g.Key, g => g.Sum(x => x.Value)), _ledger.Reader.Count);
+
+    /// <summary>
+    /// The model gateway's own health (Admin → Overview, Mode own): each server its routes send to asked as each kind is
+    /// (llama.cpp, vLLM and SGLang: /health; another server: /v1/models): ok when every chat model's server answers.
+    /// </summary>
+    public async Task<(bool Ok, string Detail)> HealthAsync(CancellationToken ct)
+    {
+        List<Deployment> routes;
+        try
+        {
+            routes = await TableAsync(false, ct);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return (false, "its routes cannot be read: " + e.Message);
+        }
+        var servers = routes.Where(r => r.CopyOf is null || r.Mode == "chat").GroupBy(r => r.BaseUrl).Select(g => g.First()).ToList();
+        var down = new List<string>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Task.WhenAll(servers.Select(async d =>
+        {
+            var root = d.BaseUrl.EndsWith("/v1", StringComparison.Ordinal) ? d.BaseUrl[..^3] : d.BaseUrl;
+            var url = d.Kind is Deployment.LlamaCpp || Llm.Core.Models.EngineKinds.Priority(d.Kind) ? root + "/health" : d.BaseUrl.TrimEnd('/') + "/models";
+            try
+            {
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                limit.CancelAfter(TimeSpan.FromSeconds(5));
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+                }
+                using var res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, limit.Token);
+                if ((int)res.StatusCode >= 500 && d.Mode == "chat")
+                {
+                    lock (down)
+                    {
+                        down.Add(d.Name);
+                    }
+                }
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                if (d.Mode == "chat")
+                {
+                    lock (down)
+                    {
+                        down.Add(d.Name);
+                    }
+                }
+            }
+        }));
+        return down.Count == 0
+            ? (true, $"in the app: {routes.Count(r => r.CopyOf is null)} models on {servers.Count} servers · {sw.ElapsedMilliseconds} ms")
+            : (false, $"in the app: {string.Join(", ", down.Distinct().Order())} not answering");
+    }
 
     public void Dispose()
     {
@@ -69,7 +135,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         EnsureWriter();
         var row = Row(caller, model ?? "", null, null, 0, clock.GetUtcNow());
         (row.Status, row.HttpStatus, row.Refusal, row.Error, row.EndedAt) = (GatewayRequest.Refused, (short)status, reason.Length <= 16 ? reason : reason[..16], Short(message), row.StartedAt);
-        _ledger.Writer.TryWrite(row);
+        Write(row);
     }
 
     /// <summary>The routes are built again at the next call (a model loaded, a server or price changed).</summary>
@@ -103,7 +169,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         catch (HttpRequestException ex)
         {
             (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
-            _ledger.Writer.TryWrite(row);
+            Write(row);
             throw new ChatGatewayException("The embeddings server could not be reached: " + ex.Message, 502);
         }
         var text = await res.Content.ReadAsStringAsync(ct);
@@ -131,7 +197,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         {
             (row.Status, row.HttpStatus, row.Error) = (GatewayRequest.Failed, (short)res.StatusCode, Short(PromptLogWriter.ErrorOf(text) ?? text));
         }
-        _ledger.Writer.TryWrite(row);
+        Write(row);
         var status = res.StatusCode;
         res.Dispose();
         return new HttpResponseMessage(status) { Content = new StringContent(text, Encoding.UTF8, "application/json") };
@@ -351,7 +417,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         failed.Error = Short(PromptLogWriter.ErrorOf(lastError ?? "") ?? lastError);
         failed.EndedAt = clock.GetUtcNow();
         failed.DurationMs = (int)(failed.EndedAt - started).TotalMilliseconds;
-        _ledger.Writer.TryWrite(failed);
+        Write(failed);
         // An API caller gets the engine's own error as it came (its status and body: the context's size, its own words).
         if (passErrors && lastStatus is { } code and not 404 && lastError is { } said)
         {
@@ -381,7 +447,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         if (copies.Count == 0)
         {
             (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 404, $"There is no model {model}.", clock.GetUtcNow());
-            _ledger.Writer.TryWrite(row);
+            Write(row);
             throw new ChatGatewayException($"There is no model {model}.", 404);
         }
         var d = Pick(copies);
@@ -400,7 +466,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         catch (HttpRequestException ex)
         {
             (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
-            _ledger.Writer.TryWrite(row);
+            Write(row);
             throw new ChatGatewayException("The model server could not be reached: " + ex.Message, 502);
         }
         decimal Unit(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x : 0m;
@@ -410,7 +476,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             res.Dispose();
             (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, (short)res.StatusCode, Short(PromptLogWriter.ErrorOf(said) ?? said), clock.GetUtcNow());
             row.DurationMs = (int)(row.EndedAt - started).TotalMilliseconds;
-            _ledger.Writer.TryWrite(row);
+            Write(row);
             return passErrors ? new HttpResponseMessage(res.StatusCode) { Content = new StringContent(said, Encoding.UTF8, "application/json") } : throw ChatGatewayException.From(said, (int)res.StatusCode);
         }
         if (call == "transcription")
@@ -442,7 +508,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         }
         row.EndedAt = clock.GetUtcNow();
         row.DurationMs = (int)(row.EndedAt - started).TotalMilliseconds;
-        _ledger.Writer.TryWrite(row);
+        Write(row);
         return res;
     }
 
@@ -511,7 +577,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         {
             (row.Status, row.HttpStatus) = (GatewayRequest.Stopped, 499);
         }
-        _ledger.Writer.TryWrite(row);
+        Write(row);
         try
         {
             caller.Booked?.Invoke(row);

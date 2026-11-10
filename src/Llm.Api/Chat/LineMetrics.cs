@@ -14,7 +14,7 @@ namespace Llm.Api.Chat;
 public static class LineMetrics
 {
     public static void MapLineMetrics(this IEndpointRouteBuilder app) =>
-        app.MapGet("/metrics", (HttpContext http, AnswerGate gate, Models.EngineState engine) =>
+        app.MapGet("/metrics", (HttpContext http, AnswerGate gate, Models.EngineState engine, Gateway.ModelGateway own) =>
         {
             // Through Traefik: X-Forwarded-For, which the forwarded-headers middleware takes in (keeping it as X-Original-For) and
             // whose client becomes the remote address. Only the stack's network (a private address, or none in tests) reads it.
@@ -23,7 +23,7 @@ public static class LineMetrics
             {
                 return Results.NotFound();
             }
-            return Results.Text(Render(gate) + RenderPlaces(engine), "text/plain; version=0.0.4");
+            return Results.Text(Render(gate) + RenderPlaces(engine) + own.Metrics(), "text/plain; version=0.0.4");
         }).AllowAnonymous("Prometheus, on the stack's network: numbers of the line, no names.");
 
     /// <summary>Loopback, or a private network's address (10/8, 172.16/12, 192.168/16, fc00::/7, link-local).</summary>

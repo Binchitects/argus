@@ -51,7 +51,7 @@ public static class OperationsEndpoints
         var g = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.SettingsManage);
         g.MapGet("/overview", OverviewAsync);
         g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<CodeIntelOptions> a, IOptions<Dashboards.DashboardOptions> d, Features features,
-            Models.MediaControl media, CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, features, media, ct)));
+            Models.MediaControl media, Gateway.ModelGateway own, CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, features, media, own, ct)));
         // People, their emails and spend: people.read's, not monitoring's.
         g.MapGet("/people.csv", PeopleCsvAsync).RequirePermission(Llm.Core.Access.Permissions.PeopleRead);
 
@@ -291,7 +291,7 @@ public static class OperationsEndpoints
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CodeIntelAdmin codeIntel,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<CodeIntelOptions> codeIntelOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
-        Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, Features features, CancellationToken ct)
+        Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, Features features, Gateway.ModelGateway own, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await access.OwnersAsync(ct: ct)).Count;
@@ -300,7 +300,7 @@ public static class OperationsEndpoints
         var warning = spending.Problem;
         var over = people.Where(p => spending.Over(p).Count > 0).Select(p => p.UserName).ToList();
 
-        var probes = ProbeAllAsync(factory, stack.Value, codeIntelOptions.Value, dashboards.Value, features, media, ct);
+        var probes = ProbeAllAsync(factory, stack.Value, codeIntelOptions.Value, dashboards.Value, features, media, own, ct);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
         var space = disks.ListAsync(ct);
         JsonNode? index = null;
@@ -362,9 +362,17 @@ public static class OperationsEndpoints
     /// meant (idle ten minutes, or never asked for), or that has no model in the library yet, is idle, not down.
     /// </summary>
     public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, CodeIntelOptions a, Dashboards.DashboardOptions d,
-        Features features, Models.MediaControl? media = null, CancellationToken ct = default)
+        Features features, Models.MediaControl? media = null, Gateway.ModelGateway? own = null, CancellationToken ct = default)
     {
         var http = factory.CreateClient("probe");
+        // The app's own gateway (Gateway:Mode own): its health is the app's, each model's server asked in the app.
+        Task<Probe>? gateway = null;
+        if (own is { ForApi: true })
+        {
+            gateway = own.HealthAsync(ct).ContinueWith(t => t.IsCompletedSuccessfully
+                ? new Probe("Model gateway", "in the app: API keys, credit, the models' routes", t.Result.Ok, t.Result.Detail)
+                : new Probe("Model gateway", "in the app: API keys, credit, the models' routes", false, "its health could not be read"), TaskScheduler.Default);
+        }
         var services = new (string Service, string Name, string Purpose, string Url)[]
         {
             ("litellm", "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
@@ -379,8 +387,12 @@ public static class OperationsEndpoints
             ("code-intel", $"{Brand.CodeIntel}", "the code index", a.Url.TrimEnd('/') + "/healthz"),
         };
         var probes = await Task.WhenAll(services
-            .Where(x => features.Runs(x.Service) && (x.Service != "code-intel" || a.Enabled))
+            .Where(x => features.Runs(x.Service) && (x.Service != "code-intel" || a.Enabled) && (gateway is null || x.Service != "litellm"))
             .Select(x => ProbeAsync(http, x.Name, x.Purpose, x.Url)));
+        if (gateway is not null)
+        {
+            probes = [await gateway, .. probes];
+        }
         if (media is null)
         {
             return probes;

@@ -806,6 +806,12 @@ its events (output_item, content_part, output_text and function_call_arguments d
 response.completed, incomplete or failed). `/v1/completions` goes to the engine as it came, metered. The meter reads a
 non-streamed answer (one JSON body) by its usage too, and a completion's `text`. ResponsesGatewayTests.
 
+Commit 16 (2026-11-11): `GatewayMetrics` on the app's `/metrics` (requests by model, deployment, surface and status;
+request and first-token histograms; tokens by kind; in flight by deployment; upstream errors, refusals, fallbacks;
+the ledger's lines pending), alert rules `rules/gateway.yml` (GatewayUpstreamErrors, GatewayLedgerBehind,
+GatewaySlowFirstToken; in the Helm chart too), and with Mode own Admin → Overview's "Model gateway" is the app's own
+health (each route's server asked: llama.cpp, vLLM and SGLang `/health`, others `/v1/models`). GatewayAlertTests.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

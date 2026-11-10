@@ -1,0 +1,37 @@
+# The app's own model gateway (Gateway:Mode chat or own): its metrics are on the app's /metrics (job "app").
+groups:
+  - name: gateway
+    rules:
+      - alert: GatewayUpstreamErrors
+        expr: >-
+          sum by (deployment) (rate(arena_gateway_upstream_errors_total{reason=~"unreachable|server_error"}[10m]))
+          /
+          clamp_min(sum by (deployment) (rate(arena_gateway_requests_total[10m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Over 5% of requests to {{ $labels.deployment }} fail at the server"
+          description: "The model server is unreachable or answers with errors: Admin → Models and Admin → Overview say which."
+
+      - alert: GatewayLedgerBehind
+        expr: arena_gateway_log_pending > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "The gateway's ledger is behind"
+          description: "Over 1,000 requests are not yet written to gateway.requests: the database is slow or refusing writes, and credit and usage lag."
+
+      - alert: GatewaySlowFirstToken
+        expr: >-
+          histogram_quantile(0.95, sum by (le, model) (rate(arena_gateway_ttft_seconds_bucket[10m]))) > 30
+        for: 15m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "{{ $labels.model }}: the 95th percentile of the first token is over 30 s"
+          description: "Its line is long or its engine is overloaded: Admin → Line, and the model's engine."
