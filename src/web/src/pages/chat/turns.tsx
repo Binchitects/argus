@@ -258,7 +258,7 @@ export function QuestionTurn({
       )}
       {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
       {m.quote && editing === null && <QuotedLine quote={m.quote} onJump={onJumpToQuote ? () => onJumpToQuote(m) : undefined} />}
-      {m.skill && <SkillUsed skill={m.skill} />}
+      {m.skills?.map((k) => <SkillUsed key={k.name} skill={k} />)}
       {editing === null ? (
         <>
           <MessageContextNote m={m} />
@@ -275,7 +275,7 @@ export function QuestionTurn({
           className="grid w-full max-w-[85%] gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (editing.trim() || m.skill) onEdit?.(m, editing.trim(), editQuote?.text ?? null)
+            if (editing.trim() || m.skills?.length) onEdit?.(m, editing.trim(), editQuote?.text ?? null)
             setEditing(null)
           }}
         >
@@ -289,7 +289,7 @@ export function QuestionTurn({
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={busy || (!editing.trim() && !m.skill)}>
+            <Button type="submit" size="sm" disabled={busy || (!editing.trim() && !m.skills?.length)}>
               Send
             </Button>
           </div>

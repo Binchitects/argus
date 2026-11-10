@@ -3037,8 +3037,13 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Enter}')
     expect(box).toHaveValue('/ship ')
     expect(screen.queryByRole('listbox', { name: 'Skills and commands' })).not.toBeInTheDocument()
+    // Another skill after it: / again offers them, and both go together.
+    await userEvent.type(box, '/ti')
+    expect(within(await screen.findByRole('listbox', { name: 'Skills and commands' })).getAllByRole('option')).toHaveLength(1)
+    await userEvent.keyboard('{Enter}')
+    expect(box).toHaveValue('/ship /tidy ')
     await userEvent.type(box, 'the beta{Enter}')
-    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toMatchObject({ text: '/ship the beta' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toMatchObject({ text: '/ship /tidy the beta' }))
 
     // New Skill: named, made for the project and opened to be written.
     await userEvent.click(within(panel).getByRole('button', { name: 'New Skill' }))

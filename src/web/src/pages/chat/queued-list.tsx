@@ -13,14 +13,14 @@ export interface Queued {
   attachments: Attachment[]
   /** The part of an answer it quotes. */
   quote?: string | null
-  /** The skill it uses. */
-  skill?: SkillCall | null
+  /** The skills it uses. */
+  skills?: SkillCall[] | null
 }
 
 /** Whether a queued message waits for the answer to end in Arena's chat: the model reads files with the history, and a skill sets up a turn of its own. */
-const waitsForEnd = (q: Queued, filesGoIn: boolean) => (!filesGoIn && q.attachments.length > 0) || !!q.skill
+const waitsForEnd = (q: Queued, filesGoIn: boolean) => (!filesGoIn && q.attachments.length > 0) || !!q.skills?.length
 
-const label = (q: Queued) => q.text || (q.skill ? `/${q.skill.name}` : 'files')
+const label = (q: Queued) => q.text || (q.skills?.length ? q.skills.map((k) => `/${k.name}`).join(' ') : 'files')
 
 /**
  * The messages waiting, at the end of the thread, as Claude Code shows what was typed while it works: each pending, until the
@@ -112,8 +112,8 @@ export function QueuedList({
                   </>
                 )}
                 <span dir="auto" className="bidi-lines min-w-0 break-words whitespace-pre-wrap">
-                  {q.skill && <span className="font-mono text-[0.8125rem] font-medium">/{q.skill.name} </span>}
-                  {q.text || (q.skill ? '' : `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`)}
+                  {q.skills?.map((k) => <span key={k.name} className="font-mono text-[0.8125rem] font-medium">/{k.name} </span>)}
+                  {q.text || (q.skills?.length ? '' : `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`)}
                   {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
                 </span>
               </div>
@@ -121,7 +121,7 @@ export function QueuedList({
             {editing?.key !== q.key && (
               <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
                 <span className="px-1">{waitsForEnd(q, filesGoIn) ? 'Waits for the answer to end' : filesGoIn || elsewhere || i === 0 ? 'Read at the next step' : 'Waiting'}</span>
-                {onEdit && !q.skill && (
+                {onEdit && !q.skills?.length && (
                   <Tooltip content="Edit">
                     <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => setEditing({ key: q.key, text: q.text })} aria-label={`Edit queued message: ${label(q)}`}>
                       <Pencil />

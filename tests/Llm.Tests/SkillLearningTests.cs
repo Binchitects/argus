@@ -95,7 +95,7 @@ public sealed class SkillLearningTests(AppFixture app)
         var chat = await SendAsync(b, null, new
         {
             content = $$"""Too long: leave out the refactors. [improve {"skill":"release-notes","instructions":"{{better}}","why":"It listed internal refactors the person did not want"}]""",
-            skill = new { name = "release-notes", args = new Dictionary<string, string>() },
+            skills = new[] { new { name = "release-notes", args = new Dictionary<string, string>() } },
         });
         // The answer marked bad, with why: read with the conversation.
         var answer = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("messages").EnumerateArray().Last(m => m.GetProperty("role").GetString() == "assistant");
@@ -128,7 +128,7 @@ public sealed class SkillLearningTests(AppFixture app)
             parameters = Array.Empty<object>(), autoUse = true, sharing = "Company",
         }));
         var stand = $$"""Group it by team instead. [improve {"skill":"standup","instructions":"Summarize what each team did yesterday and will do today, by team, then the blockers.","why":"The person wanted it by team"}]""";
-        await SendAsync(b, null, new { content = stand, skill = new { name = "standup", args = new Dictionary<string, string>() } });
+        await SendAsync(b, null, new { content = stand, skills = new[] { new { name = "standup", args = new Dictionary<string, string>() } } });
         Assert.Equal(1, await ReflectAsync(f, clock));
         var mine = (await LibraryAsync(b)).GetProperty("skills").EnumerateArray().Where(s => s.GetProperty("name").GetString() == "standup").ToList();
         Assert.Equal(2, mine.Count);

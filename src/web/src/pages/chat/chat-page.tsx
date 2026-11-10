@@ -652,18 +652,18 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
   /** `onEvent`: hears the answer's events as they come (a sketch's question reads the code it gets). */
-  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void, skill?: SkillUse): Promise<boolean> => {
+  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void, skills?: SkillUse[]): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? comparing : null
     if (versus) setCompare(null)
     // "/context": the Context panel, not a question.
-    if (text === '/context' && !skill && (files ?? uploads.attachments).length === 0 && id && !room) {
+    if (text === '/context' && !skills?.length && (files ?? uploads.attachments).length === 0 && id && !room) {
       setContextOpen(true)
       return true
     }
     // "/compact": a command, not a question.
-    if (text === '/compact' && !skill && (files ?? uploads.attachments).length === 0) {
+    if (text === '/compact' && !skills?.length && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
         toast.error(id ? 'Compact when the answer is done.' : 'This chat has nothing to compact yet.')
         return false
@@ -675,7 +675,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     if (fromBox && withQuote) setQuote(null)
     // No connection: it waits in the outbox (not a voice turn, a comparison or a sketch's question, which need their answer now).
     const wait = () => {
-      outbox.add({ chatId: id ?? null, text, attachments: files ?? uploads.attachments, quote: withQuote ?? undefined, skill })
+      outbox.add({ chatId: id ?? null, text, attachments: files ?? uploads.attachments, quote: withQuote ?? undefined, skills })
       if (fromBox) uploads.clear()
       return true
     }
@@ -703,7 +703,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       ...(versus?.models ? { models: versus.models } : {}),
       ...(talkTurn ? { spoken: true } : {}),
       ...(withQuote ? { quote: withQuote.text } : {}),
-      ...(skill ? { skill: { name: skill.name, args: skill.args } } : {}),
+      ...(skills?.length ? { skills: skills.map((k) => ({ name: k.name, args: k.args })) } : {}),
     }
     const watch = (e: ChatEvent) => {
       if (e.type === 'question' && fromBox) uploads.clear()
@@ -716,7 +716,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     }
-    let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text, skill), localId, watch)
+    let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text, skills), localId, watch)
     if (!sent && wentOffline.current && canWait) {
       wentOffline.current = false
       return wait()
@@ -729,7 +729,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       setAsking(null)
       if (answer.go) {
         const again = newLocalId()
-        sent = await run(conversationId, versus ? 'compare' : 'messages', { ...body, acknowledged: question.rules, justification: answer.justification }, withQuestion(view, again, parent, text, attachments, withQuote?.text, skill), again, watch)
+        sent = await run(conversationId, versus ? 'compare' : 'messages', { ...body, acknowledged: question.rules, justification: answer.justification }, withQuestion(view, again, parent, text, attachments, withQuote?.text, skills), again, watch)
       }
     }
     // Not sent: it goes back into the box with its quote, and Compare stays on for it.
@@ -790,7 +790,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it). The answer reads
   // the first at its next step and goes on (took_in); one it may not take becomes the next question once the answer is
   // over, and this page then watches that answer as it watched the one before. Only Stop stops an answer.
-  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote, skill: q.skill }))
+  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote, skills: q.skills }))
   const setQueued = (chat: string, queued: QueuedMessage[]) =>
     queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, queued } : c))
   /** Watches the answer the chat is writing now (a queued message's): from its start, then live. */
@@ -806,11 +806,11 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     })
   }
   /** Queues what the box holds (its files and quote); `quoted`: a question about a selection instead, with no files. */
-  const enqueue = async (text: string, quoted?: Quote, inRoom?: { replyTo?: string; mentions?: string[] }, skill?: SkillUse): Promise<boolean> => {
+  const enqueue = async (text: string, quoted?: Quote, inRoom?: { replyTo?: string; mentions?: string[] }, skills?: SkillUse[]): Promise<boolean> => {
     const chat = streamingIn.current ?? id
     if (!chat) return false
     const fromBox = !quoted
-    if (fromBox && text === '/compact' && !skill && uploads.attachments.length === 0) {
+    if (fromBox && text === '/compact' && !skills?.length && uploads.attachments.length === 0) {
       toast.error('Compact when the answer is done.')
       return false
     }
@@ -823,7 +823,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         ...(withQuote ? { quote: withQuote.text } : {}),
         ...(inRoom?.replyTo ? { replyTo: inRoom.replyTo } : {}),
         ...(inRoom?.mentions?.length ? { mentions: inRoom.mentions } : {}),
-        ...(skill ? { skill: { name: skill.name, args: skill.args } } : {}),
+        ...(skills?.length ? { skills: skills.map((k) => ({ name: k.name, args: k.args })) } : {}),
       })
       if (fromBox) uploads.clear()
       setQueued(chat, r.queued)
@@ -935,16 +935,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     void run(
       id,
       'messages',
-      // A new version of a question keeps the skill it used, with the same parameters.
+      // A new version of a question keeps the skills it used, with the same parameters.
       {
         content: text,
         attachments: m.attachments.map((a) => a.id),
         parentId: m.parentId ?? undefined,
         root: m.parentId === null,
         ...(quoted ? { quote: quoted } : {}),
-        ...(m.skill ? { skill: { name: m.skill.name, args: m.skill.args } } : {}),
+        ...(m.skills?.length ? { skills: m.skills.map((k) => ({ name: k.name, args: k.args })) } : {}),
       },
-      withQuestion(view, localId, m.parentId, text, m.attachments, quoted, m.skill ?? undefined),
+      withQuestion(view, localId, m.parentId, text, m.attachments, quoted, m.skills ?? undefined),
       localId,
     )
   }
@@ -1018,7 +1018,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     if (!online || !next || flushing.current || streaming || (id && !data)) return
     flushing.current = true
     void (async () => {
-      const sent = await send(next.text, next.attachments, undefined, next.quote, undefined, next.skill)
+      const sent = await send(next.text, next.attachments, undefined, next.quote, undefined, next.skills)
       // Gone again: send kept a copy to wait. Refused: it stays, for the person to send again or remove.
       if (sent || isOffline()) outbox.remove(next.key)
       else outbox.failed(next)
@@ -1300,7 +1300,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   fill={fill}
                   onFilled={filled}
                   streaming={streaming}
-                  onSend={(text, skill) => send(text, undefined, undefined, undefined, undefined, skill)}
+                  onSend={(text, skills) => send(text, undefined, undefined, undefined, undefined, skills)}
                   onStop={() => void stop()}
                   uploads={uploads}
                   model={model}
@@ -1548,17 +1548,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}
                   onSend={
                     room
-                      ? async (text, skill) => {
-                          const sent = await enqueue(text, undefined, { replyTo: replyTo?.id, mentions: mentionsIn(text, room.members, me?.id ?? '') }, skill)
+                      ? async (text, skills) => {
+                          const sent = await enqueue(text, undefined, { replyTo: replyTo?.id, mentions: mentionsIn(text, room.members, me?.id ?? '') }, skills)
                           if (sent) setReplyTo(null)
                           return sent
                         }
-                      : (text, skill) => send(text, undefined, undefined, undefined, undefined, skill)
+                      : (text, skills) => send(text, undefined, undefined, undefined, undefined, skills)
                   }
                   talk={talkButton}
                   attach={mayAttach}
                   voice={maySpeak}
-                  onQueue={(text, skill) => enqueue(text, undefined, undefined, skill)}
+                  onQueue={(text, skills) => enqueue(text, undefined, undefined, skills)}
                   // A room's messages go to its queue, never compared.
                   compare={room ? null : comparePicker}
                   onStop={() => void stop()}

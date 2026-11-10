@@ -223,12 +223,12 @@ public sealed class SkillTests(AppFixture app)
         var id = await NewChatAsync(b);
 
         // A required parameter missing, a skill they do not have: refused before anything is sent.
-        var missing = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "notes", skill = new { name = "standup" } });
+        var missing = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "notes", skills = new[] { new { name = "standup" } } });
         await StatusAssert.Is(HttpStatusCode.BadRequest, missing);
         Assert.Contains("needs team", await missing.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "x", skill = new { name = "nothing" } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "x", skills = new[] { new { name = "nothing" } } }));
 
-        var sent = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "shipped the parser; fixing the cache", skill = new { name = "/standup", args = new { team = "Payments" } } });
+        var sent = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "shipped the parser; fixing the cache", skills = new[] { new { name = "/standup", args = new { team = "Payments" } } } });
         Assert.True(sent.IsSuccessStatusCode, await sent.Content.ReadAsStringAsync());
         await sent.Content.ReadAsStringAsync();
         var asked = LastUser(LastRequestFor(email));
@@ -240,16 +240,54 @@ public sealed class SkillTests(AppFixture app)
         // The chat keeps the words and the skill apart: the person sees what they typed and the skill they used.
         var question = (await ChatAsync(b, id)).GetProperty("messages").EnumerateArray().First(m => m.GetProperty("role").GetString() == "user");
         Assert.Equal("shipped the parser; fixing the cache", question.GetProperty("content").GetString());
-        var skill = question.GetProperty("skill");
+        var skill = question.GetProperty("skills")[0];
         Assert.Equal(("standup", "Stand-up notes", "Payments"), (skill.GetProperty("name").GetString(), skill.GetProperty("title").GetString(), skill.GetProperty("args").GetProperty("team").GetString()));
 
         // A skill alone (no words) is a question too, and the next answer reads it again as it was.
-        var alone = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "", skill = new { name = "standup", args = new { team = "Search", tone = "cheerful" } } });
+        var alone = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "", skills = new[] { new { name = "standup", args = new { team = "Search", tone = "cheerful" } } } });
         Assert.True(alone.IsSuccessStatusCode, await alone.Content.ReadAsStringAsync());
         await alone.Content.ReadAsStringAsync();
         var history = LastRequestFor(email)["messages"]!.AsArray().Where(m => m!["role"]!.GetValue<string>() == "user").Select(m => m!["content"]!.ToJsonString()).ToList();
         Assert.Contains(history, h => h.Contains("Write Payments", StringComparison.Ordinal));
         Assert.Contains("Write Search's stand-up, cheerful, from these notes: \n</skill>", LastUser(LastRequestFor(email)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Several_skills_go_with_one_message_in_their_order_each_once_and_a_message_kept_with_one_skill_still_reads()
+    {
+        await using var f = NewApp();
+        var (b, _, email) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "tests", title = "Write tests", instructions = "Write tests for {{what}}." , parameters = new object[] { new { name = "what" } } }));
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "review", title = "Review code", instructions = "Review it for bugs." }));
+        var id = await NewChatAsync(b);
+
+        // The same twice, or too many: refused.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "x", skills = new object[] { new { name = "review" }, new { name = "/review" } } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/messages",
+            new { content = "x", skills = Enumerable.Range(0, Llm.Api.Chat.SkillLibrary.MostPerMessage + 1).Select(_ => new { name = "review" }).ToArray() }));
+
+        var sent = await b.PostAsync($"/api/chat/conversations/{id}/messages",
+            new { content = "the parser", skills = new object[] { new { name = "review" }, new { name = "tests", args = new { what = "parse_frame" } } } });
+        Assert.True(sent.IsSuccessStatusCode, await sent.Content.ReadAsStringAsync());
+        await sent.Content.ReadAsStringAsync();
+        var asked = LastUser(LastRequestFor(email));
+        Assert.Contains("The person used 2 skills together: /review (Review code), /tests (Write tests) with what: parse_frame.", asked, StringComparison.Ordinal);
+        Assert.True(asked.IndexOf("<skill name=\"review\">", StringComparison.Ordinal) < asked.IndexOf("<skill name=\"tests\">", StringComparison.Ordinal));
+        Assert.Contains("Write tests for parse_frame.", asked, StringComparison.Ordinal);
+        Assert.EndsWith("Their words: the parser", asked.TrimEnd(), StringComparison.Ordinal);
+        var question = (await ChatAsync(b, id)).GetProperty("messages").EnumerateArray().First(m => m.GetProperty("role").GetString() == "user");
+        Assert.Equal(["review", "tests"], question.GetProperty("skills").EnumerateArray().Select(k => k.GetProperty("name").GetString()));
+
+        // A question kept before 8.0, with its one skill: read as a list of one.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var m = db.ChatMessages.Single(x => x.ConversationId == id && x.Role == "user");
+            m.Skill = """{"name":"review","title":"Review code","args":{},"instructions":"Review it for bugs.","tookWords":false}""";
+            await db.SaveChangesAsync();
+        }
+        question = (await ChatAsync(b, id)).GetProperty("messages").EnumerateArray().First(m => m.GetProperty("role").GetString() == "user");
+        Assert.Equal(["review"], question.GetProperty("skills").EnumerateArray().Select(k => k.GetProperty("name").GetString()));
     }
 
     [Fact]
@@ -357,7 +395,7 @@ public sealed class SkillTests(AppFixture app)
         Assert.Equal(("what", false, "the code or change in this conversation"), (what.GetProperty("name").GetString(), what.GetProperty("required").GetBoolean(), what.GetProperty("default").GetString()));
         // Used as any skill: its instructions, filled in.
         var chat = await NewChatAsync(b);
-        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "", skill = new { name = "code-review", args = new { what = "src/parser.cs" } } });
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "", skills = new[] { new { name = "code-review", args = new { what = "src/parser.cs" } } } });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         Assert.Contains("Review src/parser.cs, with correctness first", LastUser(LastRequestFor(email)), StringComparison.Ordinal);
 
@@ -366,7 +404,7 @@ public sealed class SkillTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Forbidden, await PutAsync(admin, id, new { name = "code-review", title = "Mine", instructions = "x", sharing = "Company" }));
         await StatusAssert.Is(HttpStatusCode.Forbidden, await admin.Http.DeleteAsync(new Uri($"/api/skills/{id}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/skills", new { name = "code-review", title = "Our review", instructions = "Review {{what}} our way.", sharing = "Company" }));
-        res = await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "", skill = new { name = "code-review", args = new { what = "app.ts" } } });
+        res = await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "", skills = new[] { new { name = "code-review", args = new { what = "app.ts" } } } });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         Assert.Contains("Review app.ts our way.", LastUser(LastRequestFor(email)), StringComparison.Ordinal);
 
@@ -376,7 +414,7 @@ public sealed class SkillTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/skills/{debug}/off", UriKind.Relative), new { off = true }));
         Assert.DoesNotContain(await SkillsAsync(b), s => s.GetProperty("name").GetString() == "debug");
         Assert.True((await SkillsAsync(admin)).Single(s => s.GetProperty("name").GetString() == "debug").GetProperty("off").GetBoolean());
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "x", skill = new { name = "debug" } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "x", skills = new[] { new { name = "debug" } } }));
 
         // Written again at the next start: still once each, still off.
         await f.Services.GetRequiredService<Llm.Api.Chat.BuiltInSkills>().SyncAsync(CancellationToken.None);

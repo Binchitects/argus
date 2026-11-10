@@ -157,28 +157,53 @@ public static partial class SkillLibrary
     /// What the model reads for a question that used a skill: the skill and what it was given, its instructions, then the
     /// person's own words unless the instructions took them (none: the skill is the whole question).
     /// </summary>
-    public static string ForModel(SkillCall call, string words)
+    public static string ForModel(SkillCall call, string words) => ForModel([call], words);
+
+    /// <summary>
+    /// What the model reads for a question that used skills (one or more, in the order chosen): each skill and what it was
+    /// given with its instructions, then the person's own words once, unless a skill's instructions took them.
+    /// </summary>
+    public static string ForModel(IReadOnlyList<SkillCall> calls, string words)
     {
-        var given = call.Args.Count > 0 ? " with " + string.Join("; ", call.Args.Select(a => $"{a.Key}: {a.Value}")) : "";
-        var asked = !call.TookWords && words.Trim().Length > 0 ? $"\n\nTheir words: {words.Trim()}" : "";
-        return $"The person used the skill /{call.Name} ({call.Title}){given}. Follow its instructions:\n\n<skill name=\"{call.Name}\">\n{call.Instructions}\n</skill>{asked}";
+        static string Given(SkillCall c) => c.Args.Count > 0 ? " with " + string.Join("; ", c.Args.Select(a => $"{a.Key}: {a.Value}")) : "";
+        var asked = !calls.Any(c => c.TookWords) && words.Trim().Length > 0 ? $"\n\nTheir words: {words.Trim()}" : "";
+        if (calls.Count == 1)
+        {
+            var call = calls[0];
+            return $"The person used the skill /{call.Name} ({call.Title}){Given(call)}. Follow its instructions:\n\n<skill name=\"{call.Name}\">\n{call.Instructions}\n</skill>{asked}";
+        }
+        var names = string.Join(", ", calls.Select(c => $"/{c.Name} ({c.Title}){Given(c)}"));
+        var blocks = string.Join("\n\n", calls.Select(c => $"<skill name=\"{c.Name}\">\n{c.Instructions}\n</skill>"));
+        return $"The person used {calls.Count} skills together: {names}. Follow all of their instructions, each where it applies:\n\n{blocks}{asked}";
     }
 
-    public static string Keep(SkillCall call) => JsonSerializer.Serialize(call, Json);
+    /// <summary>The most skills one message may use.</summary>
+    public const int MostPerMessage = 5;
 
-    public static SkillCall? Kept(string? json)
+    public static string Keep(SkillCall call) => Keep([call])!;
+
+    /// <summary>The skills a message used, as the message keeps them (a list).</summary>
+    public static string? Keep(IReadOnlyList<SkillCall> calls) => calls.Count == 0 ? null : JsonSerializer.Serialize(calls, Json);
+
+    /// <summary>The first skill a message used (its title names a chat); null: none.</summary>
+    public static SkillCall? Kept(string? json) => KeptAll(json) is [var first, ..] ? first : null;
+
+    /// <summary>Every skill a message used, in order: a list, or one skill as messages from before 8.0 kept it.</summary>
+    public static IReadOnlyList<SkillCall> KeptAll(string? json)
     {
         if (json is null)
         {
-            return null;
+            return [];
         }
         try
         {
-            return JsonSerializer.Deserialize<SkillCall>(json, Json);
+            return json.TrimStart().StartsWith('[')
+                ? JsonSerializer.Deserialize<List<SkillCall>>(json, Json) ?? []
+                : JsonSerializer.Deserialize<SkillCall>(json, Json) is { } one ? [one] : [];
         }
         catch (JsonException)
         {
-            return null;
+            return [];
         }
     }
 

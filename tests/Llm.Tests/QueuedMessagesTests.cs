@@ -240,16 +240,16 @@ public sealed class QueuedMessagesTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "recap", title = "Recap", instructions = "Recap {{topic}} in three bullets." }));
         var id = await NewChatAsync(b);
         var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ");
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await QueueAsync(b, id, new { content = "", skill = new { name = "recap" } }));
-        await StatusAssert.Is(HttpStatusCode.OK, await QueueAsync(b, id, new { content = "", skill = new { name = "recap", args = new { topic = "the outage" } } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await QueueAsync(b, id, new { content = "", skills = new[] { new { name = "recap" } } }));
+        await StatusAssert.Is(HttpStatusCode.OK, await QueueAsync(b, id, new { content = "", skills = new[] { new { name = "recap", args = new { topic = "the outage" } } } }));
         var waiting = (await ConversationAsync(b, id)).GetProperty("queued").EnumerateArray().Single();
-        Assert.Equal("the outage", waiting.GetProperty("skill").GetProperty("args").GetProperty("topic").GetString());
+        Assert.Equal("the outage", waiting.GetProperty("skills")[0].GetProperty("args").GetProperty("topic").GetString());
         await res.Content.ReadAsStringAsync();
         res.Dispose();
 
         var chat = await SettledAsync(b, id, 2);
         var question = chat.GetProperty("messages").EnumerateArray().Last(m => m.GetProperty("role").GetString() == "user");
-        Assert.Equal("recap", question.GetProperty("skill").GetProperty("name").GetString());
+        Assert.Equal("recap", question.GetProperty("skills")[0].GetProperty("name").GetString());
         Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email
             && r.Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToJsonString().Contains("Recap the outage in three bullets.", StringComparison.Ordinal));
     }

@@ -1352,7 +1352,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public async Task<string?> ExpandAsync(string input, CancellationToken ct)
     {
         var prompt = Extensions.Expand(input);
-        return !input.StartsWith('/') || prompt is not null && Extensions.SkillTyped(input) is not { Source: "arena" }
+        return !input.StartsWith('/') || prompt is not null && !Extensions.SkillsTyped(input).Skills.Any(k => k.Source == "arena")
             ? prompt
             : (await ReloadExtensionsAsync(true, ct)).Expand(input);
     }

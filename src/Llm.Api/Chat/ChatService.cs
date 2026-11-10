@@ -2108,7 +2108,7 @@ public sealed partial class ChatService(
                 case "user":
                     // A quoted part of an earlier answer first, then the question, then its files.
                     // A skill used: its instructions, filled in, before the words.
-                    var asked = SkillLibrary.Kept(m.Skill) is { } skill ? SkillLibrary.ForModel(skill, m.Content) : m.Content;
+                    var asked = SkillLibrary.KeptAll(m.Skill) is { Count: > 0 } used ? SkillLibrary.ForModel(used, m.Content) : m.Content;
                     var text = new StringBuilder(ChatQuotes.ForModel(m.Quote is null ? null : mask(m.Quote), mask(asked)));
                     if (authors is not null)
                     {

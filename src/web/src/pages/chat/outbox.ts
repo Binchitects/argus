@@ -11,7 +11,7 @@ export interface Outgoing {
   text: string
   attachments: Attachment[]
   quote?: Quote
-  skill?: SkillUse
+  skills?: SkillUse[]
   at: number
   /** Sent with the connection back, and refused: it waits for the person (send again, or remove). */
   failed?: boolean

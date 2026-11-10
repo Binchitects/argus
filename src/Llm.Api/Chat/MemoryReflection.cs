@@ -130,7 +130,7 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
         var bad = await db.AnswerFeedback.AsNoTracking().Where(f => f.ConversationId == chat.Id && !f.Up && answerIds.Contains(f.MessageId))
             .ToDictionaryAsync(f => f.MessageId, f => string.Join(": ", new[] { f.Reason, f.Comment }.Where(x => !string.IsNullOrWhiteSpace(x))), ct);
         // The skills used here: chosen with / (their call kept on the question), or by the model (use_skill).
-        var usedNames = said.Select(m => SkillLibrary.Kept(m.Skill)?.Name).OfType<string>()
+        var usedNames = said.SelectMany(m => SkillLibrary.KeptAll(m.Skill).Select(k => k.Name))
             .Concat(said.Where(m => m.ToolCallsJson?.Contains(Tools.SkillTool.Function, StringComparison.Ordinal) == true)
                 .SelectMany(m => (TryParse(m.ToolCallsJson) as JsonArray ?? []).OfType<JsonObject>())
                 .Where(c => c["function"]?["name"]?.GetValue<string>() == Tools.SkillTool.Function)
@@ -150,7 +150,7 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
         foreach (var m in said.Where(m => m.Content.Length > 0))
         {
             var content = m.Role == "assistant" && m.Content.Length > 800 ? m.Content[..800] + " …" : m.Content;
-            var skill = m.Role == "user" && SkillLibrary.Kept(m.Skill) is { } call ? $" (with the skill /{call.Name})" : "";
+            var skill = m.Role == "user" && SkillLibrary.KeptAll(m.Skill) is { Count: > 0 } calls ? $" (with the skill{(calls.Count > 1 ? "s" : "")} {string.Join(", ", calls.Select(k => "/" + k.Name))})" : "";
             text.Append(m.Role == "user" ? $"The person{skill}: " : "The assistant: ").Append(content).Append("\n\n");
             if (bad.TryGetValue(m.Id, out var why))
             {

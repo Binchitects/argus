@@ -74,10 +74,10 @@ export function waitsForModel(answer: Message[], live: boolean): boolean {
 }
 
 /** The question shown at once, before the server has it (with the part of an answer it quotes). */
-export function withQuestion(state: LiveState, localId: string, parentId: string | null, text: string, attachments: Attachment[], quote?: string | null, skill?: SkillUse): LiveState {
-  // A skill used shows as the person chose it; the server's instructions come with the saved chat.
-  const used = skill ? { name: skill.name, title: skill.title ?? skill.name, args: skill.args, instructions: '' } : null
-  return { ...state, messages: [...state.messages, { ...blank(localId, 'user', parentId, text), attachments, quote: quote ?? null, skill: used }], leaf: localId, notices: [] }
+export function withQuestion(state: LiveState, localId: string, parentId: string | null, text: string, attachments: Attachment[], quote?: string | null, skills?: SkillUse[]): LiveState {
+  // The skills used show as the person chose them; the server's instructions come with the saved chat.
+  const used = (skills ?? []).map((k) => ({ name: k.name, title: k.title ?? k.name, args: k.args, instructions: '' }))
+  return { ...state, messages: [...state.messages, { ...blank(localId, 'user', parentId, text), attachments, quote: quote ?? null, skills: used }], leaf: localId, notices: [] }
 }
 
 /** Puts a message in its place when the page has it already (an answer watched again from its start), else at the end. */

@@ -103,8 +103,17 @@ internal sealed record Skill(string Name, string Description, string Instruction
     /// What goes with a message that used the skill (/name and the words after it), as what went with it (Mentions' section):
     /// the page shows what was typed, the model reads the instructions after it, the words in them for $ARGUMENTS.
     /// </summary>
-    public string Use(string typed, string words) =>
-        typed + Mentions.Marker + $"\n<skill name=\"{Name}\">\nThe person used the skill /{Name} ({Description}). Follow its instructions:\n\n{Filled(words)}\n</skill>" + Mentions.End;
+    public string Use(string typed, string words) => UseAll(typed, words, [this]);
+
+    /// <summary>What was typed, with each skill's instructions after it (several used together: each where it applies).</summary>
+    public static string UseAll(string typed, string words, IReadOnlyList<Skill> skills)
+    {
+        var said = skills.Count == 1
+            ? $"The person used the skill /{skills[0].Name} ({skills[0].Description}). Follow its instructions:"
+            : $"The person used {skills.Count} skills together ({string.Join(", ", skills.Select(k => "/" + k.Name))}). Follow all of their instructions, each where it applies:";
+        var blocks = string.Join("\n", skills.Select(k => $"<skill name=\"{k.Name}\">\n{(skills.Count == 1 ? said + "\n\n" : "")}{k.Filled(words)}\n</skill>"));
+        return typed + Mentions.Marker + (skills.Count == 1 ? "\n" + blocks : $"\n{said}\n\n{blocks}") + Mentions.End;
+    }
 }
 
 /// <summary>
@@ -228,7 +237,42 @@ internal sealed class Extensions
         {
             return command.Fill(words);
         }
-        return SkillTyped(input) is { } skill ? skill.Use(input, words) : null;
+        // Skills one after another at the start (/review /tests the parser): all of them, with the words after them.
+        var (skills, rest) = SkillsTyped(input);
+        return skills.Count > 0 ? Skill.UseAll(input, rest, skills) : null;
+    }
+
+    /// <summary>The most skills one message may use.</summary>
+    public const int MostSkills = 5;
+
+    /// <summary>
+    /// The skills a message starts with, one after another (each /name once, at most <see cref="MostSkills"/>), and the words
+    /// after them; none when it starts with no skill (or with a command, which goes first).
+    /// </summary>
+    public (List<Skill> Skills, string Words) SkillsTyped(string input)
+    {
+        var skills = new List<Skill>();
+        var at = 0;
+        while (at < input.Length && input[at] == '/' && skills.Count < MostSkills)
+        {
+            var end = input.IndexOfAny([' ', '\n'], at);
+            var name = (end < 0 ? input[(at + 1)..] : input[(at + 1)..end]);
+            if (skills.Count == 0 && Commands.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+                || Skills.FirstOrDefault(k => string.Equals(k.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } skill)
+            {
+                break;
+            }
+            if (!skills.Contains(skill))
+            {
+                skills.Add(skill);
+            }
+            at = end < 0 ? input.Length : end;
+            while (at < input.Length && input[at] is ' ' or '\n')
+            {
+                at++;
+            }
+        }
+        return (skills, skills.Count == 0 ? "" : input[at..].Trim());
     }
 
     /// <summary>The skill a typed /name args uses, or null (none of that name, or a command of that name goes first).</summary>

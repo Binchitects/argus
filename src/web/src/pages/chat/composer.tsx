@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUp, ListEnd, Paperclip, Square } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { missingOf, skillsQuery, slashItems, slashQuery, type SkillItem, type SkillUse, type SlashItem } from '@/lib/skills'
 import { cn } from '@/lib/utils'
@@ -12,6 +13,9 @@ import { useRecall, type RecallSource } from './recall'
 import type { Quote } from './quote'
 import { QuoteChip } from './quote-parts'
 import { SkillFields, SlashMenu } from './slash'
+
+/** The most skills one message may use (the server's own limit). */
+const maxSkills = 5
 import type { ChatModel } from './types'
 import { UploadChips } from './upload-chips'
 import type { Uploads } from './uploads'
@@ -55,7 +59,7 @@ export function Composer({
   voice = true,
 }: {
   streaming: boolean
-  onSend: (text: string, skill?: SkillUse) => Promise<boolean>
+  onSend: (text: string, skills?: SkillUse[]) => Promise<boolean>
   onStop: () => void
   uploads: Uploads
   model?: ChatModel
@@ -74,7 +78,7 @@ export function Composer({
   /** Open the Context panel: what fills the window, piece by piece (also: send /context). */
   onContextView?: () => void
   /** While an answer runs: how to queue a message (false: it was not taken). The thread shows those waiting (QueuedList). */
-  onQueue?: (text: string, skill?: SkillUse) => Promise<boolean>
+  onQueue?: (text: string, skills?: SkillUse[]) => Promise<boolean>
   /** Compare (arena mode): the next question to two models. */
   compare?: ReactNode
   /** The Talk button: a voice conversation. */
@@ -120,13 +124,14 @@ export function Composer({
   const [closedAt, setClosedAt] = useState<string | null>(null)
   const items = query === null ? [] : slashItems(query, library.data?.skills ?? [], !!onCompact, !!onContextView)
   const menuOpen = items.length > 0 && closedAt !== text
-  // The skill chosen for the message, and its parameters' values.
-  const [chosen, setChosen] = useState<SkillItem | null>(null)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [missing, setMissing] = useState<string[]>([])
-  const fields = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  // The skills chosen for the message, in order (/ again adds one), and each one's parameters' values.
+  const [chosen, setChosen] = useState<SkillItem[]>([])
+  const [values, setValues] = useState<Record<string, Record<string, string>>>({})
+  const [missing, setMissing] = useState<Record<string, string[]>>({})
+  const fields = useRef<Record<string, { current: Record<string, HTMLTextAreaElement | null> }>>({})
+  const fieldsOf = (skill: string) => (fields.current[skill] ??= { current: {} })
   // ↑ and ↓: what was sent before. Not while a skill is chosen; a message brought back keeps the / menu shut.
-  const recall = useRecall({ area, setText, source: history, enabled: !chosen, onRecall: setClosedAt })
+  const recall = useRecall({ area, setText, source: history, enabled: chosen.length === 0, onRecall: setClosedAt })
 
   useEffect(() => {
     const el = area.current
@@ -136,9 +141,15 @@ export function Composer({
   }, [text])
 
   const unchoose = () => {
-    setChosen(null)
+    setChosen([])
     setValues({})
-    setMissing([])
+    setMissing({})
+  }
+  // One skill let go (its X, or Backspace / Escape for the last one).
+  const unchooseOne = (name: string) => {
+    setChosen((c) => c.filter((k) => k.name !== name))
+    setValues(({ [name]: _gone, ...rest }) => rest)
+    setMissing(({ [name]: _gone, ...rest }) => rest)
   }
   const pick = (item: SlashItem) => {
     setActive(0)
@@ -154,36 +165,44 @@ export function Composer({
     }
     const skill = item.skill!
     setText('')
-    setChosen(skill)
-    setValues({})
-    setMissing([])
+    // Another skill joins those chosen (once each, at most five).
+    if (!chosen.some((k) => k.name === skill.name)) {
+      if (chosen.length >= maxSkills) {
+        toast.error(`At most ${maxSkills} skills in one message.`)
+        return
+      }
+      setChosen((c) => [...c, skill])
+    }
     const first = skill.parameters[0]?.name
-    requestAnimationFrame(() => (first ? fields.current[first] : area.current)?.focus())
+    requestAnimationFrame(() => (first ? fieldsOf(skill.name).current[first] : area.current)?.focus())
   }
 
-  const hasContent = text.trim().length > 0 || uploads.attachments.length > 0 || !!chosen
+  const hasContent = text.trim().length > 0 || uploads.attachments.length > 0 || chosen.length > 0
   // An answer runs, here or elsewhere: what is sent waits its turn.
   const queueing = streaming || !!elsewhere
   const canSend = (!queueing || !!onQueue) && !uploads.busy && hasContent
   const submit = async () => {
     if (!canSend) return
-    // A skill goes with the parameters it needs filled in.
-    const empty = chosen ? missingOf(chosen, values) : []
-    if (empty.length > 0) {
+    // Each skill goes with the parameters it needs filled in.
+    const empty = Object.fromEntries(chosen.map((k) => [k.name, missingOf(k, values[k.name] ?? {})] as const).filter(([, m]) => m.length > 0))
+    const firstEmpty = chosen.find((k) => empty[k.name])
+    if (firstEmpty) {
       setMissing(empty)
-      fields.current[empty[0]!]?.focus()
+      fieldsOf(firstEmpty.name).current[empty[firstEmpty.name]![0]!]?.focus()
       return
     }
     const t = text.trim()
-    const skill = chosen ? { name: chosen.name, args: Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())) } : undefined
+    const skills = chosen.length
+      ? chosen.map((k) => ({ name: k.name, title: k.title, args: Object.fromEntries(Object.entries(values[k.name] ?? {}).filter(([, v]) => v.trim())) }))
+      : undefined
     const before = { text, chosen, values }
     setText('')
     unchoose()
     recall.reset()
     // An answer is running: this one waits on the server, and the answer reads it at its next step (or after it ends).
-    if (!(await (queueing && onQueue ? onQueue(t, skill) : onSend(t, skill)))) {
+    if (!(await (queueing && onQueue ? onQueue(t, skills) : onSend(t, skills)))) {
       setText((now) => now || before.text)
-      if (before.chosen) {
+      if (before.chosen.length) {
         setChosen(before.chosen)
         setValues(before.values)
       }
@@ -208,16 +227,16 @@ export function Composer({
         return
       }
     }
-    // Escape lets the chosen skill go; what is written in the box stays.
-    if (e.key === 'Escape' && chosen && !e.nativeEvent.isComposing) {
+    // Escape lets the last chosen skill go; what is written in the box stays.
+    if (e.key === 'Escape' && chosen.length > 0 && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      unchoose()
+      unchooseOne(chosen.at(-1)!.name)
       return
     }
-    // Backspace at the start of an empty box lets the skill go, then takes the quote away.
-    if (e.key === 'Backspace' && (chosen || (quote && onClearQuote)) && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+    // Backspace at the start of an empty box lets the last skill go, then takes the quote away.
+    if (e.key === 'Backspace' && (chosen.length > 0 || (quote && onClearQuote)) && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault()
-      if (chosen) unchoose()
+      if (chosen.length > 0) unchooseOne(chosen.at(-1)!.name)
       else onClearQuote?.()
       return
     }
@@ -236,23 +255,29 @@ export function Composer({
       }}
     >
       {menuOpen && <SlashMenu id={menuId} items={items} active={Math.min(active, items.length - 1)} onPick={pick} onActive={setActive} />}
-      {chosen && (
+      {chosen.map((skill, i) => (
         <SkillFields
-          skill={chosen}
-          values={values}
-          missing={missing}
-          refs={fields}
+          key={skill.name}
+          skill={skill}
+          values={values[skill.name] ?? {}}
+          missing={missing[skill.name] ?? []}
+          refs={fieldsOf(skill.name)}
           onChange={(name, value) => {
-            setValues((v) => ({ ...v, [name]: value }))
-            setMissing((m) => m.filter((x) => x !== name))
+            setValues((v) => ({ ...v, [skill.name]: { ...v[skill.name], [name]: value } }))
+            setMissing((m) => ({ ...m, [skill.name]: (m[skill.name] ?? []).filter((x) => x !== name) }))
           }}
           onClear={() => {
-            unchoose()
+            unchooseOne(skill.name)
             area.current?.focus()
           }}
-          onLast={() => area.current?.focus()}
+          onLast={() => {
+            // The next skill's first field, else the message box.
+            const next = chosen[i + 1]
+            const first = next?.parameters[0]?.name
+            ;(next && first ? fieldsOf(next.name).current[first] : area.current)?.focus()
+          }}
         />
-      )}
+      ))}
       {quote && onClearQuote && (
         <QuoteChip
           quote={quote}
@@ -283,7 +308,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={streaming && onQueue ? 'Add to the answer: it reads this at its next step…' : queueing && onQueue ? 'Queue a message…' : chosen ? `Anything to add for /${chosen.name} (optional)` : 'Message, or / for a skill'}
+        placeholder={streaming && onQueue ? 'Add to the answer: it reads this at its next step…' : queueing && onQueue ? 'Queue a message…' : chosen.length ? `Anything to add for ${chosen.map((k) => `/${k.name}`).join(' ')} (optional), or / for another skill` : 'Message, or / for a skill'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}

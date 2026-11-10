@@ -19,8 +19,11 @@ const own: SlashItem[] = [
   { name: 'projects', description: 'Show the Projects view: Arena\'s projects you see', kind: 'chat' },
 ]
 
-/** A /name being typed at the start of the box, before the caret: what follows the / so far; null: none. */
-const typing = (text: string, caret: number) => /^\/([\w:.-]*)$/.exec(text.slice(0, caret))?.[1] ?? null
+/**
+ * A /name being typed at the start of the box, or after the skills chosen there (/review /te…: several go together), before
+ * the caret: what follows its / so far; null: none.
+ */
+const typing = (text: string, caret: number) => /^(?:\/[\w:.-]+\s+)*\/([\w:.-]*)$/.exec(text.slice(0, caret))?.[1] ?? null
 
 /** A /name with a space after it at the start of the box: a command or skill chosen, the words for it after. */
 const chosenName = /^\/[\w:.-]+(\s+|$)/
@@ -57,7 +60,9 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
 
   const pick = (item: SlashItem) => {
     const el = area.current
-    const put = `/${item.name} `
+    // After the skills chosen before it: they stay, this one joins them.
+    const before = text.slice(0, caret).replace(/\/[\w:.-]*$/, '')
+    const put = `${before}/${item.name} `
     const next = put + text.slice(el?.selectionEnd ?? caret).trimStart()
     setText(next)
     setTyped(null)

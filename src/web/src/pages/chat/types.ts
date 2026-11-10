@@ -91,8 +91,8 @@ export interface Message {
   replyToId?: string | null
   /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
   quote?: string | null
-  /** A question: the skill it used, with its parameters (the model read its instructions before the words). */
-  skill?: SkillCall | null
+  /** A question: the skills it used, in order, with their parameters (the model read their instructions before the words). */
+  skills?: SkillCall[] | null
   reasoning: string | null
   toolName: string | null
   toolCallId: string | null
@@ -412,7 +412,7 @@ export interface QueuedMessage {
   userId?: string
   forPeople?: boolean
   quote?: string | null
-  skill?: SkillCall | null
+  skills?: SkillCall[] | null
   attachments: Attachment[]
   createdAt: string
 }

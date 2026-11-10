@@ -50,13 +50,13 @@ function backend() {
     'GET /api/chat/conversations/c1': () => ({ json: saved }),
     'POST /api/chat/conversations/c1/messages': (body) => {
       // The server keeps the question with its skill filled in: the chat reads it back when the answer ends.
-      const b = body as { content: string; skill?: { name: string; args: Record<string, string> } }
-      const used = b.skill ? { ...b.skill, title: library.skills.find((x) => x.name === b.skill!.name)!.title, instructions: 'Filled in.' } : null
+      const b = body as { content: string; skills?: { name: string; args: Record<string, string> }[] }
+      const used = (b.skills ?? []).map((k) => ({ ...k, title: library.skills.find((x) => x.name === k.name)!.title, instructions: 'Filled in.' }))
       saved = {
         ...conversation,
         currentLeafId: 'a1',
         messages: [
-          { id: 'q1', parentId: null, role: 'user', content: b.content, skill: used, attachments: [], createdAt: '' },
+          { id: 'q1', parentId: null, role: 'user', content: b.content, skills: used, attachments: [], createdAt: '' },
           { id: 'a1', parentId: 'q1', role: 'assistant', content: 'Done.', attachments: [], createdAt: '', model: 'Main-Model' },
         ] as unknown as Conversation['messages'],
       }
@@ -86,7 +86,7 @@ describe('slash skills', () => {
     // The skill above the box (not its instructions in it), a field for each parameter, the first one ready to type in.
     const chosen = screen.getByRole('group', { name: 'Use /review' })
     expect(box).toHaveValue('')
-    expect(box).toHaveAttribute('placeholder', 'Anything to add for /review (optional)')
+    expect(box).toHaveAttribute('placeholder', 'Anything to add for /review (optional), or / for another skill')
     const file = within(chosen).getByRole('textbox', { name: /File/ })
     await waitFor(() => expect(file).toHaveFocus())
     expect(within(chosen).getByText('The path')).toBeInTheDocument()
@@ -108,7 +108,7 @@ describe('slash skills', () => {
         content: 'mostly the header parser',
         attachments: [],
         root: true,
-        skill: { name: 'review', args: { file: 'src/parse.c', focus: 'buffer overflows' } },
+        skills: [{ name: 'review', args: { file: 'src/parse.c', focus: 'buffer overflows' } }],
       }),
     )
     await waitFor(() => expect(box).toHaveValue(''))
@@ -176,6 +176,32 @@ describe('slash skills', () => {
     expect(screen.getByRole('group', { name: 'Use /standup' })).toBeInTheDocument()
     await waitFor(() => expect(box).toHaveFocus())
     await userEvent.keyboard('{Enter}')
-    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: '', skill: { name: 'standup', args: {} } }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: '', skills: [{ name: 'standup', args: {} }] }))
+  })
+
+  it('several skills go with one message: / again adds one, each with its own fields, Backspace lets the last go', async () => {
+    const calls = backend()
+    renderApp('/chat')
+    const box = await screen.findByRole('textbox', { name: 'Message' })
+    await userEvent.type(box, '/st')
+    await userEvent.click(await screen.findByRole('option', { name: /standup/ }))
+    await userEvent.type(box, '/tri')
+    await userEvent.click(await screen.findByRole('option', { name: /triage/ }))
+    expect(screen.getByRole('group', { name: 'Use /standup' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Use /triage' })).toBeInTheDocument()
+    // The same one again is not added twice.
+    await userEvent.type(box, '/st')
+    await userEvent.click(await screen.findByRole('option', { name: /standup/ }))
+    expect(screen.getAllByRole('group', { name: 'Use /standup' })).toHaveLength(1)
+    // Each one's own fields: /triage needs its issue.
+    await userEvent.type(within(screen.getByRole('group', { name: 'Use /triage' })).getByRole('textbox', { name: /Issue/ }), '42')
+    await userEvent.click(box)
+    await userEvent.type(box, 'the week{Enter}')
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({
+        content: 'the week',
+        skills: [{ name: 'standup', args: {} }, { name: 'triage', args: { issue: '42' } }],
+      }),
+    )
   })
 })

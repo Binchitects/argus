@@ -82,6 +82,39 @@ public static partial class SkillEndpoints
     }
 
     /// <summary>The skill a person means by its name: theirs before their groups', the company's and a plugin's of the same name.</summary>
+    /// <summary>
+    /// The skills a message uses, in the order chosen, each filled in with what it was given and the words typed: each one the
+    /// person may use, none twice, at most <see cref="SkillLibrary.MostPerMessage"/>. The problem, else null.
+    /// </summary>
+    internal static async Task<(List<SkillCall> Calls, string? Problem)> UsedAsync(AppUser me, IReadOnlyList<SkillUse>? skills, string text, AccessService access, AppDbContext db, CancellationToken ct)
+    {
+        var calls = new List<SkillCall>();
+        var asked = (skills ?? []).Where(s => s.Name is { Length: > 0 }).ToList();
+        if (asked.Count > SkillLibrary.MostPerMessage)
+        {
+            return (calls, $"Use at most {SkillLibrary.MostPerMessage} skills in one message.");
+        }
+        foreach (var use in asked)
+        {
+            var name = use.Name!.Trim().TrimStart('/');
+            if (calls.Any(c => c.Name == name))
+            {
+                return (calls, $"/{name} is there twice.");
+            }
+            if (await FindAsync(me, name, access, db, ct) is not { } found)
+            {
+                return (calls, $"There is no skill /{name} you may use.");
+            }
+            var (call, missing) = SkillLibrary.Use(found, use.Args, text);
+            if (missing is not null)
+            {
+                return (calls, missing);
+            }
+            calls.Add(call!);
+        }
+        return (calls, null);
+    }
+
     internal static async Task<Skill?> FindAsync(AppUser me, string name, AccessService access, AppDbContext db, CancellationToken ct) =>
         (await UsableAsync(me, access, db, ct)).FirstOrDefault(s => string.Equals(s.Name, name.Trim().TrimStart('/'), StringComparison.OrdinalIgnoreCase));
 

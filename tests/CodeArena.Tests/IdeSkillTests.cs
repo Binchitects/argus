@@ -341,5 +341,12 @@ public sealed class IdeSkillTests : IDisposable
         Assert.EndsWith("<skill name=\"plain\">\nThe person used the skill /plain (No words taken). Follow its instructions:\n\nDo it plainly.\n</skill>\n</attached>", Asked(), StringComparison.Ordinal);
         var shown = (await web.GetJsonAsync("/api/session"))["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!;
         Assert.Equal(("/plain carefully, with @notes.txt", "notes.txt"), (shown["content"]!.GetValue<string>(), string.Join(", ", shown["files"]!.AsArray().Select(a => a!.GetValue<string>()))));
+
+        // Two skills one after another: both, in their order, the words after them for each; a path after them is words.
+        await (await web.SendAsync("/ship /plain /ship /etc/hosts first")).RestAsync();
+        var both = Asked();
+        Assert.Contains("The person used 2 skills together (/ship, /plain). Follow all of their instructions, each where it applies:", both, StringComparison.Ordinal);
+        Assert.True(both.IndexOf("<skill name=\"ship\">", StringComparison.Ordinal) < both.IndexOf("<skill name=\"plain\">", StringComparison.Ordinal));
+        Assert.Contains("Run make ship for /etc/hosts first.", both, StringComparison.Ordinal);
     }
 }
