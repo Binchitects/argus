@@ -214,6 +214,17 @@ class AirgapTests(unittest.TestCase):
         compose = [c for c in self.s.calls() if c[1:2] == ["compose"]][0]
         self.assertIn("--env-file", compose)
 
+    def test_A_dotenv_from_before_this_release_still_lists_the_images_and_keeps_its_own_values(self):
+        # The installation's .env names a secret as an older release did (ARGUS_KEY, not CODE_INTEL_KEY): compose
+        # needs every secret, so the ones it lacks are filled in; the ones it has are its own.
+        self.s.write(".env", "DOMAIN=llm.example\nMODELS_DIR=./models\nAPP_KEY=a-secret-value\nARGUS_KEY=old\nBACKUP_DIR=./backups\n")
+        self.s.env["FAKE_REQUIRED_ENV"] = "APP_KEY\nCODE_INTEL_KEY\nDOMAIN"
+        self.pack()
+        compose = [c for c in self.s.calls() if c[1:2] == ["compose"]][0]
+        self.assertIn("--env-file", compose)
+        # The filled-in file is gone afterwards: it held the installation's secrets.
+        self.assertFalse(Path(compose[compose.index("--env-file") + 1]).exists())
+
     def test_Podman_packs_from_its_own_store_with_its_compose_files(self):
         self.pack("--podman")
         self.assertTrue(self.s.called("podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml"))

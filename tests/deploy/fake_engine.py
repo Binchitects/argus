@@ -14,6 +14,7 @@ make with small fake files, so they run with no container engine at all.
     FAKE_PROFILES     what `compose config --profiles` prints
     FAKE_LOAD_SECONDS how long each `load` takes
     FAKE_INFO_FAIL    `info` fails (the engine does not answer)
+    FAKE_REQUIRED_ENV keys `compose config` needs a value for, as the compose file's ${KEY:?} (from --env-file, else .env)
 
 (With FAKE_STATE, compose config reads the compose files themselves, below.)
 
@@ -413,6 +414,14 @@ def compose(st: Store, args: list[str], project: str) -> int:
         if os.environ.get("FAKE_CONFIG_FAIL"):
             print("services must be a mapping", file=sys.stderr)
             return 1
+        if lines("FAKE_REQUIRED_ENV"):
+            envf = args[args.index("--env-file") + 1] if "--env-file" in args else ".env"
+            text = open(envf, encoding="utf-8").read() if os.path.exists(envf) else ""
+            have = {ln.split("=", 1)[0].strip() for ln in text.splitlines() if "=" in ln and ln.split("=", 1)[1].strip()}
+            for key in lines("FAKE_REQUIRED_ENV"):
+                if key not in have:
+                    print(f"required variable {key} is missing a value: set {key} in .env", file=sys.stderr)
+                    return 1
         if "--images" in args:
             if "FAKE_IMAGES" in os.environ:
                 print("\n".join(lines("FAKE_IMAGES")))

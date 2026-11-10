@@ -170,11 +170,18 @@ if [[ $ACTION == pack ]]; then
     else
       cmd=(docker compose)
     fi
-    if [[ ! -f .env ]]; then
-      PLACEHOLDER_ENV="$(mktemp)"
-      { printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY CODE_INTEL_KEY; echo DATA_DIR=/placeholder; } > "$PLACEHOLDER_ENV"
-      envf=(--env-file "$PLACEHOLDER_ENV")
-    fi
+    # .env as it is, and a placeholder for each secret it does not set (none yet, or one named before this release:
+    # an install not upgraded yet still packs this release).
+    PLACEHOLDER_ENV="$(mktemp)"
+    {
+      [[ -f .env ]] && { cat .env; echo; }
+      local k
+      for k in APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY CODE_INTEL_KEY DATA_DIR; do
+        [[ -f .env ]] && grep -Eq "^[[:space:]]*$k=." .env && continue
+        if [[ $k == DATA_DIR ]]; then echo DATA_DIR=/placeholder; else echo "$k=placeholder"; fi
+      done
+    } > "$PLACEHOLDER_ENV"
+    envf=(--env-file "$PLACEHOLDER_ENV")
     "${cmd[@]}" "${envf[@]}" config --images | sed '/^$/d' | sort -u
     local rc=${PIPESTATUS[0]}
     [[ -n "${PLACEHOLDER_ENV:-}" ]] && rm -f "$PLACEHOLDER_ENV"
