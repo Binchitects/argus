@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { HelpButton, HelpPanel } from '@/help/help-button'
 import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
 import { EyesBackdrop } from './eyes-backdrop'
+import { useAppIcon } from '@/lib/app-icon'
 
 /** The notice as formatted text: the chat's Markdown, fetched only when there is a notice to show. */
 const NoticeText = lazy(() => import('./chat/markdown').then((m) => ({ default: m.Markdown })))
@@ -61,6 +62,7 @@ export function LoginPage() {
   const [step, setStep] = useState<'password' | '2fa'>('password')
   const [remember, setRemember] = useState(false)
   const name = info.data?.name ?? 'Argus Arena'
+  const icon = useAppIcon(info.data?.icon)
   const [helpOpen, setHelpOpen] = useState(false)
   const logo = useRef<HTMLImageElement>(null)
   useEffect(() => {
@@ -73,7 +75,7 @@ export function LoginPage() {
       <EyesBackdrop logo={logo} />
       <aside className="flex flex-col items-center px-6 pt-8 lg:p-10">
         <div className="flex flex-col items-center gap-3 lg:flex-1 lg:justify-center">
-          <img ref={logo} src="/favicon.svg" alt="" className="eyes-logo size-24 drop-shadow-xl sm:size-28 lg:size-44" />
+          <img ref={logo} src={icon} alt="" className="eyes-logo size-24 object-contain drop-shadow-xl sm:size-28 lg:size-44" />
           <p data-keep-clear className="text-lg font-semibold lg:text-xl">
             {name}
           </p>

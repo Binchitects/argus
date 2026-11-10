@@ -664,6 +664,7 @@ public static class IdentityWiring
         Insights.DataSourceEndpoints.MapDataSources(app);
         Insights.DataEndpoints.MapData(app);
         Decks.DeckEndpoints.MapDecks(app);
+        Settings.BrandingEndpoints.MapBranding(app);
         Studio.StudioEndpoints.MapStudio(app);
         Code.Fixes.FixEndpoints.MapFixes(app);
         Panels.PanelEndpoints.MapPanels(app);

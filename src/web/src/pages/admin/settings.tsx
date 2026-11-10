@@ -23,6 +23,7 @@ import { DirectoryChecks, DirectoryGuide } from './directory-panel'
 import { SpeechLanguage, SpeechVoices } from './speech-voices'
 import { BotAddresses } from './bot-addresses'
 import { RecalculatePanel } from './recalculate'
+import { AppIconPanel } from './app-icon'
 import { InstallationPanel } from './settings-installation'
 import { bytesHint, initialValue, installationTitle, installMatches, isShown, limits, shownValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
@@ -226,6 +227,7 @@ export function SettingsPage() {
                 {g.title === 'Company sign-in' && <CompanySignInPanel draft={draft} />}
                 {g.title === 'Chat bots' && <BotAddresses />}
                 {g.title === 'Prices' && <RecalculatePanel />}
+                {g.title === 'Branding' && !q && <AppIconPanel />}
               </CardContent>
             </Card>
           ))}

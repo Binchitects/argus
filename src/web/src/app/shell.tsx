@@ -19,6 +19,7 @@ import { continueTo } from './continue'
 import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
+import { useAppIcon } from '@/lib/app-icon'
 import { findNavItem, mayOpen, spaceOf, spaces, spaceTitle, visibleNavigation, type NavItem, type NavSection, type Space } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
@@ -67,6 +68,7 @@ function SignedIn({ me }: { me: Me }) {
   const [whatsNew, setWhatsNew] = useState(false)
   const sections = visibleNavigation(me)
   const name = info.data?.name ?? 'Argus Arena'
+  const icon = useAppIcon(info.data?.icon)
   // The old cheat code, anywhere but a text box.
   useKonami(useCallback(() => {
     confetti()
@@ -120,7 +122,7 @@ function SignedIn({ me }: { me: Me }) {
         aria-label="Sidebar"
       >
         <div className="sticky top-0 flex h-dvh flex-col">
-          <Brand name={name} collapsed={collapsed} />
+          <Brand name={name} icon={icon} collapsed={collapsed} />
           <SidebarNav sections={sections} collapsed={collapsed} />
           <div className="border-t border-sidebar-border p-2">
             <ManualLink collapsed={collapsed} />
@@ -136,7 +138,7 @@ function SignedIn({ me }: { me: Me }) {
         <SheetContent side="left" className="w-72 gap-0 bg-sidebar p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
           <SheetDescription className="sr-only">Pages of {name}</SheetDescription>
-          <Brand name={name} collapsed={false} />
+          <Brand name={name} icon={icon} collapsed={false} />
           <SidebarNav sections={sections} collapsed={false} onNavigate={() => setMobileOpen(false)} />
           <div className="border-t border-sidebar-border p-2">
             <ManualLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
@@ -273,7 +275,7 @@ const eyeSays = [
   'Seven clicks. The eye blinks back.',
 ]
 
-function Brand({ name, collapsed }: { name: string; collapsed: boolean }) {
+function Brand({ name, icon, collapsed }: { name: string; icon: string; collapsed: boolean }) {
   const said = useRef(0)
   const blink = useQuickClicks(7, useCallback(() => {
     confetti()
@@ -281,7 +283,7 @@ function Brand({ name, collapsed }: { name: string; collapsed: boolean }) {
   }, []))
   return (
     <Link to="/" onClick={blink} className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 font-semibold', collapsed && 'justify-center px-0')}>
-      <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
+      <img src={icon} alt="" className="size-7 rounded-md object-contain" />
       {!collapsed && <span className="truncate">{name}</span>}
     </Link>
   )

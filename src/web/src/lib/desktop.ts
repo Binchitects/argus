@@ -3,6 +3,8 @@
  * is hidden. Off until the person turns them on (the browser asks them once); they can
  * turn them off here again without going into the browser's settings.
  */
+import { appIcon } from './app-icon'
+
 const KEY = 'desktop-notifications'
 
 export type DesktopState = 'on' | 'off' | 'blocked' | 'unsupported'
@@ -32,7 +34,7 @@ export async function setDesktop(on: boolean): Promise<DesktopState> {
 export function tellDesktop(title: string, body: string | null | undefined, tag: string, open?: () => void) {
   if (typeof document === 'undefined' || !document.hidden || desktopState() !== 'on') return
   try {
-    const n = new Notification(title, { body: body?.slice(0, 200) ?? undefined, tag, icon: '/favicon.svg' })
+    const n = new Notification(title, { body: body?.slice(0, 200) ?? undefined, tag, icon: appIcon() })
     n.onclick = () => {
       window.focus()
       open?.()

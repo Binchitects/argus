@@ -92,13 +92,16 @@ app.MapAppIdentity();
 
 var api = app.MapGroup("/api");
 // Public: the sign-in page shows the name, headline and where to get help.
-api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding,
-    Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Compliance.NoticeOptions> notice) =>
+api.MapGet("/info", async (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding,
+    Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Compliance.NoticeOptions> notice, Llm.Core.Data.AppDbContext db, CancellationToken ct) =>
 {
     var b = branding.CurrentValue;
+    var icon = await Llm.Api.Settings.BrandingEndpoints.IconAsync(db, ct);
     return new
     {
         name = string.IsNullOrWhiteSpace(b.ProductName) ? AppInfo.Current.Name : b.ProductName,
+        // The icon an admin chose (Settings → Branding); null: the app's own, /favicon.svg.
+        icon = icon?.Url,
         version = AppInfo.Current.Version,
         signInHeadline = b.SignInHeadline,
         supportContact = string.IsNullOrWhiteSpace(b.SupportContact) ? null : b.SupportContact,

@@ -21,6 +21,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     }
 
     public DbSet<Setting> Settings => Set<Setting>();
+    public DbSet<SiteImage> SiteImages => Set<SiteImage>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     /// <summary>Cookie, 2FA and OIDC key material survives restarts and is shared by every replica.</summary>
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
@@ -183,6 +184,19 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<AttachmentPage>().Property(p => p.Data).HasConversion(files, sameFile);
         builder.Entity<Decks.DeckTemplate>().Property(t => t.Data).HasConversion(files, sameFile);
         builder.UseOpenIddict<Guid>();
+
+        builder.Entity<SiteImage>(e =>
+        {
+            e.ToTable("site_images");
+            e.HasKey(i => i.Name);
+            e.Property(i => i.Name).HasMaxLength(40);
+            e.Property(i => i.ContentType).HasMaxLength(40);
+            e.Property(i => i.Sha256).HasMaxLength(64);
+            e.Property(i => i.UpdatedBy).HasMaxLength(256);
+            // Replaced whole, never changed in place.
+            e.Property(i => i.Data).Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<byte[]>(
+                (a, b) => ReferenceEquals(a, b), v => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v), v => v));
+        });
 
         builder.Entity<Setting>(e =>
         {

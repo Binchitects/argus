@@ -49,21 +49,24 @@ public static class PushEndpoints
     /// phone's Share sheet sends a file, a page or words to a new chat (the service worker keeps them for it); and its shortcuts
     /// (a long press on its icon): a new chat, Talk, and recording a meeting.
     /// </summary>
-    private static IResult Manifest(HttpResponse response, IOptionsMonitor<BrandingOptions> branding)
+    private static async Task<IResult> Manifest(HttpResponse response, IOptionsMonitor<BrandingOptions> branding, Llm.Core.Data.AppDbContext db, CancellationToken ct)
     {
         var name = branding.CurrentValue.ProductName is { Length: > 0 } n ? n : AppInfo.Current.Name;
+        // The icon an admin chose goes first: the home screen shows it, the app's own after it.
+        var chosen = await Settings.BrandingEndpoints.IconAsync(db, ct);
         response.Headers.CacheControl = "no-cache";
         return Results.Json(new
         {
             id = "/", name, short_name = name.Length <= 12 ? name : name.Split(' ')[0], description = branding.CurrentValue.SignInHeadline,
             start_url = "/", scope = "/", display = "standalone", background_color = "#070b1b", theme_color = "#141f45",
-            icons = new object[]
+            icons = new object?[]
             {
+                chosen is { } icon ? new { src = icon.Url, sizes = "any", type = icon.Type, purpose = "any" } : null,
                 new { src = "/icons/icon-192.png", sizes = "192x192", type = "image/png", purpose = "any" },
                 new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png", purpose = "any" },
                 new { src = "/icons/maskable-512.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
                 new { src = "/favicon.svg", sizes = "any", type = "image/svg+xml", purpose = "any" },
-            },
+            }.OfType<object>(),
             share_target = new
             {
                 action = "/share", method = "POST", enctype = "multipart/form-data",

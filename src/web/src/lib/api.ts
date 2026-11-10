@@ -1,6 +1,8 @@
 export interface AppInfo {
   name: string
   version: string
+  /** The icon an admin chose (Settings → Branding), its address changing with it; null: the app's own. */
+  icon?: string | null
   /** Branding (Settings page). */
   signInHeadline?: string | null
   supportContact?: string | null

@@ -41,6 +41,45 @@ function data(over: Partial<SettingsData> = {}): SettingsData {
 }
 
 describe('settings', () => {
+  it("an admin chooses the app's icon beside its name, sees it at once, and can go back to the app's own", async () => {
+    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Argus Arena', default: 'Argus Arena' })] }] })
+    let icon: string | null = null
+    const calls = fakeApi(admin, {
+      'GET /api/admin/config': () => ({ json: d }),
+      'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '8.0.0', icon } }),
+      'PUT /api/admin/branding/icon': () => {
+        icon = '/api/branding/icon?v=abc123'
+        return { json: { url: icon, type: 'image/png', size: 70 } }
+      },
+      'DELETE /api/admin/branding/icon': () => {
+        icon = null
+        return { status: 204 }
+      },
+    })
+    renderApp('/admin/settings')
+    const panel = await screen.findByRole('region', { name: 'Icon' })
+    expect(within(panel).getByRole('img', { name: "The app's own icon" })).toHaveAttribute('src', '/favicon.svg')
+    expect(within(panel).queryByRole('button', { name: "Use the app's own" })).not.toBeInTheDocument()
+    await userEvent.upload(within(panel).getByLabelText('Icon picture'), new File([new Uint8Array([137, 80, 78, 71])], 'logo.png', { type: 'image/png' }))
+    expect(await within(panel).findByRole('img', { name: 'The icon in use' })).toHaveAttribute('src', '/api/branding/icon?v=abc123')
+    expect(calls.some((c) => c.method === 'PUT' && c.path === '/api/admin/branding/icon' && c.body instanceof FormData)).toBe(true)
+    // The sidebar's icon follows, beside the name.
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' })
+    await waitFor(() => expect(within(sidebar).getByRole('link', { name: /Argus Arena/ }).querySelector('img')).toHaveAttribute('src', '/api/branding/icon?v=abc123'))
+    await userEvent.click(within(panel).getByRole('button', { name: "Use the app's own" }))
+    expect(await within(panel).findByRole('img', { name: "The app's own icon" })).toHaveAttribute('src', '/favicon.svg')
+  })
+
+  it('a picture too big for an icon is refused before it is sent', async () => {
+    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Argus Arena', default: 'Argus Arena' })] }] })
+    const calls = fakeApi(admin, { 'GET /api/admin/config': () => ({ json: d }) })
+    renderApp('/admin/settings')
+    const panel = await screen.findByRole('region', { name: 'Icon' })
+    await userEvent.upload(within(panel).getByLabelText('Icon picture'), new File([new Uint8Array(600 * 1024)], 'photo.png', { type: 'image/png' }))
+    expect(await screen.findByText('That picture is too big')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
   it('a setting is changed only by who holds its group’s part of settings.manage; the others are read only', async () => {
     const d = data({ restartNeeded: true })
     for (const g of d.groups) for (const x of g.settings) x.permission = g.title === 'Chat' ? 'settings.chat' : g.title === 'Model' ? 'settings.models' : 'signin.directory'

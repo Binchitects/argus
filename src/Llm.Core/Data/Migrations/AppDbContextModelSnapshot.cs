@@ -5366,6 +5366,38 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("settings", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Data.SiteImage", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("site_images", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Data.StorageQuota", b =>
                 {
                     b.Property<Guid>("UserId")
