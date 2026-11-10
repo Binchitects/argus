@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 namespace CodeArena.Tests;
 
 /// <summary>
-/// "In code-arena loading chat and history and syncing with argus-arena is too laggy and slow": a session of 500 messages
+/// "In code-arena loading chat and history and syncing with arena is too laggy and slow": a session of 500 messages
 /// (125 turns, each a tool call with its result and an answer; every other one an edit of 60 lines), compacted along the
 /// way as a long session is, opened in the IDE and sent to Arena. Each test says its numbers.
 /// </summary>

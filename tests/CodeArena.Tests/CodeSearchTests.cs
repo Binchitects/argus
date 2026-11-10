@@ -108,7 +108,7 @@ public sealed partial class CodeSearchTests : IDisposable
         var expected = new HashSet<(string, int)>();
         foreach (var path in new[] { "src/Shop/Payments.cs", "src/Shop/Cart.cs", "tools/bill.py", "src/web/cart.ts" })
         {
-            var code = Argus.Util.CodeText.Blank(CodeFiles.LanguageOf(path), File.ReadAllText(Path.Combine(_root, path))).Split('\n');
+            var code = CodeIntel.Util.CodeText.Blank(CodeFiles.LanguageOf(path), File.ReadAllText(Path.Combine(_root, path))).Split('\n');
             for (var i = 0; i < code.Length; i++)
             {
                 if (Regex.IsMatch(code[i], @"\bCharge\b"))

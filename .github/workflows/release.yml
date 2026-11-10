@@ -35,7 +35,7 @@ jobs:
           # are commonly mixed case -- so this must be lowered, not assumed.
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "version=$version"            >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/$owner/argus"  >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$owner/code-intel"  >> "$GITHUB_OUTPUT"
           case "$version" in
             *rc*|*alpha*|*beta*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
             *)                   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
@@ -52,7 +52,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/Argus/Dockerfile
+          file: src/CodeIntel/Dockerfile
           target: test
           push: false
           no-cache: true          # a CACHED test layer proves nothing
@@ -69,7 +69,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/Argus/Dockerfile
+          file: src/CodeIntel/Dockerfile
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
@@ -79,7 +79,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/Argus/Dockerfile
+          file: src/CodeIntel/Dockerfile
           target: server
           push: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}-server
@@ -92,7 +92,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/Argus/Dockerfile
+          file: src/CodeIntel/Dockerfile
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.image }}:latest

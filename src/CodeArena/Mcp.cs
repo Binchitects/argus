@@ -554,7 +554,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         if (status is 401 or 403)
         {
-            // Its reason, when it gives one (Argus: the key is not valid, or GitLab cannot say what the person may read).
+            // Its reason, when it gives one (code-intel: the key is not valid, or GitLab cannot say what the person may read).
             var why = Reason(await res.Content.ReadAsStringAsync(ct));
             throw new McpException($"{url} refused the credentials ({status}){(why is null ? "." : $": {why}")}", status);
         }

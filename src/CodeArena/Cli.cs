@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
+using Branding;
 namespace CodeArena;
 
 /// <summary>The command line, parsed.</summary>
@@ -122,8 +123,8 @@ internal static partial class Cli
         Source: {Source}
         """;
 
-    public const string Help = """
-        Code Arena: an IDE in your browser around a coding agent, on your company's Argus Arena.
+    public static readonly string Help = $"""
+        Code Arena: an IDE in your browser around a coding agent, on your company's {Brand.Product}.
 
         Usage:
           code-arena [options]              the IDE for this folder, in your browser, on this machine only
@@ -537,22 +538,22 @@ internal static partial class Cli
                 // A key of another account (a test one) would keep the sessions with that account's chats, not the person's.
                 ui.Line($"{ui.Green("✓")} Sessions are kept with {account}'s chats in Arena: the key's account.");
             }
-            var argus = new Config { Url = url, ArgusUrl = config.ArgusUrl };
-            if (config.ArgusTools && argus.ArgusMcpUrl is { } argusUrl)
+            var codeIntel = new Config { Url = url, CodeIntelUrl = config.CodeIntelUrl };
+            if (config.CodeIntelTools && codeIntel.CodeIntelMcpUrl is { } codeIntelUrl)
             {
                 try
                 {
-                    await using var client = await McpClient.ConnectAsync("argus", new HttpMcpTransport(http, argusUrl,
+                    await using var client = await McpClient.ConnectAsync("code-intel", new HttpMcpTransport(http, codeIntelUrl,
                         new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }), ct);
-                    ui.Line($"{ui.Green("✓")} Argus's tools: {client.Tools.Count} ({string.Join(", ", client.Tools.Take(6).Select(t => t.Str("name")))}{(client.Tools.Count > 6 ? ", …" : "")}).");
+                    ui.Line($"{ui.Green("✓")} {Brand.CodeIntel}'s tools: {client.Tools.Count} ({string.Join(", ", client.Tools.Take(6).Select(t => t.Str("name")))}{(client.Tools.Count > 6 ? ", …" : "")}).");
                 }
                 catch (McpUnavailableException)
                 {
-                    ui.Info($"Argus's tools are not available on this Arena (no MCP endpoint at {argusUrl}).");
+                    ui.Info($"{Brand.CodeIntel}'s tools are not available on this Arena (no MCP endpoint at {codeIntelUrl}).");
                 }
                 catch (Exception e) when (e is McpException or OperationCanceledException && !ct.IsCancellationRequested)
                 {
-                    ui.Warn($"Argus's tools did not connect: {(e is OperationCanceledException ? $"{argusUrl} did not answer in time." : e.Message)} Sessions try again in the background.");
+                    ui.Warn($"{Brand.CodeIntel}'s tools did not connect: {(e is OperationCanceledException ? $"{codeIntelUrl} did not answer in time." : e.Message)} Sessions try again in the background.");
                 }
             }
         }
@@ -667,7 +668,7 @@ internal static partial class Cli
                 ui.Warn("This code-arena has no IDE built into it: the conversation runs in this terminal.");
                 return await AgentAsync(o, env, ct);
             }
-            ui.Error("This code-arena has no IDE: its page was not built into it. ./arenactl code-arena, in Argus Arena's repository, builds the page (from src/web) and then the program.");
+            ui.Error($"This code-arena has no IDE: its page was not built into it. ./arenactl code-arena, in {Brand.Product}'s repository, builds the page (from src/web) and then the program.");
             return 1;
         }
         // The whole run is one "turn" of Ctrl+C: the first press stops the server.

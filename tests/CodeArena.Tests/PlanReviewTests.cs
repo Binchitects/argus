@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 
+using Branding;
 namespace CodeArena.Tests;
 
 /// <summary>Plan mode, finished: the agent proposes its plan, the person approves it, changes a step, asks for another way or rejects it.</summary>
@@ -122,9 +123,9 @@ public sealed class PlanReviewTests : IDisposable
     [Fact]
     public async Task A_proposed_plan_is_grounded_in_the_code_its_symbols_callers_in_every_repository_and_the_tests_that_name_them()
     {
-        using var argus = new FakeMcp
+        using var codeIntel = new FakeMcp
         {
-            ToolList = [new JsonObject { ["name"] = "change_impact", ["description"] = "Argus's change_impact.", ["inputSchema"] = new JsonObject { ["type"] = "object" }, ["annotations"] = new JsonObject { ["readOnlyHint"] = true } }],
+            ToolList = [new JsonObject { ["name"] = "change_impact", ["description"] = $"{Brand.CodeIntel}'s change_impact.", ["inputSchema"] = new JsonObject { ["type"] = "object" }, ["annotations"] = new JsonObject { ["readOnlyHint"] = true } }],
             CallContent = [new JsonObject
             {
                 ["type"] = "text",
@@ -141,14 +142,14 @@ public sealed class PlanReviewTests : IDisposable
             : Reply.Say("ok");
         using var h = new Harness(_gateway, _mcp, c =>
         {
-            c["argusUrl"] = argus.Url;
+            c["codeIntelUrl"] = codeIntel.Url;
             c["planCritique"] = false;
         });
         Git(h.Work, "init", "-q");
         Git(h.Work, "remote", "add", "origin", "https://gitlab.example/shop/codec.git");
         Assert.Equal(0, await h.Run("plan the fix\n/plan\n/exit\n", "chat", "--mode", "plan"));
 
-        var call = Assert.Single(argus.ToolCalls, c => c["name"]!.GetValue<string>() == "change_impact");
+        var call = Assert.Single(codeIntel.ToolCalls, c => c["name"]!.GetValue<string>() == "change_impact");
         Assert.Equal(("shop/codec", "parse"), (call["arguments"]!["repo"]!.GetValue<string>(), call["arguments"]!["symbol"]!.GetValue<string>()));
         Assert.Contains("impact: parse: 2 lines use it, in shop/codec (1), shop/player (1); 1 repository depends on this one; tests that name it: tests/parse_test.c.", h.Out, StringComparison.Ordinal);
     }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Code Arena: the coding agent people run on their own machine, against
-       their Argus Arena. The base class library only, no package references:
+       their Arena. The base class library only, no package references:
        it builds with nothing but the SDK. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -36,10 +36,10 @@
     <Compile Include="../Llm.Core/Chat/RepetitionGuard.cs" Link="Shared/RepetitionGuard.cs" />
   </ItemGroup>
 
-  <!-- Code with its comments and strings blanked, lines and columns kept: Argus's own reading, which the code index
+  <!-- Code with its comments and strings blanked, lines and columns kept: code-intel's own reading, which the code index
        scans for what a file declares and uses (docs/design/code-index.md). Shared as a file, no project reference. -->
   <ItemGroup>
-    <Compile Include="../Argus/Util/CodeText.cs" Link="Shared/CodeText.cs" />
+    <Compile Include="../CodeIntel/Util/CodeText.cs" Link="Shared/CodeText.cs" />
   </ItemGroup>
 
   <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/

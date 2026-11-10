@@ -446,7 +446,7 @@ internal sealed partial class Agent
     /// </summary>
     public Func<WorkPlan, CancellationToken, Task<string?>>? Critique { get; set; }
 
-    /// <summary>A proposed plan grounded in the code before its second reading: what its steps' symbols reach (Argus). Null: not looked up.</summary>
+    /// <summary>A proposed plan grounded in the code before its second reading: what its steps' symbols reach (code-intel). Null: not looked up.</summary>
     public Func<WorkPlan, CancellationToken, Task<WorkPlan>>? Ground { get; set; }
 
     /// <summary>What ended outside the conversation since the last turn (the person's background tasks), told before the next message; null: nothing.</summary>

@@ -1,0 +1,190 @@
+using System.Globalization;
+using System.Reflection;
+using System.Text;
+using CodeIntel.Store;
+using CodeIntel.Util;
+using Microsoft.Data.Sqlite;
+
+using Branding;
+namespace CodeIntel.Server;
+
+/// <summary>
+/// Prometheus metrics for the index, so it cannot go stale unnoticed
+///. The exporter decides what "stale" means
+/// (CODE_INTEL_INDEX_STALE_AFTER, default 3600s) and exports the raw timestamps too.
+///
+/// One difference from the Python exposition, deliberately: HELP and TYPE are
+/// written once per metric family rather than once per sample. Prometheus's
+/// scraper tolerates the repetition, but the strict text-format parsers
+/// (client_golang's expfmt, promtool) reject a second HELP line for a family.
+/// </summary>
+public static class Metrics
+{
+    public const int DefaultStaleAfter = 3600;
+    public const string Prefix = "code_intel";
+
+    public static int StaleAfter() =>
+        int.TryParse(Environment.GetEnvironmentVariable("CODE_INTEL_INDEX_STALE_AFTER"), out var v) ? v : DefaultStaleAfter;
+
+    public static string Version =>
+        Environment.GetEnvironmentVariable("CODE_INTEL_VERSION") is { Length: > 0 } v
+            ? v
+            : (typeof(Metrics).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0+unknown").Split('+')[0];
+
+    public static string Escape(object? value) =>
+        (Convert.ToString(value, CultureInfo.InvariantCulture) ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+
+    public sealed record RepoState(string Repo, string Branch, bool IsDefault, long? LastRunAt, long? LastIndexedAt, double? AgeSeconds,
+        bool Stale, bool TimedOut, bool SymbolsFailed, string? Error, long Files, long Symbols, long GitlabId = 0);
+
+    /// <summary>
+    /// How long a repository on this schedule may go unchecked before it is stale: the threshold,
+    /// plus the time its own schedule leaves between runs; null (never, once checked) when it is off.
+    /// </summary>
+    public static double? StaleLimit(Indexing.RepoSchedule schedule, int staleAfter) => schedule.Kind switch
+    {
+        Indexing.ScheduleKind.Off => null,
+        _ => staleAfter + (schedule.Period?.TotalSeconds ?? 0),
+    };
+
+    /// <summary>Each repository's schedule (its own, or the default), by project id; read without the migrations' help.</summary>
+    static (Dictionary<long, Indexing.RepoSchedule> ById, Indexing.RepoSchedule Fallback) Schedules(SqliteConnection conn)
+    {
+        var byId = new Dictionary<long, Indexing.RepoSchedule>();
+        var fallback = Indexing.RepoSchedule.WithPass;
+        try
+        {
+            fallback = Indexing.RepoSchedule.Parse(Sql.One(conn, "SELECT value FROM code_intel_meta WHERE key = ?", Choices.DefaultScheduleKey)?.Str("value"));
+            foreach (var row in Sql.Query(conn, "SELECT gitlab_id, schedule FROM repo_choices WHERE schedule <> ''"))
+                byId[row.Long("gitlab_id")] = Indexing.RepoSchedule.Parse(row.Str("schedule"));
+        }
+        catch (SqliteException)
+        {
+            // An index older than schedules: every repository goes with the passes.
+        }
+        return (byId, fallback);
+    }
+
+    /// <summary>
+    /// The index at one moment. <c>Repos</c> holds a row per repository and branch; the counts are of
+    /// repositories, each counted once with all its branches: stale or failing when any branch is.
+    /// </summary>
+    public sealed record Snapshot(double Now, int StaleAfterSeconds, List<RepoState> Repos, int StaleRepos, int ErroredRepos, string Version)
+    {
+        public int Repositories => Repos.Select(r => r.GitlabId).Distinct().Count();
+        public int Branches => Repos.Count;
+    }
+
+    static int Distinct(IEnumerable<RepoState> rows) => rows.Select(r => r.GitlabId).Distinct().Count();
+
+    public static Snapshot Take(string dbPath, double? now = null)
+    {
+        double t = now ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        int limit = StaleAfter();
+        var repos = new List<RepoState>();
+        Db.Init();
+        using var conn = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        conn.Open();
+        var counts = new Dictionary<long, Dictionary<string, long>>();
+        foreach (var table in new[] { "files", "symbols" })
+            foreach (var row in Sql.Query(conn, $"SELECT repo_id, COUNT(*) AS n FROM {table} GROUP BY repo_id"))
+            {
+                var id = row.Long("repo_id");
+                if (!counts.TryGetValue(id, out var d)) counts[id] = d = new();
+                d[table] = row.Long("n");
+            }
+        var (schedules, fallback) = Schedules(conn);
+        foreach (var row in Sql.Query(conn,
+                     "SELECT id, gitlab_id, path_with_namespace, branch, default_branch," +
+                     "       last_run_at, last_indexed_at, last_run_timed_out," +
+                     "       last_run_symbols_failed, last_run_error" +
+                     "  FROM repos ORDER BY path_with_namespace, branch"))
+        {
+            var lastRun = row.LongOrNull("last_run_at");
+            double? age = lastRun is null ? null : Math.Max(0.0, t - lastRun.Value);
+            var byTable = counts.GetValueOrDefault(row.Long("id")) ?? new();
+            var branch = row.StrOrNull("branch") is { Length: > 0 } b ? b : row.Str("default_branch");
+            // A repository on a daily schedule is not stale an hour after its run.
+            var allowed = StaleLimit(schedules.GetValueOrDefault(row.Long("gitlab_id"), fallback), limit);
+            repos.Add(new RepoState(
+                row.Str("path_with_namespace"), branch, branch == row.Str("default_branch"),
+                lastRun, row.LongOrNull("last_indexed_at"), age,
+                age is null || (allowed is { } a && age > a),
+                row.Long("last_run_timed_out") != 0, row.Long("last_run_symbols_failed") != 0,
+                row.StrOrNull("last_run_error"),
+                byTable.GetValueOrDefault("files", 0), byTable.GetValueOrDefault("symbols", 0), row.Long("gitlab_id")));
+        }
+        return new Snapshot(t, limit, repos, Distinct(repos.Where(r => r.Stale)), Distinct(repos.Where(r => !string.IsNullOrEmpty(r.Error))), Version);
+    }
+
+    sealed class Exposition
+    {
+        readonly StringBuilder _sb = new();
+        readonly HashSet<string> _described = new(StringComparer.Ordinal);
+
+        public void Line(string name, object value, IReadOnlyList<(string, object?)>? labels = null, string help = "", string kind = "gauge")
+        {
+            if (help.Length > 0 && _described.Add(name))
+            {
+                _sb.Append("# HELP ").Append(name).Append(' ').Append(help).Append('\n');
+                _sb.Append("# TYPE ").Append(name).Append(' ').Append(kind).Append('\n');
+            }
+            _sb.Append(name);
+            if (labels is { Count: > 0 })
+                _sb.Append('{').Append(string.Join(",", labels.Select(l => $"{l.Item1}=\"{Escape(l.Item2)}\""))).Append('}');
+            _sb.Append(' ').Append(Convert.ToString(value, CultureInfo.InvariantCulture)).Append('\n');
+        }
+
+        public void Comment(string text) => _sb.Append(text).Append('\n');
+        public override string ToString() => _sb.ToString();
+    }
+
+    /// <summary>What to emit when the index cannot be read at all: still a 200 and a valid scrape.</summary>
+    public static string RenderError(Exception exc)
+    {
+        var x = new Exposition();
+        x.Line($"{Prefix}_index_build_info", 0, [("version", "unknown")], $"{Brand.CodeIntel} build, always 1");
+        x.Line($"{Prefix}_index_scrape_ok", 0, help: "1 when this scrape read the index successfully");
+        x.Comment($"# code-intel could not read the index: {PythonName(exc)}");
+        return x.ToString();
+    }
+
+    /// <summary>The Python exception class a failure corresponds to, for operator-facing text.</summary>
+    static string PythonName(Exception exc) => exc switch
+    {
+        SqliteException => "OperationalError",
+        _ => exc.GetType().Name,
+    };
+
+    public static string Render(string dbPath)
+    {
+        var snap = Take(dbPath);
+        var x = new Exposition();
+        x.Line($"{Prefix}_index_build_info", 1, [("version", snap.Version)], $"{Brand.CodeIntel} build, always 1");
+        x.Line($"{Prefix}_index_scrape_ok", 1, help: "1 when this scrape read the index successfully");
+        x.Line($"{Prefix}_index_repos", snap.Repositories, help: "Repositories in the index, each once with all its branches");
+        x.Line($"{Prefix}_index_branches", snap.Branches, help: "Branches in the index, of every repository");
+        x.Line($"{Prefix}_index_stale_repos", snap.StaleRepos, help: $"No check within {snap.StaleAfterSeconds}s (plus the time a repository's own schedule leaves between runs), or never indexed");
+        x.Line($"{Prefix}_index_errored_repos", snap.ErroredRepos, help: "Repositories whose last pass recorded an error on any branch");
+        x.Line($"{Prefix}_index_stale_after_seconds", snap.StaleAfterSeconds, help: "Threshold this build applies to the stale gauges");
+        // Family-major, not repo-major: the text format requires every sample of a
+        // family to be contiguous, which the Python exposition (one block per
+        // repo) does not guarantee once there are two repositories.
+        var families = new (string Name, string Help, Func<RepoState, object> Value)[]
+        {
+            ($"{Prefix}_index_last_run_timestamp_seconds", "Unix time of the last pass, 0 if it has never run", r => r.LastRunAt ?? 0),
+            ($"{Prefix}_index_last_indexed_timestamp_seconds", "Unix time of the last pass that changed the index", r => r.LastIndexedAt ?? 0),
+            ($"{Prefix}_index_files", "Files indexed in this repository", r => r.Files),
+            ($"{Prefix}_index_symbols", "Symbols indexed in this repository", r => r.Symbols),
+            ($"{Prefix}_index_stale", "1 when this repository has gone stale", r => r.Stale ? 1 : 0),
+            ($"{Prefix}_index_timed_out", "1 when the last pass hit its time budget", r => r.TimedOut ? 1 : 0),
+            ($"{Prefix}_index_symbols_failed", "1 when symbol extraction failed on the last pass", r => r.SymbolsFailed ? 1 : 0),
+            ($"{Prefix}_index_errored", "1 when the last pass recorded an error", r => string.IsNullOrEmpty(r.Error) ? 0 : 1),
+        };
+        foreach (var (name, help, value) in families)
+            foreach (var r in snap.Repos)
+                x.Line(name, value(r), [("repo", r.Repo), ("branch", r.Branch)], help);
+        return x.ToString();
+    }
+}

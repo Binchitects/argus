@@ -4,7 +4,7 @@ namespace CodeArena;
 
 /// <summary>
 /// Configure Tools, in the IDE and the web interface (as VS Code's and the web chat's tool customisation): every tool of
-/// the session (the built-in ones, Arena's, Argus's, the MCP servers', the person's and the project's own) with its
+/// the session (the built-in ones, Arena's, code-intel's, the MCP servers', the person's and the project's own) with its
 /// settings at each level and those in force; the project's own tools and MCP servers to enable here.
 /// </summary>
 internal static class ToolsApi

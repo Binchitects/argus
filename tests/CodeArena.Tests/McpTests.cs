@@ -16,7 +16,7 @@ public sealed class McpTests : IDisposable
     {
         _mcp.Sse = sse;
         await using var client = await McpClient.ConnectAsync("arena", new HttpMcpTransport(_http, _mcp.Url, Auth), CancellationToken.None);
-        Assert.Equal("argus-arena", client.ServerName);
+        Assert.Equal("arena", client.ServerName);
         Assert.StartsWith("Arena: search the web", client.Instructions);
         Assert.Equal(["web_search", "read_file", "create_issue"], client.Tools.Select(t => t.Str("name")));
         var result = await client.CallAsync("web_search", new JsonObject { ["query"] = "llama" }, CancellationToken.None);

@@ -1068,7 +1068,7 @@ internal sealed class ChatSync : IAsyncDisposable
 
     /// <summary>
     /// What the web chat offers the person, as Arena's /api/chat/config says it (read with the key): each model loaded or
-    /// not and seeing pictures or not, the thinking levels and their default, the address of GitLab for Argus's links. Null
+    /// not and seeing pictures or not, the thinking levels and their default, the address of GitLab for code-intel's links. Null
     /// when Arena does not say (an older one) or cannot be reached within <paramref name="limit"/>.
     /// </summary>
     public static Task<JsonObject?> ChatConfigAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>

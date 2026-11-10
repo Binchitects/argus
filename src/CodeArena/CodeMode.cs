@@ -124,7 +124,7 @@ internal sealed class ToolBridge : IAsyncDisposable
 
 /// <summary>
 /// Code mode (run_code): a Python program, in the session's sandbox, calls the session's tools as functions (import
-/// arena: its local tools, Arena's, Argus's and the person's MCP servers) through a bridge here, each call checked as a
+/// arena: its local tools, Arena's, code-intel's and the person's MCP servers) through a bridge here, each call checked as a
 /// direct one would be (the mode, the rules, asking where it asks), and only what it prints comes back.
 /// </summary>
 internal sealed partial class Runtime
@@ -197,7 +197,7 @@ internal sealed partial class Runtime
             "(fresh: true starts anew). It is the project's virtual environment when it has one (.venv, venv), in the working directory and the " +
             "session's sandbox. What it prints comes back, and the value of a last line that is an expression, an error with its line, and the " +
             "plots it makes (matplotlib: they are shown to you and kept in .code-arena/plots). In it, `import arena` calls this session's tools as " +
-            "functions: arena.tools.search(\"words\") lists them (arena.local.read_file, arena.argus.find_symbol, arena.<server>.<tool>), help(...) " +
+            "functions: arena.tools.search(\"words\") lists them (arena.local.read_file, arena.code-intel.find_symbol, arena.<server>.<tool>), help(...) " +
             "tells one's parameters, and each call (keyword arguments) returns the tool's result, a dict or a list when it is JSON; a refused call " +
             $"raises arena.ToolError. Each call is checked as a direct one is (the mode, the rules); at most {MostCodeCalls} in one run. Use it to " +
             "compute, to explore data, and for many tool calls whose results you only filter or join; print only what you need.",

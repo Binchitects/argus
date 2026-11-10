@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 
+using Branding;
 namespace CodeArena.Tests;
 
-/// <summary>Arena's and Argus's MCP servers, connected in the background: slow, down, lost, back.</summary>
+/// <summary>Arena's and code-intel's MCP servers, connected in the background: slow, down, lost, back.</summary>
 public sealed class ServerTests : IDisposable
 {
     private readonly FakeGateway _gateway = new();
@@ -29,7 +30,7 @@ public sealed class ServerTests : IDisposable
     private static JsonObject Tool(string name) => new()
     {
         ["name"] = name,
-        ["description"] = $"Argus's {name}.",
+        ["description"] = $"{Brand.CodeIntel}'s {name}.",
         ["inputSchema"] = new JsonObject { ["type"] = "object" },
         ["annotations"] = new JsonObject { ["readOnlyHint"] = true },
     };
@@ -120,49 +121,49 @@ public sealed class ServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Argus_connects_beside_Arena_and_its_tools_Arena_serves_are_offered_once()
+    public async Task CodeIntel_connects_beside_Arena_and_its_tools_Arena_serves_are_offered_once()
     {
-        using var argus = new FakeMcp { ToolList = [Tool("find_symbol"), Tool("web_search")] };
+        using var codeIntel = new FakeMcp { ToolList = [Tool("find_symbol"), Tool("web_search")] };
         _mcp.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var h = new Harness(_gateway, _mcp, c => c["argusUrl"] = argus.Url);
+        using var h = new Harness(_gateway, _mcp, c => c["codeIntelUrl"] = codeIntel.Url);
         await using var rt = await StartAsync(h);
-        Assert.Equal([Runtime.ArenaName, Runtime.ArgusName], rt.Links.Select(l => l.Name));
-        var argusLink = rt.Links[1];
-        await argusLink.FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal([Runtime.ArenaName, Runtime.CodeIntelName], rt.Links.Select(l => l.Name));
+        var codeIntelLink = rt.Links[1];
+        await codeIntelLink.FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Arena still connecting: Argus's own tools, both.
-        Assert.Equal(["find_symbol", "web_search"], rt.Tools.All.Where(t => t.Server == Runtime.ArgusName).Select(t => t.Name));
+        // Arena still connecting: code-intel's own tools, both.
+        Assert.Equal(["find_symbol", "web_search"], rt.Tools.All.Where(t => t.Server == Runtime.CodeIntelName).Select(t => t.Name));
 
-        // Arena connects: its web_search is the one kept; Argus keeps what Arena does not serve.
+        // Arena connects: its web_search is the one kept; code-intel keeps what Arena does not serve.
         _mcp.Hold.SetResult();
         await rt.Links[0].FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Single(rt.Tools.All, t => t.Name == "web_search");
         Assert.Equal(Runtime.ArenaName, rt.Tools.Find("web_search")!.Server);
-        Assert.Equal(Runtime.ArgusName, rt.Tools.Find("find_symbol")!.Server);
+        Assert.Equal(Runtime.CodeIntelName, rt.Tools.Find("find_symbol")!.Server);
         Assert.True(rt.Tools.Find("find_symbol")!.ReadOnly);
 
-        // Arena lost: Argus's copy comes back.
+        // Arena lost: code-intel's copy comes back.
         _mcp.Status = 503;
         rt.Links[0].Retry();
         // The link says it is down a moment before its tools have gone (what hears of it changes them): both are waited for.
-        await Until(() => rt.Links[0].State == LinkState.Failed && rt.Tools.Find("web_search")?.Server == Runtime.ArgusName, "Arena lost, Argus's web_search back");
-        Assert.Contains(argus.Calls, c => c.Method == "tools/list");
+        await Until(() => rt.Links[0].State == LinkState.Failed && rt.Tools.Find("web_search")?.Server == Runtime.CodeIntelName, $"Arena lost, {Brand.CodeIntel}'s web_search back");
+        Assert.Contains(codeIntel.Calls, c => c.Method == "tools/list");
     }
 
     [Fact]
-    public async Task Turned_off_in_the_config_neither_Arena_nor_Argus_is_asked()
+    public async Task Turned_off_in_the_config_neither_Arena_nor_CodeIntel_is_asked()
     {
-        using var argus = new FakeMcp();
+        using var codeIntel = new FakeMcp();
         using var h = new Harness(_gateway, _mcp, c =>
         {
-            c["argusUrl"] = argus.Url;
+            c["codeIntelUrl"] = codeIntel.Url;
             c["arenaTools"] = false;
-            c["argusTools"] = false;
+            c["codeIntelTools"] = false;
         });
         Assert.Equal(0, await h.Run("/mcp\n/exit\n", "chat"));
-        Assert.Contains("No MCP servers: Arena's and Argus's are off in config.json (arenaTools, argusTools)", h.Out);
+        Assert.Contains($"No MCP servers: Arena's and {Brand.CodeIntel}'s are off in config.json (arenaTools, codeIntelTools)", h.Out);
         Assert.Empty(_mcp.Calls);
-        Assert.Empty(argus.Calls);
+        Assert.Empty(codeIntel.Calls);
     }
 
     [Fact]
@@ -179,34 +180,34 @@ public sealed class ServerTests : IDisposable
     }
 
     [Fact]
-    public async Task An_Arena_without_Argus_beside_it_is_said_once_quietly_not_as_a_failure()
+    public async Task An_Arena_without_CodeIntel_beside_it_is_said_once_quietly_not_as_a_failure()
     {
-        // argus.DOMAIN does not resolve (.invalid never does): this Arena has no Argus.
+        // code-intel.DOMAIN does not resolve (.invalid never does): this Arena has no code-intel.
         using var h = new Harness(_gateway, _mcp, c =>
         {
             c["url"] = "http://arena.invalid";
             c["mcpUrl"] = _mcp.Url;
         });
         await using var rt = await StartAsync(h);
-        var argus = rt.Links.Single(l => l.Name == Runtime.ArgusName);
-        Assert.Equal("http://argus.arena.invalid/mcp", argus.Url);
-        await argus.FirstTry.WaitAsync(TimeSpan.FromSeconds(20));
-        Assert.Equal(LinkState.Unavailable, argus.State);
-        Assert.Equal("Argus: not available here", argus.Describe());
-        Assert.Contains("Argus's tools are not available here: http://argus.arena.invalid/mcp does not resolve: this Arena has no Argus at argus.DOMAIN", _output.ToString());
-        Assert.DoesNotContain("Argus's tools did not connect", _output.ToString());
+        var codeIntel = rt.Links.Single(l => l.Name == Runtime.CodeIntelName);
+        Assert.Equal("http://code-intel.arena.invalid/mcp", codeIntel.Url);
+        await codeIntel.FirstTry.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(LinkState.Unavailable, codeIntel.State);
+        Assert.Equal($"{Brand.CodeIntel}: not available here", codeIntel.Describe());
+        Assert.Contains($"{Brand.CodeIntel}'s tools are not available here: http://code-intel.arena.invalid/mcp does not resolve: this Arena has no {Brand.CodeIntel} at code-intel.DOMAIN", _output.ToString());
+        Assert.DoesNotContain($"{Brand.CodeIntel}'s tools did not connect", _output.ToString());
         Assert.True(rt.ArenaConnected);
     }
 
     [Fact]
-    public void Argus_is_found_beside_the_Arena_unless_the_Arena_has_no_name_for_it()
+    public void CodeIntel_is_found_beside_the_Arena_unless_the_Arena_has_no_name_for_it()
     {
-        Assert.Equal("https://argus.arena.example.com/mcp", Config.DeriveArgus("https://arena.example.com"));
-        Assert.Equal("https://argus.arena.example.com:8443/mcp", Config.DeriveArgus("https://arena.example.com:8443/"));
-        Assert.Null(Config.DeriveArgus("http://127.0.0.1:8080"));
-        Assert.Null(Config.DeriveArgus("http://localhost:8080"));
-        Assert.Null(Config.DeriveArgus(null));
-        Assert.Equal("https://code.example/mcp", new Config { Url = "https://arena.example.com", ArgusUrl = "https://code.example/mcp" }.ArgusMcpUrl);
+        Assert.Equal("https://code-intel.arena.example.com/mcp", Config.DeriveCodeIntel("https://arena.example.com"));
+        Assert.Equal("https://code-intel.arena.example.com:8443/mcp", Config.DeriveCodeIntel("https://arena.example.com:8443/"));
+        Assert.Null(Config.DeriveCodeIntel("http://127.0.0.1:8080"));
+        Assert.Null(Config.DeriveCodeIntel("http://localhost:8080"));
+        Assert.Null(Config.DeriveCodeIntel(null));
+        Assert.Equal("https://code.example/mcp", new Config { Url = "https://arena.example.com", CodeIntelUrl = "https://code.example/mcp" }.CodeIntelMcpUrl);
     }
 
     [Fact]
@@ -214,7 +215,7 @@ public sealed class ServerTests : IDisposable
     {
         using var refusing = new RefusingMcp();
         using var http = new HttpClient();
-        var e = await Assert.ThrowsAsync<McpException>(() => McpClient.ConnectAsync("argus", new HttpMcpTransport(http, refusing.BaseUrl + "/mcp", new Dictionary<string, string>()), CancellationToken.None));
+        var e = await Assert.ThrowsAsync<McpException>(() => McpClient.ConnectAsync("code-intel", new HttpMcpTransport(http, refusing.BaseUrl + "/mcp", new Dictionary<string, string>()), CancellationToken.None));
         Assert.Equal($"{refusing.BaseUrl}/mcp refused the credentials (401): Cannot verify your GitLab access right now.", e.Message);
         Assert.False(e.Lost);
     }
@@ -303,7 +304,7 @@ public sealed class ServerTests : IDisposable
     [Theory]
     [InlineData("mcpUrl", "https://arena.corp:99999/mcp", "ARENA_MCP_URL")]
     [InlineData("mcpUrl", "https://arena corp/mcp", "ARENA_MCP_URL")]
-    [InlineData("argusUrl", "ftp://argus.corp/mcp", "ARENA_ARGUS_URL")]
+    [InlineData("codeIntelUrl", "ftp://code-intel.corp/mcp", "ARENA_CODE_INTEL_URL")]
     public async Task An_address_that_is_not_one_stops_the_session_as_it_starts_with_where_to_fix_it(string key, string address, string variable)
     {
         using var h = new Harness(_gateway, _mcp, c => c[key] = address);
@@ -325,7 +326,7 @@ public sealed class ServerTests : IDisposable
         Assert.Contains("MCP server files: ftp://files.example/mcp is not an http or https address: skipped.", _output.ToString());
     }
 
-    /// <summary>Argus refusing as it does when it cannot say what the person may read.</summary>
+    /// <summary>code-intel refusing as it does when it cannot say what the person may read.</summary>
     private sealed class RefusingMcp : FakeServer
     {
         protected override Task HandleAsync(System.Net.HttpListenerContext ctx, string body, CancellationToken ct) =>

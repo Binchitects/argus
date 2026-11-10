@@ -12,7 +12,7 @@ internal enum LinkState
 }
 
 /// <summary>
-/// One MCP server of the session (Arena's, Argus's, or one of the person's own), connected in the
+/// One MCP server of the session (Arena's, code-intel's, or one of the person's own), connected in the
 /// background: the session does not wait for it (a few seconds as it starts, at most), its tools
 /// join when it answers, and while it does not it is tried again, after 5 seconds and then less
 /// often, up to every 5 minutes. <see cref="Retry"/> tries at once; a call that finds it gone
@@ -34,8 +34,8 @@ internal sealed class ServerLink : IAsyncDisposable
     private TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task _loop = Task.CompletedTask;
 
-    /// <param name="name">The tools' server: "arena", "argus", or the name in the config.</param>
-    /// <param name="title">What the person reads: Arena, Argus, the name.</param>
+    /// <param name="name">The tools' server: "arena", "code-intel", or the name in the config.</param>
+    /// <param name="title">What the person reads: Arena, code-intel, the name.</param>
     public ServerLink(string name, string title, string? url, Func<CancellationToken, Task<McpClient>> connect)
     {
         Name = name;
@@ -61,7 +61,7 @@ internal sealed class ServerLink : IAsyncDisposable
     /// </summary>
     public Action<ServerLink, McpClient?, McpClient?>? Changed { get; set; }
 
-    /// <summary>"Arena: 14 tools", "Argus: connecting", "Argus: not available (…)".</summary>
+    /// <summary>"Arena: 14 tools", "code-intel: connecting", "code-intel: not available (…)".</summary>
     public string Describe() => State switch
     {
         LinkState.Connected => $"{Title}: {Client?.Tools.Count ?? 0} tool{(Client?.Tools.Count == 1 ? "" : "s")}",

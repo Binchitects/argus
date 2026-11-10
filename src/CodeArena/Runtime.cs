@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
+using Branding;
 namespace CodeArena;
 
 /// <summary>A session put together: the config, the gateway and its models, the tools (local and MCP), the agent.</summary>
@@ -386,7 +387,7 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     /// <summary>A group of remote tools by name, for the person and the model: Arena's title for its tool, else the server's.</summary>
     public string ToolTitle(string group) => ToolBox.Local(group)?.Title ?? ArenaTool(group)?.Str("title")
-        ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? group[4..] : group == ArgusName ? "Argus" : group == ArenaName ? "Arena" : group);
+        ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? group[4..] : group == CodeIntelName ? $"{Brand.CodeIntel}" : group == ArenaName ? "Arena" : group);
 
     /// <summary>What a group of remote tools is for: Arena's description of its tool, else which server's tools they are.</summary>
     public string ToolAbout(string group) => ToolBox.Local(group)?.About ?? ArenaTool(group)?.Str("description")
@@ -437,7 +438,7 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     /// <summary>How long the start waits for Arena to say when the person's chats compact.</summary>
     private static readonly TimeSpan AccountWait = TimeSpan.FromSeconds(5);
-    /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
+    /// <summary>The session's MCP servers: Arena's, code-intel's and the person's own, each connected in the background.</summary>
     public IReadOnlyList<ServerLink> Links => _links;
     /// <summary>Whether Arena's MCP endpoint answered and its tools are among the session's (set once they are, not before).</summary>
     public bool ArenaConnected => Volatile.Read(ref _arenaServing);
@@ -446,7 +447,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Action<ServerLink>? ServersChanged { get; set; }
 
     public const string ArenaName = "arena";
-    public const string ArgusName = "argus";
+    public const string CodeIntelName = "code-intel";
 
     /// <summary>Thrown for what stops a session before it starts, with what to do about it.</summary>
     public sealed class StartException(string message) : Exception(message);
@@ -1494,7 +1495,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
-    /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
+    /// The session's servers, each in the background: Arena's MCP endpoint and code-intel's (with the
     /// person's key, unless the config turns them off), then the person's own.
     /// </summary>
     private void AddLinks()
@@ -1504,18 +1505,18 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Link(new ServerLink(ArenaName, "Arena", arenaUrl, ct => McpClient.ConnectAsync(ArenaName, new HttpMcpTransport(Http, arenaUrl, auth), ct)));
         }
-        if (Config.ArgusTools && Config.ArgusMcpUrl is { } argusUrl)
+        if (Config.CodeIntelTools && Config.CodeIntelMcpUrl is { } codeIntelUrl)
         {
-            Link(new ServerLink(ArgusName, "Argus", argusUrl, async ct =>
+            Link(new ServerLink(CodeIntelName, $"{Brand.CodeIntel}", codeIntelUrl, async ct =>
             {
                 try
                 {
-                    return await McpClient.ConnectAsync(ArgusName, new HttpMcpTransport(Http, argusUrl, auth), ct);
+                    return await McpClient.ConnectAsync(CodeIntelName, new HttpMcpTransport(Http, codeIntelUrl, auth), ct);
                 }
-                catch (McpException e) when (e.NoSuchHost && Config.ArgusUrl is not { Length: > 0 })
+                catch (McpException e) when (e.NoSuchHost && Config.CodeIntelUrl is not { Length: > 0 })
                 {
-                    // Found by its name beside the Arena's (argus.DOMAIN): an Arena without Argus has no such name. Not an error.
-                    throw new McpUnavailableException($"{argusUrl} does not resolve: this Arena has no Argus at argus.DOMAIN (\"argusUrl\" in config.json gives its address).");
+                    // Found by its name beside the Arena's (code-intel.DOMAIN): an Arena without code-intel has no such name. Not an error.
+                    throw new McpUnavailableException($"{codeIntelUrl} does not resolve: this Arena has no {Brand.CodeIntel} at code-intel.DOMAIN (\"codeIntelUrl\" in config.json gives its address).");
                 }
             }));
         }
@@ -1575,8 +1576,8 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     /// <summary>
     /// The servers' tools and instructions, from those connected now. Arena's: renamed arena_… where
-    /// a local tool has the name. Argus's: those Arena serves already (its Argus tools) are left to
-    /// Arena, and Argus's instructions with them; when Arena is not connected, Argus's own are used.
+    /// a local tool has the name. code-intel's: those Arena serves already (its code-intel tools) are left to
+    /// Arena, and code-intel's instructions with them; when Arena is not connected, code-intel's own are used.
     /// The person's own: mcp__server__tool.
     /// </summary>
     private (List<ToolDef> Tools, List<(string Server, string Text)> Notes) Served()
@@ -1590,7 +1591,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 continue;
             }
-            var own = link.Name is ArenaName or ArgusName ? null
+            var own = link.Name is ArenaName or CodeIntelName ? null
                 : Config.McpServers.FirstOrDefault(s => s.Name == link.Name) ?? ProjectServers.FirstOrDefault(p => p.Server.Name == link.Name)?.Server;
             // A project's server is the repository's word: what it says changes nothing is not taken for it, each call asks.
             var theProjects = own is not null && Config.McpServers.All(s => s.Name != link.Name);
@@ -1602,15 +1603,15 @@ internal sealed partial class Runtime : IAsyncDisposable
                 {
                     tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, !theProjects && t["annotations"].Bool("readOnlyHint") == true, link, "mcp:" + link.Name));
                 }
-                else if (link.Name == ArgusName && tools.Any(x => x.Server == ArenaName && x.RemoteName == name))
+                else if (link.Name == CodeIntelName && tools.Any(x => x.Server == ArenaName && x.RemoteName == name))
                 {
                     continue;
                 }
                 else
                 {
-                    // Arena (and Argus) decide who may call what; a tool marked as changing things still asks here first.
+                    // Arena (and code-intel) decide who may call what; a tool marked as changing things still asks here first.
                     var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
-                    // Arena's tools by the tool of its chat each is a function of (as its menu has them); Argus's own as Argus.
+                    // Arena's tools by the tool of its chat each is a function of (as its menu has them); code-intel's own as code-intel.
                     var group = link.Name == ArenaName ? t["_meta"].Str("arena/tool") ?? ArenaName : link.Name;
                     tools.Add(Remote(client, t, local.Contains(name) ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link, group));
                 }
@@ -1652,7 +1653,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Notice(false, link.Name switch
             {
                 ArenaName => $"Arena's tools are not available here (no MCP endpoint at {link.Url}): carrying on with the local tools.",
-                ArgusName => $"Argus's tools are not available here: {link.Error}",
+                CodeIntelName => $"{Brand.CodeIntel}'s tools are not available here: {link.Error}",
                 _ => $"MCP server {link.Name} has no MCP endpoint at {link.Url}.",
             });
             return;
@@ -1660,7 +1661,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Notice(true, link.Name switch
         {
             ArenaName => $"Arena's tools did not connect: {link.Error} Carrying on with the local tools meanwhile.{again}",
-            ArgusName => $"Argus's tools did not connect: {link.Error}{again}",
+            CodeIntelName => $"{Brand.CodeIntel}'s tools did not connect: {link.Error}{again}",
             _ => $"MCP server {link.Name} did not connect: {link.Error}{again}",
         });
     }
@@ -2007,7 +2008,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         return null;
     }
 
-    /// <summary>"Arena: 14 tools", "Argus: its tools come through Arena", "Argus: not connected (…)".</summary>
+    /// <summary>"Arena: 14 tools", "code-intel: its tools come through Arena", "code-intel: not connected (…)".</summary>
     public string Describe(ServerLink link)
     {
         if (link.State == LinkState.Connected)
@@ -2048,21 +2049,21 @@ internal sealed partial class Runtime : IAsyncDisposable
         return await reviewer.RunAsync(prompt, new Spend(), ct);
     }
 
-    /// <summary>The most symbols looked up for one plan: each is a call to Argus.</summary>
+    /// <summary>The most symbols looked up for one plan: each is a call to code-intel.</summary>
     public const int MostGrounded = 12;
 
     /// <summary>
-    /// What each step's symbols reach, from Argus's change_impact (when Argus is connected and the project is a repository it
+    /// What each step's symbols reach, from code-intel's change_impact (when code-intel is connected and the project is a repository it
     /// knows): the repositories that depend on this one, the lines that use each name, and the tests among them. Steps
-    /// Argus cannot say anything of keep no impact; the plan is otherwise as it was.
+    /// code-intel cannot say anything of keep no impact; the plan is otherwise as it was.
     /// </summary>
     private async Task<WorkPlan> GroundAsync(WorkPlan plan, CancellationToken ct)
     {
-        if (Tools.Find("change_impact") is not { Server: ArgusName } impact || ProjectKeys.Of(Workspace.Root) is var key && key.StartsWith("local/", StringComparison.Ordinal))
+        if (Tools.Find("change_impact") is not { Server: CodeIntelName } impact || ProjectKeys.Of(Workspace.Root) is var key && key.StartsWith("local/", StringComparison.Ordinal))
         {
             return plan;
         }
-        // Argus names a repository by its path in GitLab: the project's key without its host.
+        // code-intel names a repository by its path in GitLab: the project's key without its host.
         var repo = key[(key.IndexOf('/') + 1)..];
         var looked = 0;
         var steps = new List<WorkStep>();
@@ -2087,7 +2088,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 }
                 catch (Exception e) when (e is ToolError or McpException or HttpRequestException or IOException)
                 {
-                    // Argus out of reach: the plan goes on without what it would have said.
+                    // code-intel out of reach: the plan goes on without what it would have said.
                 }
             }
             steps.Add(said.Count == 0 ? step : step with { Impact = string.Join("\n", said) });

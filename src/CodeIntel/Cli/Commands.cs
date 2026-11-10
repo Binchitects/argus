@@ -1,0 +1,1307 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json.Nodes;
+using CodeIntel.Access;
+using CodeIntel.Configuration;
+using CodeIntel.Indexing;
+using CodeIntel.Packs;
+using CodeIntel.Packs.Sources;
+using CodeIntel.Server;
+using CodeIntel.Store;
+using CodeIntel.Util;
+using Microsoft.Data.Sqlite;
+using ModelContextProtocol.Protocol;
+
+using Branding;
+namespace CodeIntel.Cli;
+
+/// <summary>
+/// The `code-intel` command line: the same subcommands, options,
+/// output lines and exit codes, so a hook, a cron job or the admin console
+/// cannot tell which implementation it is driving.
+/// </summary>
+public static class Commands
+{
+    public const string DefaultServeHost = "127.0.0.1";
+    public const int DefaultServePort = 7700;
+    public const int ExitPack = 5;
+    public const int ExitVerifyContradicted = 2;
+    public const int ExitVerifyUnavailable = 6;
+    public const int DefaultEmbedPerPass = 2000;
+
+    static TextWriter Out => Console.Out;
+    static TextWriter Err => Console.Error;
+    static long Now() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    static double NowF() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+    static double Ms(double started) => Math.Round((NowF() - started) * 1000, 1, MidpointRounding.ToEven);
+
+    public static string? Preflight()
+    {
+        var exe = Ctags.Which("ctags");
+        if (exe is null)
+            return "ctags not found on PATH. Install Universal Ctags:\n  Linux:   sudo apt install universal-ctags\n  Windows: winget install UniversalCtags.Ctags";
+        string output;
+        try
+        {
+            var psi = new ProcessStartInfo(exe, "--version") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            using var p = Process.Start(psi)!;
+            output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(10_000);
+        }
+        catch (Exception exc) when (exc is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        {
+            return $"could not run ctags --version: {exc.Message}";
+        }
+        if (!output.Contains("Universal Ctags"))
+        {
+            var first = output.Length > 0 ? PyStr.SplitLines(output)[0] : "?";
+            return $"{exe} is not Universal Ctags (reported: {first}).\nExuberant Ctags has no --output-format=json and cannot be used.";
+        }
+        return null;
+    }
+
+    // --- index --------------------------------------------------------------------------
+
+    /// <summary>Who started a run, as a repository's log says it.</summary>
+    static string StartedBy(string? trigger, RepoSchedule? schedule) => trigger switch
+    {
+        "schedule" => "with the scheduled pass",
+        "repo-schedule" => $"by its schedule ({(schedule ?? RepoSchedule.WithPass).Words.ToLowerInvariant()})",
+        "webhook" => "by a push or merge in GitLab",
+        "manual" => "by an admin",
+        "queued" => "after the run before it",
+        _ => "from the command line",
+    };
+
+    static (bool Unhealthy, string Outcome) IndexBranch(SqliteConnection conn, CodeIntelConfig cfg, Project project, string branch, string mirrorDir, RepoLog log)
+    {
+        var label = branch == project.DefaultBranch ? project.PathWithNamespace : $"{project.PathWithNamespace}@{branch}";
+        var repoId = Writes.UpsertRepo(conn, project.GitlabId, project.PathWithNamespace, project.DefaultBranch, project.HttpUrl, branch);
+        var old = Sql.One(conn, "SELECT last_indexed_sha FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_sha");
+        var started = NowF();
+        IndexResult result;
+        string? graphSaid = null;
+        string sha;
+        string? subject = null;
+        // The symbol reader changed since its last run: every file is read again.
+        var newReader = false;
+        try
+        {
+            sha = Mirror.HeadSha(mirrorDir, branch);
+            if (sha == old && !Worker.ContractIsStale(conn, repoId))
+            {
+                Writes.RecordRunState(conn, repoId, false, false, Now());
+                // Rows indexed before commits were described get their words now.
+                subject = Sql.One(conn, "SELECT last_indexed_message FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_message");
+                if (subject is null)
+                {
+                    (subject, var at) = Mirror.CommitInfo(mirrorDir, sha);
+                    Writes.SetCommitInfo(conn, repoId, subject, at);
+                }
+                Out.WriteLine($"{label}: up to date");
+                AuditLog.IndexRepo(project.PathWithNamespace, branch, "up_to_date", Ms(started));
+                Progress.BranchDone(project.PathWithNamespace, branch, "up_to_date");
+                log.Say($"{branch}: up to date at {RepoLog.Commit(sha, subject)}; nothing new to read.");
+                // Indexed before the symbol graph was (or by its older version): it is built now, from the same checkout.
+                if (branch == project.DefaultBranch && Symbols.SymbolGraph.Enabled && !Symbols.SymbolGraph.IsCurrent(conn, repoId, sha))
+                {
+                    var current = Mirror.SyncWorktree(cfg.Index, project.GitlabId, mirrorDir, sha, branch);
+                    if (Symbols.SymbolGraph.Refresh(conn, repoId, current, sha) is { } builtSaid)
+                    {
+                        log.Say($"{branch}: {builtSaid}.");
+                    }
+                }
+                return (false, "up_to_date");
+            }
+            newReader = old is not null && Worker.ContractIsStale(conn, repoId);
+            var tree = Mirror.SyncWorktree(cfg.Index, project.GitlabId, mirrorDir, sha, branch);
+            result = Worker.IndexRepo(conn, cfg.Index, project, mirrorDir, tree, sha, old, repoId: repoId,
+                progress: (done, total) => Progress.Files(project.PathWithNamespace, branch, done, total),
+                symbols: files => Progress.Symbols(project.PathWithNamespace, branch, files));
+            (subject, var committed) = Mirror.CommitInfo(mirrorDir, sha);
+            if (!result.TimedOut && !result.SymbolsFailed) Writes.SetCommitInfo(conn, repoId, subject, committed);
+            // Who calls and implements what inside the repository, on its default branch (said after what was read).
+            if (!result.TimedOut && branch == project.DefaultBranch)
+            {
+                graphSaid = Symbols.SymbolGraph.Refresh(conn, repoId, tree, sha);
+            }
+        }
+        catch (GitError exc)
+        {
+            Writes.RecordError(conn, repoId, null, "git", exc.Message, Now());
+            Writes.RecordRunState(conn, repoId, false, false, Now(), exc.Message);
+            Err.WriteLine($"{label}: FAILED ({exc.Message})");
+            AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: exc.Message);
+            Progress.BranchDone(project.PathWithNamespace, branch, "failed");
+            log.Fail($"{branch}: git could not check it out: {exc.Message}. The next run tries again; if this repeats, check that the branch still exists in GitLab.");
+            return (true, "failed");
+        }
+        catch (Exception exc)
+        {
+            var repr = $"{exc.GetType().Name}({PyStr.Repr(exc.Message)})";
+            Writes.RecordError(conn, repoId, null, "index", repr, Now());
+            Writes.RecordRunState(conn, repoId, false, false, Now(), repr);
+            Err.WriteLine($"{label}: FAILED ({repr})");
+            AuditLog.IndexRepo(project.PathWithNamespace, branch, "failed", Ms(started), error: repr);
+            Progress.BranchDone(project.PathWithNamespace, branch, "failed");
+            log.Fail($"{branch}: failed: {exc.Message}. The next run tries again; if this repeats, {Brand.CodeIntel}'s own log has the details ({exc.GetType().Name}).");
+            return (true, "failed");
+        }
+        var took = NowF() - started;
+        var flags = (result.TimedOut ? " TIMED-OUT" : "") + (result.SymbolsFailed ? " SYMBOLS-FAILED" : "");
+        Out.WriteLine($"{label}: indexed={result.Indexed} deleted={result.Deleted} skipped={result.Skipped} errors={result.Errors}{flags} ({took:0.0}s)");
+        var outcome = result.TimedOut ? "timed_out" : result.SymbolsFailed ? "symbols_failed" : "ok";
+        AuditLog.IndexRepo(project.PathWithNamespace, branch, outcome, Ms(started), result.Indexed, result.Deleted, result.Skipped,
+            result.Errors, result.TimedOut, result.SymbolsFailed);
+        Progress.BranchDone(project.PathWithNamespace, branch, outcome);
+
+        var what = result.FullReindex
+            ? old is null ? "read for the first time"
+            : newReader ? $"read in full (this {Brand.CodeIntel} reads symbols in a newer way than the last run)"
+            : "read in full (the commit indexed before is not in its history any more)"
+            :$"{RepoLog.Count(result.Considered, "file")} changed since {PyStr.Prefix(old!, 8)}";
+        var parts = new List<string> { $"{result.Indexed:N0} indexed" };
+        if (result.Deleted > 0) parts.Add($"{result.Deleted:N0} removed");
+        if (result.Skipped > 0) parts.Add($"{result.Skipped:N0} skipped (unchanged, not code, or too large)");
+        log.Say($"{branch}: at {RepoLog.Commit(sha, subject)}, {what}: {string.Join(", ", parts)} ({RepoLog.Took(took)}).");
+        if (graphSaid is not null)
+            log.Say($"{branch}: {graphSaid}.");
+        if (result.SymbolsFailed)
+            log.Fail($"{branch}: its symbols could not be read: {result.SymbolsProblem ?? "the symbol reader failed"}. " +
+                     $"Check that Universal Ctags is installed where {Brand.CodeIntel} runs; the files are read again on the next run.");
+        else if (result.Errors > 0)
+            log.Warn($"{branch}: {RepoLog.Count(result.Errors, "file")} could not be read or stored; each is tried again on the next runs (up to " +
+                     $"{Writes.MaxRetryAttempts} times). `code-intel status` lists them with the reason; a path too long or a file nobody may read are the usual causes.");
+        if (result.TimedOut)
+            log.Warn($"{branch}: stopped after {RepoLog.Took(cfg.Index.RepoTimeBudgetSeconds)}, the time one repository may take; the next run goes on " +
+                     $"from where this one stopped. If it keeps happening, raise index.repo_time_budget_seconds in {Brand.CodeIntel}'s configuration.");
+        return (result.TimedOut || result.SymbolsFailed, outcome);
+    }
+
+    static int PruneMissingBranches(SqliteConnection conn, Project project, List<string> keep, RepoLog? log = null)
+    {
+        var marks = keep.Count > 0 ? Sql.Marks(keep.Count) : "NULL";
+        var gone = Sql.QueryList(conn, $"SELECT id, branch FROM repos WHERE gitlab_id = ? AND branch NOT IN ({marks})",
+            new object?[] { project.GitlabId }.Concat(keep).ToArray());
+        var n = Writes.DeleteRepos(conn, [.. gone.Select(r => r.Long("id"))]);
+        if (n > 0) Out.WriteLine($"{project.PathWithNamespace}: dropped {n} branch(es) no longer indexed");
+        foreach (var r in gone) log?.Say($"{r.Str("branch")}: no longer chosen (or gone from GitLab), so its index was removed.");
+        return n;
+    }
+
+    /// <summary>Mirrors and checkouts of projects code-intel no longer knows: what a repository found under a new id left behind.</summary>
+    static void PruneMirrors(IndexConfig index, SqliteConnection conn)
+    {
+        var known = Sql.Query(conn, "SELECT gitlab_id FROM repo_choices").Select(r => r.Long("gitlab_id")).ToHashSet();
+        void Prune(string dir, string suffix)
+        {
+            if (!Directory.Exists(dir)) return;
+            foreach (var path in Directory.EnumerateDirectories(dir))
+            {
+                var name = Path.GetFileName(path);
+                if (!name.EndsWith(suffix, StringComparison.Ordinal) || !long.TryParse(name[..^suffix.Length], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+                    || known.Contains(id)) continue;
+                try
+                {
+                    Directory.Delete(path, recursive: true);
+                    Out.WriteLine($"removed {path}: no repository {Brand.CodeIntel} knows uses it any more");
+                }
+                catch (Exception exc) when (exc is IOException or UnauthorizedAccessException) { Err.WriteLine($"could not remove {path}: {exc.Message}"); }
+            }
+        }
+        Prune(index.MirrorsDir, ".git");
+        Prune(index.TreesDir, "");
+    }
+
+    /// <summary>
+    /// A repository's new symbols embedded for meaning search, within what is left of the pass's
+    /// share (CODE_INTEL_EMBED_PER_PASS). Once the embedder fails, the rest of the pass does not ask it
+    /// again, and each repository's log says what waits.
+    /// </summary>
+    static int EmbedRepo(SqliteConnection conn, Project project, RepoLog log, ref long budget, ref string? problem)
+    {
+        var path = project.PathWithNamespace;
+        List<long> rows = [.. Sql.Query(conn, "SELECT id FROM repos WHERE gitlab_id = ?", project.GitlabId).Select(r => r.Long("id"))];
+        long waiting;
+        try { waiting = Semantic.PendingCount(conn, rows); }
+        catch (SqliteException) { return 0; }
+        if (waiting == 0) return 0;
+        if (problem is not null)
+        {
+            log.Warn($"{RepoLog.Count(waiting, "symbol")} wait to be embedded for meaning search ({problem}); semantic_search does not find them until a later run embeds them.");
+            return 0;
+        }
+        if (budget <= 0)
+        {
+            log.Say($"{RepoLog.Count(waiting, "symbol")} wait to be embedded for meaning search: this run's share (CODE_INTEL_EMBED_PER_PASS) is used up, so a later run embeds them.");
+            return 0;
+        }
+        var started = NowF();
+        Progress.Embedding(path, 0, (int)Math.Min(waiting, budget));
+        try
+        {
+            var n = Semantic.BuildSymbolEmbeddings(conn, limit: budget, progress: (done, total) => Progress.Embedding(path, done, total), repoIds: rows);
+            budget -= n;
+            log.Say($"Embedded {RepoLog.Count(n, "new symbol")} for meaning search ({RepoLog.Took(NowF() - started)}).");
+            if (waiting > n)
+                log.Say($"{RepoLog.Count(waiting - n, "more symbol")} wait to be embedded: each run embeds at most {EmbedPerPass():N0} (CODE_INTEL_EMBED_PER_PASS), so a later run goes on.");
+            return n;
+        }
+        catch (EmbeddingUnavailable exc) { problem = $"the embedding service did not answer: {exc.Message}"; }
+        catch (Exception exc) { problem = $"embedding failed: {exc.GetType().Name}: {exc.Message}"; }
+        log.Warn($"Its {RepoLog.Count(waiting, "new symbol")} could not be embedded for meaning search: {problem}. They are found by name as usual; " +
+                 "semantic_search finds them once a later run embeds them. Check the embedder (CODE_INTEL_EMBED_URL).");
+        return 0;
+    }
+
+    /// <param name="only">These repositories (path_with_namespace); null: every one chosen.</param>
+    /// <param name="scheduled">A scheduled pass: only the repositories that go with the passes (by their schedule, or the default).</param>
+    /// <param name="triggers">Who started the run, for each repository's log (one for all, or one per repository of <paramref name="only"/>):
+    /// manual, schedule, repo-schedule, webhook; none from the command line.</param>
+    public static int Index(CodeIntelConfig cfg, IReadOnlyList<string>? only, bool resetRetries = false, bool allowPartial = false,
+        bool scheduled = false, IReadOnlyList<string>? triggers = null)
+    {
+        var started = NowF();
+        int GiveUp(int code, string reason)
+        {
+            AuditLog.IndexEnd(code, Ms(started), 0, 0, 0, reason);
+            return code;
+        }
+        if (!allowPartial)
+        {
+            EnumerationHealth health;
+            try { health = GitLab.CheckEnumeration(cfg.GitLab); }
+            catch (Exception exc) when (exc is GitLabError or HttpRequestException or TaskCanceledException or CredentialError)
+            {
+                Err.WriteLine($"could not verify GitLab enumeration: {PythonName(exc)}: {exc.Message}");
+                return GiveUp(3, "gitlab_unreachable");
+            }
+            if (!health.Ok)
+            {
+                Err.WriteLine(health.Problem);
+                Err.WriteLine("\nRe-run with --allow-partial-enumeration to index anyway.");
+                return GiveUp(3, "enumeration_incomplete");
+            }
+        }
+        if (Preflight() is { } problem)
+        {
+            Err.WriteLine(problem);
+            return GiveUp(4, "preflight_failed");
+        }
+        using var conn = Db.Open(cfg.Index.DbPath);
+        var projects = GitLab.ListProjects(cfg.GitLab);
+        // What GitLab lists is what admins choose from: each one found again by its id, or by its path
+        // when GitLab lists it under a new one, so it never becomes a second copy.
+        var listing = Choices.Record(conn, projects, Now(), GitLab.Instance(cfg.GitLab.Url));
+        if (listing.Moved > 0)
+            Out.WriteLine($"{listing.Moved} repository(ies) GitLab lists under a new id: kept, with their index and choices");
+        if (listing.SetAside > 0)
+            Out.WriteLine($"{listing.SetAside} repository(ies) set aside: their id belongs to another project in this GitLab");
+        PruneMirrors(cfg.Index, conn);
+        var choices = Choices.List(conn).ToDictionary(c => c.GitlabId);
+        // What they left out leaves the index.
+        var excluded = projects.Where(p => !(choices.TryGetValue(p.GitlabId, out var c) ? c.Included : Choices.NewReposIncluded(conn))).ToList();
+        foreach (var p in excluded)
+        {
+            if (Choices.DropInSteps(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
+        }
+        projects = projects.Except(excluded).ToList();
+        if (only is not null)
+        {
+            var wanted = only.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in excluded.Where(p => wanted.Contains(p.PathWithNamespace))) Out.WriteLine($"repo '{p.PathWithNamespace}' is not chosen for the index");
+            projects = projects.Where(p => wanted.Contains(p.PathWithNamespace)).ToList();
+        }
+        var fallback = Choices.DefaultSchedule(conn);
+        RepoSchedule ScheduleOf(Project p) => choices.TryGetValue(p.GitlabId, out var c) ? Choices.Effective(c, fallback) : fallback;
+        if (scheduled)
+        {
+            var own = projects.Count(p => ScheduleOf(p).Kind != ScheduleKind.Pass);
+            projects = projects.Where(p => ScheduleOf(p).Kind == ScheduleKind.Pass).ToList();
+            if (own > 0) Out.WriteLine($"{own} repository(ies) on their own schedule (or off) left to it");
+        }
+        if (resetRetries)
+        {
+            if (only is not null)
+            {
+                foreach (var name in only)
+                {
+                    if (!projects.Any(p => string.Equals(p.PathWithNamespace, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        Out.WriteLine($"repo '{name}' not found in projects from GitLab");
+                        continue;
+                    }
+                    var cleared = Sql.Exec(conn, "DELETE FROM retry_attempts WHERE repo_id IN (SELECT id FROM repos WHERE lower(path_with_namespace) = lower(?))", name);
+                    Out.WriteLine($"reset retry counters for '{name}' ({cleared} rows)");
+                }
+            }
+            else
+            {
+                var cleared = Sql.Exec(conn, "DELETE FROM retry_attempts");
+                Out.WriteLine(cleared > 0 ? $"reset {cleared} retry counter entries" : "no retry counters to reset");
+            }
+        }
+        if (projects.Count == 0)
+        {
+            Out.WriteLine("no repos matched");
+            return GiveUp(0, "no_repos_matched");
+        }
+        string? TriggerOf(Project p)
+        {
+            if (triggers is not { Count: > 0 }) return null;
+            if (triggers.Count == 1 || only is null || only.Count != triggers.Count) return triggers[0];
+            for (int i = 0; i < only.Count; i++)
+                if (string.Equals(only[i], p.PathWithNamespace, StringComparison.OrdinalIgnoreCase)) return triggers[i];
+            return triggers[0];
+        }
+        AuditLog.IndexStart(cfg.Index.Branches, allowPartial, projects.Count);
+        Progress.Pass([.. projects.Select(p => p.PathWithNamespace)]);
+        var runStarted = NowF();
+        // A run is known by when it started, in milliseconds.
+        var run = (long)(runStarted * 1000);
+        var perPass = EmbedPerPass();
+        long budget = perPass > 0 ? perPass : long.MaxValue;
+        string? embedProblem = null;
+        bool anyUnhealthy = false;
+        int failed = 0, upToDate = 0, empty = 0, position = 0, embedded = 0;
+        foreach (var project in projects)
+        {
+            position++;
+            var path = project.PathWithNamespace;
+            var log = new RepoLog(conn, project.GitlabId, run);
+            var repoStarted = NowF();
+            log.Say($"Run started {StartedBy(TriggerOf(project), ScheduleOf(project))}.");
+            Progress.Fetching(position, path);
+            string mirrorDir;
+            List<string> branches;
+            try
+            {
+                mirrorDir = Mirror.EnsureMirror(cfg.Index, project, project.HttpUrl, Credentials.GitPassword(cfg.GitLab), cfg.GitLab);
+                // The operator's branch patterns for every repository, and the admin's for this one.
+                IReadOnlyList<string> patterns = [.. cfg.Index.Branches, .. choices.GetValueOrDefault(project.GitlabId)?.Branches ?? []];
+                branches = Mirror.SelectBranches(Mirror.ListBranches(mirrorDir), patterns, project.DefaultBranch);
+                log.Say($"Fetched from GitLab ({RepoLog.Took(NowF() - repoStarted)}): {RepoLog.Count(branches.Count, "branch", "branches")} to index.");
+            }
+            catch (GitError exc)
+            {
+                anyUnhealthy = true;
+                var repoId = Writes.UpsertRepo(conn, project.GitlabId, project.PathWithNamespace, project.DefaultBranch, project.HttpUrl, project.DefaultBranch);
+                Writes.RecordError(conn, repoId, null, "git", exc.Message, Now());
+                Writes.RecordRunState(conn, repoId, false, false, Now(), exc.Message);
+                Err.WriteLine($"{project.PathWithNamespace}: FAILED ({exc.Message})");
+                failed++;
+                AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "mirror_failed", error: exc.Message);
+                Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "failed");
+                log.Fail($"Could not fetch it from GitLab: {exc.Message}. Check that {Brand.CodeIntel}'s GitLab account can read this repository and that GitLab answers " +
+                         $"at {cfg.GitLab.Redacted()}; the next run tries again.");
+                Progress.RepoDone(path, "failed", $"Could not fetch it from GitLab: {exc.Message}");
+                RepoLog.Trim(conn, project.GitlabId);
+                continue;
+            }
+            if (branches.Count == 0)
+            {
+                Out.WriteLine($"{project.PathWithNamespace}: no branches (empty repository) -- nothing to index");
+                AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "no_branches");
+                Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "empty");
+                log.Say("It has no branches yet (an empty repository): nothing to index.");
+                log.Quiet();
+                Progress.RepoDone(path, "ok", "Empty: nothing to index.");
+                RepoLog.Trim(conn, project.GitlabId);
+                empty++;
+                continue;
+            }
+            var outcomes = new List<string>();
+            foreach (var branch in branches)
+            {
+                Progress.Branch(position, project.PathWithNamespace, branch);
+                var (unhealthy, outcome) = IndexBranch(conn, cfg, project, branch, mirrorDir, log);
+                outcomes.Add(outcome);
+                if (unhealthy) anyUnhealthy = true;
+                if (outcome == "failed") failed++;
+                else if (outcome == "up_to_date") upToDate++;
+            }
+            var pruned = PruneMissingBranches(conn, project, branches, log);
+            var embeddedHere = EmbedRepo(conn, project, log, ref budget, ref embedProblem);
+            embedded += embeddedHere;
+
+            var updated = outcomes.Count(o => o is "ok" or "timed_out" or "symbols_failed");
+            var summary = outcomes.All(o => o == "up_to_date")
+                ? $"already up to date ({RepoLog.Count(branches.Count, "branch", "branches")})"
+                : $"{RepoLog.Count(branches.Count, "branch", "branches")}, {updated:N0} updated" +
+                  (outcomes.Count(o => o == "failed") is var f and > 0 ? $", {f:N0} failed" : "");
+            var repoOutcome = outcomes.Contains("failed") || log.Worst == RepoLog.Error ? "failed"
+                : log.Worst == RepoLog.Warning ? "warning"
+                : outcomes.All(o => o == "up_to_date") ? "up_to_date" : "ok";
+            var sentence = $"Done in {RepoLog.Took(NowF() - repoStarted)}: {summary}" +
+                           (repoOutcome == "failed" ? "; see the errors above." : repoOutcome == "warning" ? "; see the warnings above." : ".");
+            log.Write(repoOutcome switch { "failed" => RepoLog.Error, "warning" => RepoLog.Warning, _ => RepoLog.Info }, sentence);
+            // A run that found nothing new: only the latest such run is kept, so real changes and failures stay in the log.
+            if (repoOutcome == "up_to_date" && pruned == 0 && embeddedHere == 0) log.Quiet();
+            Progress.RepoDone(path, repoOutcome, sentence);
+            RepoLog.Trim(conn, project.GitlabId);
+        }
+        Dictionary<string, long> counts;
+        int edges;
+        Dictionary<string, long> linked;
+        Progress.Finishing("includes");
+        try
+        {
+            counts = Resolve.ResolveIncludes(conn);
+            edges = Graph.RebuildRepoDeps(conn);
+            linked = Graph.RebuildLinks(conn);
+        }
+        catch (Exception exc)
+        {
+            Err.WriteLine($"resolve/rebuild failed: {exc.GetType().Name}({PyStr.Repr(exc.Message)})");
+            AuditLog.IndexEnd(4, Ms(runStarted), projects.Count, failed, upToDate);
+            return 4;
+        }
+        Out.WriteLine($"includes: {counts.GetValueOrDefault("resolved")} resolved, {counts.GetValueOrDefault("external")} external, " +
+                      $"{counts.GetValueOrDefault("ambiguous")} ambiguous, {counts.GetValueOrDefault("not_found")} not found");
+        Out.WriteLine($"repo graph: {edges} #include edges; {linked.GetValueOrDefault("linked_pairs")} linked pairs of repositories from packages, imports and the rest " +
+                      $"({linked.GetValueOrDefault("resolved")} uses resolved, {linked.GetValueOrDefault("ambiguous")} ambiguous of which " +
+                      $"{linked.GetValueOrDefault("candidate")} unsettled, {linked.GetValueOrDefault("external")} outside the estate)");
+        if (empty > 0)
+            Out.WriteLine($"repos: {projects.Count} seen, {empty} empty (nothing to index), {projects.Count - empty} indexed");
+        // What the repositories of this run left waiting (and other repositories' backlog), with what is left of the share.
+        Progress.Finishing("embeddings");
+        if (embedProblem is null && budget > 0)
+            embedded += EmbedAfterIndex(cfg, budget == long.MaxValue ? null : budget);
+        var rc = anyUnhealthy ? 1 : 0;
+        AuditLog.IndexEnd(rc, Ms(runStarted), projects.Count, failed, upToDate, empty: empty, embedded: embedded);
+        return rc;
+    }
+
+    /// <summary>The Python exception class name an operator would have seen for this failure.</summary>
+    static string PythonName(Exception exc) => exc switch
+    {
+        HttpRequestException => "ConnectError",
+        TaskCanceledException => "ReadTimeout",
+        _ => exc.GetType().Name,
+    };
+
+    /// <summary>
+    /// A scheduled pass every <paramref name="interval"/> seconds, as CODE_INTEL_INDEX_INTERVAL runs them: a
+    /// repository with a schedule of its own, or off, is left to it (code-intel's scheduler, in the process that serves).
+    /// </summary>
+    public static int IndexRepeatedly(CodeIntelConfig cfg, IReadOnlyList<string>? only, bool resetRetries, bool allowPartial, int interval, int? maxPasses = null)
+    {
+        int last = 0, passes = 0;
+        while (maxPasses is null || passes < maxPasses)
+        {
+            var sw = Stopwatch.StartNew();
+            try { last = Index(cfg, only, resetRetries, allowPartial, scheduled: true, triggers: ["schedule"]); }
+            catch (Exception exc) when (exc is GitLabError or GitError or IOException)
+            {
+                Err.WriteLine($"indexing pass failed: {exc.Message}");
+                last = 4;
+            }
+            passes++;
+            if (maxPasses is not null && passes >= maxPasses) break;
+            Out.WriteLine($"pass finished with exit {last} in {sw.Elapsed.TotalSeconds:0.0}s; next in {interval}s");
+            Out.Flush();
+            Thread.Sleep(TimeSpan.FromSeconds(interval));
+        }
+        return last;
+    }
+
+    static int EmbedPerPass() =>
+        int.TryParse(Environment.GetEnvironmentVariable("CODE_INTEL_EMBED_PER_PASS"), out var v) ? v : DefaultEmbedPerPass;
+
+    static int EmbedAfterIndex(CodeIntelConfig cfg, long? limit)
+    {
+        try
+        {
+            using var conn = Db.Open(cfg.Index.DbPath);
+            return Semantic.BuildSymbolEmbeddings(conn, limit: limit);
+        }
+        catch (EmbeddingUnavailable exc)
+        {
+            Err.WriteLine($"indexed, but embedding is unavailable: {exc.Message}");
+            return 0;
+        }
+        catch (Exception exc)
+        {
+            Err.WriteLine($"indexed, but embedding failed: {exc.GetType().Name}: {exc.Message}");
+            return 0;
+        }
+    }
+
+    public static int EmbedCommand(CodeIntelConfig cfg, int? limit)
+    {
+        using var conn = Db.Open(cfg.Index.DbPath);
+        try
+        {
+            var stale = Semantic.StaleCount(conn);
+            if (stale > 0)
+                Out.WriteLine($"{stale:N0} vectors were built with a different embedding model or dimension and are NOT usable. " +
+                              $"Delete them to rebuild: DELETE FROM symbol_embeddings WHERE model <> '{Embed.Model}';");
+            var written = Semantic.BuildSymbolEmbeddings(conn, limit: limit is > 0 ? limit : null,
+                progress: (done, total) => { Out.WriteLine($"  embedded {done:N0} of {total:N0}"); Out.Flush(); });
+            Out.WriteLine(written > 0 ? $"embedded {written:N0} symbols" : "nothing to embed; every public symbol already has a vector");
+            return 0;
+        }
+        catch (EmbeddingUnavailable exc)
+        {
+            Err.WriteLine($"embedding unavailable: {exc.Message}");
+            return ExitPack;
+        }
+    }
+
+    // --- operations ------------------------------------------------------------------------
+
+    public static int Backup(CodeIntelConfig cfg, string outDir, string? configPath)
+    {
+        Directory.CreateDirectory(outDir);
+        var indexOut = Path.Combine(outDir, "index.db");
+        string? Vacuum(string source, string target)
+        {
+            try
+            {
+                if (File.Exists(target)) File.Delete(target);
+                Db.Init();
+                using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = source, Pooling = false }.ToString());
+                c.Open();
+                Sql.Exec(c, "VACUUM INTO ?", target);
+                return null;
+            }
+            catch (SqliteException exc) { return Queries.SqliteMessage(exc); }
+        }
+        // People, their keys and conversations first: unlike the index, nothing can rebuild them.
+        var appDb = Platform.AppDb.PathFor(cfg.Index.DataDir);
+        long people = 0;
+        if (File.Exists(appDb))
+        {
+            var appOut = Path.Combine(outDir, "app.db");
+            if (Vacuum(appDb, appOut) is { } errApp)
+            {
+                Err.WriteLine($"app database backup failed: {errApp}");
+                return 4;
+            }
+            using var verifyApp = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = appOut, Pooling = false }.ToString());
+            verifyApp.Open();
+            var appStatus = Sql.Scalar(verifyApp, "PRAGMA integrity_check")?.ToString() ?? "";
+            if (appStatus != "ok")
+            {
+                Err.WriteLine($"app database backup failed integrity check: {appStatus}");
+                return 4;
+            }
+            people = Convert.ToInt64(Sql.Scalar(verifyApp, "SELECT COUNT(*) FROM users"));
+            Out.WriteLine($"app database: {people} people -> {appOut}");
+        }
+        if (!File.Exists(cfg.Index.DbPath))
+        {
+            Err.WriteLine($"no index at {cfg.Index.DbPath}" + (File.Exists(appDb) ? " (the app database was backed up)" : ""));
+            return File.Exists(appDb) ? 0 : 4;
+        }
+        if (Vacuum(cfg.Index.DbPath, indexOut) is { } err1)
+        {
+            Err.WriteLine($"backup failed: {err1}");
+            return 4;
+        }
+        var auditSrc = Db.AuditDbPath(cfg.Index.DbPath);
+        var auditOut = Path.Combine(outDir, Path.GetFileName(auditSrc));
+        long auditRows = 0;
+        if (File.Exists(auditSrc))
+        {
+            if (Vacuum(auditSrc, auditOut) is { } err2)
+            {
+                Err.WriteLine($"audit backup failed: {err2}");
+                return 4;
+            }
+            using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = auditOut, Pooling = false }.ToString());
+            verify.Open();
+            auditRows = Convert.ToInt64(Sql.Scalar(verify, "SELECT COUNT(*) FROM audit"));
+        }
+        string status;
+        long repoRows;
+        using (var check = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = indexOut, Pooling = false }.ToString()))
+        {
+            check.Open();
+            status = Sql.Scalar(check, "PRAGMA integrity_check")?.ToString() ?? "";
+            repoRows = Convert.ToInt64(Sql.Scalar(check, "SELECT COUNT(*) FROM repos"));
+        }
+        if (status != "ok")
+        {
+            Err.WriteLine($"backup failed integrity check: {status}");
+            return 4;
+        }
+        bool copiedConfig = false;
+        if (configPath is not null && File.Exists(configPath))
+        {
+            File.Copy(configPath, Path.Combine(outDir, "config.yaml"), overwrite: true);
+            copiedConfig = true;
+        }
+        int copiedPacks = 0;
+        if (Directory.Exists(cfg.PacksDir))
+        {
+            var target = Path.Combine(outDir, "packs");
+            Directory.CreateDirectory(target);
+            foreach (var pack in Directory.EnumerateFiles(cfg.PacksDir, "*.kpack"))
+            {
+                File.Copy(pack, Path.Combine(target, Path.GetFileName(pack)), overwrite: true);
+                copiedPacks++;
+            }
+        }
+        var sizeMb = new FileInfo(indexOut).Length / (1024.0 * 1024.0);
+        Out.WriteLine($"index.db      {sizeMb:0.0} MB  ({repoRows} repos, integrity ok)");
+        Out.WriteLine($"audit rows    {auditRows}  <- the only data no rebuild recovers");
+        Out.WriteLine($"config.yaml   {(copiedConfig ? "copied" : "NOT FOUND")}");
+        Out.WriteLine($"packs         {copiedPacks}");
+        Out.WriteLine($"written to {outDir}");
+        Out.WriteLine("mirrors/ and trees/ deliberately excluded: re-fetchable from GitLab");
+        return 0;
+    }
+
+    public static int KpiCommand(CodeIntelConfig cfg, bool asJson)
+    {
+        JsonObject data;
+        using (var conn = Db.Open(cfg.Index.DbPath)) data = Kpi.Collect(conn, cfg.Index.DbPath);
+        if (asJson)
+        {
+            var sorted = new JsonObject();
+            foreach (var key in data.Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)) sorted[key] = data[key]!?.DeepClone();
+            Out.WriteLine(PyJson.Dumps(sorted));
+            return 0;
+        }
+        foreach (var (key, value) in data)
+        {
+            if (key == "collected_at") continue;
+            var marker = Kpi.LowerIsBetter.Contains(key) ? "  (lower is better)" : "";
+            var text = value is null ? "None" : value is JsonValue v && v.TryGetValue<double>(out var d) && !v.TryGetValue<long>(out _) ? PyJson.Float(d) : value.ToJsonString();
+            Out.WriteLine($"  {key,-26} {text,12}{marker}");
+        }
+        return 0;
+    }
+
+    public static int Status(CodeIntelConfig cfg)
+    {
+        using var conn = Db.Open(cfg.Index.DbPath);
+        var all = Sql.Query(conn, "SELECT id FROM repos").Select(r => r.Long("id")).ToList();
+        var rows = Queries.IndexStatus(all, conn);
+        if (rows.Count == 0)
+        {
+            Out.WriteLine("no repos indexed");
+            return 0;
+        }
+        foreach (var row in rows)
+        {
+            var at = row.LongOrNull("last_indexed_at");
+            var when = at is { } t ? DateTimeOffset.FromUnixTimeSeconds(t).ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) : "never";
+            var sha = row.StrOrNull("last_indexed_sha") is { Length: > 0 } s ? PyStr.Prefix(s, 8) : "-";
+            var flags = (row.Long("last_run_timed_out") != 0 ? " TIMED-OUT" : "") + (row.Long("last_run_symbols_failed") != 0 ? " SYMBOLS-FAILED" : "");
+            if (row.StrOrNull("last_run_error") is { Length: > 0 } e) flags += $" RUN-FAILED({PyStr.Prefix(e, 80)})";
+            Out.WriteLine($"{row.Str("path_with_namespace"),-40} sha={sha} at={when} files={row.Long("files")} symbols={row.Long("symbols")} errors={row.Long("errors")} queued_retries={row.Long("queued_retries")}{flags}");
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// The graph measured against what the owners know (Store/GraphEval): precision and recall of the links between the
+    /// repositories they judged, by tier, layer and kind, whether confidences mean what they say, what it got wrong and
+    /// missed; and calibrated priors, written where the index reads them with --write-priors (and used at once with --apply).
+    /// </summary>
+    public static int GraphEvalCommand(CodeIntelConfig cfg, string truthPath, bool asJson, bool writePriors, bool apply)
+    {
+        string text;
+        try { text = truthPath == "-" ? Console.In.ReadToEnd() : File.ReadAllText(truthPath); }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            Err.WriteLine($"could not read {truthPath}: {exc.Message}");
+            return 2;
+        }
+        var truth = Truth.Parse(text);
+        JsonObject report;
+        using (var conn = Db.Open(cfg.Index.DbPath))
+        {
+            report = GraphEval.Run(conn, truth);
+        }
+        if (asJson) Out.WriteLine(report.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        else WriteReport(report);
+        if (writePriors)
+        {
+            var path = LinkKinds.PriorsPath(cfg.Index.DbPath);
+            var priors = report["priors"]!.AsObject();
+            if (priors.Count == 0)
+            {
+                Err.WriteLine($"no kind has {GraphEval.FewestForPrior} judged links yet: no priors written");
+                return truth.Problems.Count > 0 ? 1 : 0;
+            }
+            File.WriteAllText(path, priors.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
+            Err.WriteLine($"{priors.Count} calibrated priors written to {path}");
+            if (apply)
+            {
+                using var conn = Db.Open(cfg.Index.DbPath);
+                var stats = Graph.RebuildLinks(conn);
+                Err.WriteLine($"links rebuilt with them: {stats.GetValueOrDefault("linked_pairs")} linked pairs, {stats.GetValueOrDefault("strong_edges")} strong, " +
+                              $"{stats.GetValueOrDefault("likely_edges")} likely, {stats.GetValueOrDefault("weak_edges")} weak");
+            }
+            else Err.WriteLine("they are used from the next index pass (or code-intel resolve)");
+        }
+        return truth.Problems.Count > 0 ? 1 : 0;
+    }
+
+    static void WriteReport(JsonObject r)
+    {
+        static string Pct(JsonNode? n) => n is null ? "-" : (n.GetValue<double>() * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+        foreach (var p in r["problems"]!.AsArray()) Err.WriteLine(p!.GetValue<string>());
+        if (r["unknown_repos"]!.AsArray().Count > 0)
+            Err.WriteLine($"not in the index (left out): {string.Join(", ", r["unknown_repos"]!.AsArray().Select(u => u!.GetValue<string>()))}");
+        var pairs = r["pairs"]!;
+        Out.WriteLine($"judged {r["judged_repos"]} repositories, {r["confirmed_links"]} links the owners confirm");
+        Out.WriteLine($"links walked {pairs["walked"]}: {pairs["right"]} right, {pairs["wrong"]} wrong, {pairs["missed"]} missed");
+        Out.WriteLine($"precision {Pct(pairs["precision"])}  recall {Pct(pairs["recall"])}  f1 {Pct(pairs["f1"])}");
+        foreach (var section in new[] { "by_tier", "by_layer" })
+        {
+            Out.WriteLine();
+            Out.WriteLine(section.Replace('_', ' '));
+            foreach (var (key, v) in r[section]!.AsObject()) Out.WriteLine($"  {key,-12} {v!["links"],6} links  {Pct(v["precision"]),7} right");
+        }
+        Out.WriteLine();
+        Out.WriteLine("by kind (how its name matched)            links   right   prior  suggested");
+        foreach (var k in r["by_kind"]!.AsArray())
+            Out.WriteLine($"  {$"{k!["kind"]} ({k["how"]})",-40} {k["links"],5} {Pct(k["precision"]),7} {k["prior"],7}  {k["suggested"]?.ToString() ?? "-"}");
+        Out.WriteLine();
+        Out.WriteLine("calibration (confidence: what it says, what is so)");
+        foreach (var b in r["calibration"]!.AsArray())
+            Out.WriteLine($"  {b!["from"]}-{b["to"]}  {b["links"],6} links  says {Pct(b["mean_confidence"]),7}  is {Pct(b["observed"]),7}");
+        foreach (var (title, key) in new[] { ("wrong (walked, not confirmed)", "wrong"), ("missed (confirmed, not walked)", "missed") })
+        {
+            var rows = r[key]!.AsArray();
+            if (rows.Count == 0) continue;
+            Out.WriteLine();
+            Out.WriteLine(title);
+            foreach (var w in rows)
+                Out.WriteLine($"  {w!["from"]} -> {w["to"]}" + (key == "wrong" ? $"  {w["layer"]} {w["confidence"]} {w["kinds"]}{(w["owners_say_no"]!.GetValue<bool>() ? "  (owners say no)" : "")}"
+                    : w["seen_at"] is { } seen ? $"  (seen at {seen})" : "  (not seen)"));
+        }
+    }
+
+    public static int ResolveCommand(CodeIntelConfig cfg)
+    {
+        Dictionary<string, long> counts;
+        int edges;
+        Dictionary<string, long> linked;
+        using var conn = Db.Open(cfg.Index.DbPath);
+        try
+        {
+            counts = Resolve.ResolveIncludes(conn);
+            edges = Graph.RebuildRepoDeps(conn);
+            linked = Graph.RebuildLinks(conn);
+        }
+        catch (Exception exc)
+        {
+            Err.WriteLine($"resolve/rebuild failed: {exc.GetType().Name}({PyStr.Repr(exc.Message)})");
+            return 4;
+        }
+        foreach (var state in new[] { "resolved", "external", "ambiguous", "not_found" })
+            Out.WriteLine($"{state,-12} {counts.GetValueOrDefault(state)}");
+        Out.WriteLine($"{"edges",-12} {edges}");
+        foreach (var state in new[] { "linked_pairs", "strong_edges", "likely_edges", "weak_edges", "resolved", "internal", "ambiguous", "settled:manifest",
+                     "settled:name", "candidate", "unconfirmed", "test", "external", "described" })
+            Out.WriteLine($"{state,-16} {linked.GetValueOrDefault(state)}");
+        return 0;
+    }
+
+    public static int FlushAcl(CodeIntelConfig cfg, string? user)
+    {
+        using var conn = Db.Open(cfg.Index.DbPath);
+        if (user is not null)
+        {
+            var n = Sql.Exec(conn, "DELETE FROM acl_cache WHERE username = ?", user);
+            Out.WriteLine(n == 0 ? $"user '{user}' not in acl cache; nothing cleared" : $"cleared acl cache for '{user}' ({n} rows)");
+        }
+        else
+        {
+            var n = Sql.Exec(conn, "DELETE FROM acl_cache");
+            Out.WriteLine(n > 0 ? $"cleared {n} acl cache entries" : "no acl cache entries to clear");
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Exit 0 when the server answers /healthz with 200. For a container
+    /// healthcheck: the image ships no curl and no Python, so the probe is the
+    /// program itself.
+    /// </summary>
+    /// <summary>Where this container's own server answers: https when it serves TLS.</summary>
+    public static string DefaultHealthUrl =>
+        (Environment.GetEnvironmentVariable("CODE_INTEL_TLS_CERT") is { Length: > 0 } ? "https" : "http") + "://127.0.0.1:7700/healthz";
+
+    public static int Healthcheck(string url)
+    {
+        try
+        {
+            // A loopback probe of our own server: its certificate names the public host, not 127.0.0.1.
+            var loopback = Uri.TryCreate(url, UriKind.Absolute, out var u) && u.IsLoopback;
+            using var handler = new HttpClientHandler();
+            if (loopback) handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+            using var resp = client.GetAsync(url).GetAwaiter().GetResult();
+            return (int)resp.StatusCode == 200 ? 0 : 1;
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or UriFormatException)
+        {
+            Err.WriteLine($"unhealthy: {exc.Message}");
+            return 1;
+        }
+    }
+
+    // --- serve ---------------------------------------------------------------------------
+
+    public static int Serve(CodeIntelConfig cfg, string host, int port, IReadOnlyList<string>? allowedHosts)
+    {
+        // HTTPS when a certificate is given (PEM, e.g. from the host's ACME client);
+        // plain HTTP otherwise, for localhost or behind the host's own proxy.
+        var cert = Environment.GetEnvironmentVariable("CODE_INTEL_TLS_CERT") ?? "";
+        var key = Environment.GetEnvironmentVariable("CODE_INTEL_TLS_KEY") ?? "";
+        var tls = cert.Length > 0 && key.Length > 0;
+        var app = CodeIntelServer.Create(cfg, allowedHosts, configure: tls
+            ? b => b.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h =>
+                h.ServerCertificate = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(cert, key)))
+            : null);
+        var address = host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+        var scheme = tls ? "https" : "http";
+        app.Urls.Add($"{scheme}://{address}:{port}");
+        // The repositories' own schedules (every N hours, daily, weekly) run in the process that serves.
+        var jobs = app.Services.GetRequiredService<Jobs>();
+        if (Jobs.SchedulerEnabled()) jobs.StartRepoScheduler();
+        // The index of a repository left out before a restart, not yet removed.
+        jobs.RemoveLeftOut();
+        Out.WriteLine($"code-intel serving the app on {scheme}://{address}:{port}/ and MCP on {scheme}://{address}:{port}/mcp");
+        Out.Flush();
+        app.Run();
+        return 0;
+    }
+
+    // --- people -------------------------------------------------------------------------
+
+    /// <summary><c>code-intel user add|list|passwd|role|disable|enable</c>: accounts, for when the web app is not reachable yet.</summary>
+    public static int UserCommand(CodeIntelConfig cfg, string action, Parsed a)
+    {
+        using var conn = Platform.AppDb.Open(Platform.AppDb.PathFor(cfg.Index.DataDir));
+        try
+        {
+            switch (action)
+            {
+                case "list":
+                    foreach (var u in Platform.Users.List(conn))
+                        Out.WriteLine($"{u.Username,-24} {u.Email,-32} {u.Role,-6}{(u.Disabled ? " disabled" : "")}");
+                    return 0;
+                case "add":
+                {
+                    var password = a.Get("password") ?? "";
+                    var generated = password.Length == 0;
+                    if (generated) password = Platform.Passwords.Generate();
+                    var user = Platform.Users.Create(conn, a.Pos("username")!, a.Req("email"), password,
+                        a.Flag("admin") ? "admin" : "user", a.Get("name") ?? "", a.Get("gitlab"));
+                    Out.WriteLine($"created {user.Username} ({user.Role})");
+                    if (generated) Out.WriteLine($"password: {password}");
+                    return 0;
+                }
+                case "passwd":
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    var password = a.Get("password") ?? "";
+                    var generated = password.Length == 0;
+                    if (generated) password = Platform.Passwords.Generate();
+                    Platform.Users.SetPassword(conn, user.Id, password);
+                    Out.WriteLine($"password changed for {user.Username}; their sessions have ended");
+                    if (generated) Out.WriteLine($"password: {password}");
+                    return 0;
+                }
+                case "role":
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    Out.WriteLine($"{Platform.Users.Update(conn, user.Id, role: a.Pos("role")!).Username} is now {a.Pos("role")!}");
+                    return 0;
+                }
+                default:
+                {
+                    var user = Platform.Users.Find(conn, a.Pos("username")!) ?? throw new Platform.AccountError("No such person.");
+                    Platform.Users.Update(conn, user.Id, disabled: action == "disable");
+                    Out.WriteLine($"{user.Username} {action}d");
+                    return 0;
+                }
+            }
+        }
+        catch (Platform.AccountError exc)
+        {
+            Err.WriteLine($"user error: {exc.Message}");
+            return 2;
+        }
+    }
+
+    public static int ServeStdio(CodeIntelConfig cfg)
+    {
+        var token = (Environment.GetEnvironmentVariable("CODE_INTEL_TOKEN") ?? "").Trim();
+        if (token.Length == 0)
+        {
+            Err.WriteLine("CODE_INTEL_TOKEN is not set. stdio has no request headers, so the credential must come from the environment.");
+            return 2;
+        }
+        Identity identity;
+        using (var conn = Db.Open(cfg.Index.DbPath))
+        {
+            try { identity = Acl.Resolve(conn, cfg.GitLab, token); }
+            catch (AclDenied exc)
+            {
+                Err.WriteLine($"credential rejected: {exc.Message}");
+                return 2;
+            }
+        }
+        Err.WriteLine($"code-intel stdio: {identity.Username} ({identity.AllowedRepoIds.Count} repos)");
+        McpHandlers.StdioIdentity = identity;
+        McpHandlers.Configure(new Tools(cfg), null);
+        var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        builder.Services
+            .AddMcpServer(o =>
+            {
+                o.ServerInfo = new Implementation { Name = "code-intel", Version = Metrics.Version };
+                o.ServerInstructions = ToolCatalog.ServerInstructions;
+            })
+            .WithStdioServerTransport()
+            .WithListToolsHandler(McpHandlers.ListTools)
+            .WithCallToolHandler(McpHandlers.CallTool);
+        builder.Build().Run();
+        return 0;
+    }
+
+    // --- packs ----------------------------------------------------------------------------
+
+    static string PacksDirFor(Parsed a)
+    {
+        if (a.Get("packs_dir") is { Length: > 0 } dir) return dir;
+        if (a.Get("config") is { Length: > 0 } cfgPath) return CodeIntelConfig.Load(cfgPath).PacksDir;
+        throw new ConfigError("pass --packs-dir or --config to say where packs live");
+    }
+
+    static string Describe(InstalledPack pack)
+    {
+        var flag = pack.Compatible ? "" : "  [INCOMPATIBLE]";
+        var sizeMb = pack.SizeBytes / (1024.0 * 1024.0);
+        return $"{pack.Name,-16} {pack.Version,-10} {pack.EmbeddingModel,-20} {sizeMb,8:0.0} MB  {pack.License}{flag}";
+    }
+
+    public static int PackBuild(Parsed a)
+    {
+        var sourceName = a.Req("source");
+        if (!SourceCatalog.Sources.TryGetValue(sourceName, out var make))
+        {
+            Err.WriteLine($"unknown source {PyStr.Repr(sourceName)}; known: {string.Join(", ", SourceCatalog.Sources.Keys.OrderBy(k => k, StringComparer.Ordinal))}");
+            return ExitPack;
+        }
+        var source = make();
+        var workDir = a.Req("work_dir");
+        string? commit = null;
+        if (a.Flag("fetch"))
+        {
+            var origin = source.ArchiveUrl.Length > 0 ? source.ArchiveUrl : $"{source.RepoUrl} ({source.Branch})";
+            Out.WriteLine($"fetching {origin} into {workDir} ...");
+            commit = PackBuilder.FetchSource(source, workDir);
+        }
+        Out.WriteLine($"building {source.Name} pack from {workDir} ...");
+        string output;
+        try
+        {
+            output = PackBuilder.BuildPack(source, workDir, a.Req("out"), a.Req("version"),
+                sourceCommit: string.IsNullOrEmpty(commit) ? a.Get("commit") : commit);
+        }
+        catch (EmbeddingUnavailable exc)
+        {
+            Err.WriteLine($"embedding failed: {exc.Message}");
+            Err.WriteLine($"is the embedding server at {Indexing.Embed.BaseUrl} running (CODE_INTEL_EMBED_URL), and serving {Indexing.Embed.Model}?");
+            return ExitPack;
+        }
+        Dictionary<string, string> meta;
+        using (var conn = PackFormat.OpenPack(output)) meta = PackFormat.ReadMeta(conn);
+        Out.WriteLine($"wrote {output} ({new FileInfo(output).Length / (1024.0 * 1024.0):0.0} MB)");
+        Out.WriteLine($"  docs {meta.GetValueOrDefault("doc_count")}  chunks {meta.GetValueOrDefault("chunk_count")}  symbols {meta.GetValueOrDefault("symbol_count")} (unresolved {meta.GetValueOrDefault("unresolved_symbol_count")})");
+        return 0;
+    }
+
+    public static int PackList(Parsed a)
+    {
+        var packs = Registry.ListInstalled(PacksDirFor(a));
+        if (packs.Count == 0)
+        {
+            Out.WriteLine("no packs installed");
+            return 0;
+        }
+        Out.WriteLine($"{"NAME",-16} {"VERSION",-10} {"MODEL",-20} {"SIZE",11}  LICENSE");
+        foreach (var p in packs) Out.WriteLine(Describe(p));
+        return 0;
+    }
+
+    public static int PackInstall(Parsed a)
+    {
+        var installed = Registry.Install(a.Pos("source")!, PacksDirFor(a), a.Get("sha256"));
+        Out.WriteLine($"installed {installed.Name} {installed.Version} -> {installed.Path}");
+        if (!installed.Compatible)
+        {
+            Err.WriteLine($"warning: {installed.IncompatibleReason}");
+            Err.WriteLine("lookup and text search still work; semantic search does not.");
+        }
+        return 0;
+    }
+
+    public static int PackInfo(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var name = a.Pos("name")!;
+        var pack = Registry.ListInstalled(dest).FirstOrDefault(p => p.Name == name);
+        if (pack is null)
+        {
+            Err.WriteLine($"no installed pack named {PyStr.Repr(name)} in {dest}");
+            return ExitPack;
+        }
+        Dictionary<string, string> meta;
+        using (var conn = PackFormat.OpenPack(pack.Path)) meta = PackFormat.ReadMeta(conn);
+        Out.WriteLine($"name          {pack.Name}");
+        Out.WriteLine($"version       {pack.Version}");
+        Out.WriteLine($"path          {pack.Path}");
+        Out.WriteLine($"size          {pack.SizeBytes / (1024.0 * 1024.0):0.0} MB");
+        Out.WriteLine($"model         {pack.EmbeddingModel} ({pack.EmbeddingDim}d)");
+        Out.WriteLine($"compatible    {(pack.Compatible ? "yes" : "no")}");
+        if (!pack.Compatible) Out.WriteLine($"              {pack.IncompatibleReason}");
+        Out.WriteLine($"source        {meta.GetValueOrDefault("source_repo", "")}");
+        Out.WriteLine($"branch        {meta.GetValueOrDefault("source_branch", "")}");
+        Out.WriteLine($"commit        {pack.SourceCommit}");
+        Out.WriteLine($"docs          {meta.GetValueOrDefault("doc_count", "?")}");
+        Out.WriteLine($"chunks        {meta.GetValueOrDefault("chunk_count", "?")}");
+        Out.WriteLine($"symbols       {meta.GetValueOrDefault("symbol_count", "?")}");
+        Out.WriteLine();
+        Out.WriteLine($"license       {pack.License}");
+        Out.WriteLine($"license url   {meta.GetValueOrDefault("license_url", "")}");
+        Out.WriteLine("attribution");
+        Out.WriteLine($"  {pack.Attribution}");
+        return 0;
+    }
+
+    public static int PackRemove(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var name = a.Pos("name")!;
+        if (Registry.Remove(name, dest))
+        {
+            Out.WriteLine($"removed {name}");
+            return 0;
+        }
+        Err.WriteLine($"no installed pack named {PyStr.Repr(name)} in {dest}");
+        return ExitPack;
+    }
+
+    public static int PackUpdate(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var available = Registry.FetchIndex(a.Req("index_url")).GroupBy(e => e.Name).ToDictionary(g => g.Key, g => g.Last());
+        var installed = Registry.ListInstalled(dest);
+        var name = a.Pos("name");
+        if (!string.IsNullOrEmpty(name))
+        {
+            installed = installed.Where(p => p.Name == name).ToList();
+            if (installed.Count == 0)
+            {
+                Err.WriteLine($"no installed pack named {PyStr.Repr(name)} in {dest}");
+                return ExitPack;
+            }
+        }
+        int updated = 0;
+        foreach (var pack in installed)
+        {
+            if (!available.TryGetValue(pack.Name, out var entry)) { Out.WriteLine($"{pack.Name}: not in the index, leaving alone"); continue; }
+            if (entry.Version == pack.Version) { Out.WriteLine($"{pack.Name}: {pack.Version} is current"); continue; }
+            Out.WriteLine($"{pack.Name}: {pack.Version} -> {entry.Version}, downloading ...");
+            Registry.Install(entry.Url, dest, entry.Sha256);
+            updated++;
+        }
+        Out.WriteLine($"{updated} pack(s) updated");
+        return 0;
+    }
+
+    /// <summary>
+    /// The advisories pack renewed: GitHub's reviewed advisories and CISA's catalog fetched again, and the pack built over
+    /// the one installed in the packs directory (only the advisories that changed are embedded again, by CODE_INTEL_EMBED_URL).
+    /// On a connected machine each day; then `pack index`, and an offline host takes it with `pack update` or airgap.sh.
+    /// </summary>
+    public static int PackRenew(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var work = a.Get("work_dir") is { Length: > 0 } w ? w : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dest))!, "advisories-work");
+        var built = Deps.Advisories.Renew(work, dest, line => Out.WriteLine(line));
+        Out.WriteLine($"wrote {built}");
+        return 0;
+    }
+
+    public static int PackIndex(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var output = a.Req("out");
+        var name = a.Pos("name");
+        JsonObject index;
+        try { index = Registry.WriteIndex(dest, a.Req("base_url"), name); }
+        catch (IOException exc)
+        {
+            Err.WriteLine($"could not read {dest}: {exc.Message}");
+            return ExitPack;
+        }
+        var packs = (JsonArray)index["packs"]!;
+        if (packs.Count == 0) Err.WriteLine($"no packs found in {dest}" + (name is not null ? $" named {PyStr.Repr(name)}" : ""));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, PyJson.IndentedDumps(index) + "\n");
+        Out.WriteLine($"wrote {output}: {packs.Count} pack(s) from {dest}");
+        foreach (var entry in packs)
+            Out.WriteLine($"  {entry!["name"]} {entry["version"]}  {entry["size_bytes"]!.GetValue<long>() / (1024.0 * 1024.0):0.0} MB  {entry["url"]}");
+        foreach (var skipped in (JsonArray)index["skipped"]!)
+            Err.WriteLine($"  SKIPPED {skipped!["file"]}: {skipped["reason"]}");
+        return 0;
+    }
+
+    // --- verify ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// The last assistant text in a Claude Code transcript (JSON lines), or "" when the turn
+    /// ended on a tool call, a thinking block or nothing -- none of which is a claim to check.
+    /// </summary>
+    public static string LastAssistantText(string transcriptPath)
+    {
+        var text = "";
+        foreach (var line in File.ReadLines(transcriptPath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            JsonObject? row;
+            try { row = JsonNode.Parse(line) as JsonObject; }
+            catch (System.Text.Json.JsonException) { continue; }
+            var message = row?["message"] as JsonObject;
+            if (row?["type"]?.ToString() != "assistant" && message?["role"]?.ToString() != "assistant") continue;
+            switch (message?["content"])
+            {
+                case JsonValue v when v.TryGetValue<string>(out var s):
+                    text = s;
+                    break;
+                case JsonArray blocks:
+                    var parts = blocks.OfType<JsonObject>().Where(b => b["type"]?.ToString() == "text").Select(b => b["text"]?.ToString() ?? "").ToList();
+                    if (parts.Count > 0) text = string.Join("\n", parts);
+                    break;
+            }
+        }
+        return text;
+    }
+
+    public static int Verify(Parsed a)
+    {
+        if (a.Flag("claude_hook"))
+        {
+            // Claude Code runs this when the model tries to finish. Exit 2 with a reason on stderr
+            // blocks the stop and hands the reason back; anything else lets the turn end -- including
+            // "could not check", which must never trap an agent in a turn it cannot finish.
+            string draft;
+            try
+            {
+                var payload = JsonNode.Parse(Console.In.ReadToEnd()) as JsonObject;
+                var path = payload?["transcript_path"]?.ToString() ?? "";
+                draft = path.Length > 0 && File.Exists(path) ? LastAssistantText(path) : "";
+            }
+            catch (Exception exc) when (exc is System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+            {
+                return 0;
+            }
+            if (PyStr.Strip(draft).Length == 0) return 0;
+            var tmp = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tmp, draft);
+                var rc = Program.Run(["verify", "--config", a.Req("config"), "--text-file", tmp, "--quiet",
+                    .. (a.Get("limit") is { } l ? new[] { "--limit", l } : [])]);
+                return rc == ExitVerifyContradicted ? rc : 0;
+            }
+            finally { File.Delete(tmp); }
+        }
+        CodeIntelConfig cfg;
+        try { cfg = CodeIntelConfig.Load(a.Req("config")); }
+        catch (Exception exc) when (exc is ConfigError or IOException)
+        {
+            Err.WriteLine($"config error: {exc.Message}");
+            return ExitVerifyUnavailable;
+        }
+        var text = a.Get("text") ?? "";
+        if (a.Get("text_file") is { } file)
+        {
+            try { text = file == "-" ? Console.In.ReadToEnd() : File.ReadAllText(file); }
+            catch (IOException exc)
+            {
+                Err.WriteLine($"could not read {file}: {exc.Message}");
+                return ExitVerifyUnavailable;
+            }
+        }
+        if (PyStr.Strip(text).Length == 0)
+        {
+            Err.WriteLine("nothing to verify");
+            return 0;
+        }
+        var paths = Registry.PackFiles(cfg.PacksDir);
+        if (paths.Count == 0)
+        {
+            Err.WriteLine($"no documentation packs installed in {cfg.PacksDir}; cannot check this draft");
+            return ExitVerifyUnavailable;
+        }
+        List<Pack> opened;
+        try { opened = PackStore.OpenPacks(paths); }
+        catch (Exception exc)
+        {
+            Err.WriteLine($"could not open the installed packs: {exc.Message}");
+            return ExitVerifyUnavailable;
+        }
+        List<JsonObject> findings;
+        try { findings = PackStore.VerifyText(opened, text, a.Int("limit") ?? 40); }
+        catch (Exception exc)
+        {
+            Err.WriteLine($"could not check the draft: {exc.Message}");
+            return ExitVerifyUnavailable;
+        }
+        finally { PackStore.ClosePacks(opened); }
+
+        // One entry per wrong claim. VerifyText reports per API with the verdicts
+        // nested under `corrections`; filtering the findings on a `status` they
+        // never carry meant this command could not exit 2 and the hook never blocked.
+        var contradicted = new List<JsonObject>();
+        foreach (var f in findings)
+            foreach (var c in f["corrections"] as JsonArray ?? [])
+            {
+                if (c is not JsonObject claim || (claim["status"]?.ToString() ?? "").ToLowerInvariant() != "contradicted") continue;
+                var flat = new JsonObject { ["symbol"] = f["name"]?.DeepClone(), ["source"] = f["source"]?.DeepClone(), ["url"] = f["url"]?.DeepClone() };
+                foreach (var (k, v) in claim) flat[k] = v?.DeepClone();
+                contradicted.Add(flat);
+            }
+        if (a.Flag("json"))
+            Out.WriteLine(PyJson.Dumps(new JsonObject
+            {
+                ["contradicted"] = new JsonArray(contradicted.Select(f => (JsonNode?)f.DeepClone()).ToArray()),
+                ["findings"] = new JsonArray(findings.Select(f => (JsonNode?)f.DeepClone()).ToArray()),
+            }));
+        if (contradicted.Count == 0)
+        {
+            if (!a.Flag("quiet")) Err.WriteLine($"verified against {paths.Count} pack(s): no contradictions");
+            return 0;
+        }
+        var lines = new List<string>
+        {
+            $"The documentation contradicts {contradicted.Count} claim(s) in your draft. Correct these, or say the requirement is not documented -- do not restate them from memory:",
+        };
+        foreach (var f in contradicted.Take(10))
+        {
+            string Pick(params string[] keys) => keys.Select(k => f[k]?.ToString()).FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? "?";
+            var source = keys(f, "source", "doc_path");
+            lines.Add($"  - {Pick("symbol", "name")} {Pick("field")}: you said {PyStr.Repr(Pick("stated", "claim"))}; the documentation says {PyStr.Repr(Pick("documented", "value"))}" +
+                      (source.Length > 0 ? $" [{source}]" : ""));
+        }
+        Err.WriteLine(string.Join("\n", lines));
+        return ExitVerifyContradicted;
+
+        static string keys(JsonObject f, params string[] names) =>
+            names.Select(k => f[k]?.ToString()).FirstOrDefault(v => !string.IsNullOrEmpty(v)) ?? "";
+    }
+}

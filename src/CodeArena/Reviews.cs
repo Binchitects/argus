@@ -31,7 +31,7 @@ internal sealed class ReviewRun
 }
 
 /// <summary>
-/// The IDE's reviews (the Review view): a fresh agent with the reading tools (files, search, git, Arena's and Argus's
+/// The IDE's reviews (the Review view): a fresh agent with the reading tools (files, search, git, Arena's and code-intel's
 /// tools that change nothing) reviews the changes not yet committed, or what the branch has over a base, as the Code
 /// page's reviews and /review do: each finding refuted first, nothing changed. It reports through report_review, so
 /// each finding has its file and line; one whose file is not there is left out, and a fix whose text is not in the file

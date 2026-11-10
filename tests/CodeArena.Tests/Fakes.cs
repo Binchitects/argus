@@ -434,7 +434,7 @@ public sealed class FakeMcp : FakeServer
     public int Status { get; set; }
     /// <summary>While set, initialize waits for it: a server slow to answer, or one that never does.</summary>
     public TaskCompletionSource? Hold { get; set; }
-    /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
+    /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): code-intel's, say.</summary>
     public JsonArray? ToolList { get; set; }
     /// <summary>While set, tools/call waits for it: a tool that never answers.</summary>
     public TaskCompletionSource? CallHold { get; set; }
@@ -569,7 +569,7 @@ public sealed class FakeMcp : FakeServer
             {
                 ["protocolVersion"] = "2025-06-18",
                 ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
-                ["serverInfo"] = new JsonObject { ["name"] = "argus-arena", ["version"] = "4.2.0" },
+                ["serverInfo"] = new JsonObject { ["name"] = "arena", ["version"] = "4.2.0" },
                 ["instructions"] = "Arena: search the web with web_search before answering about recent events.",
                 ["_meta"] = DefaultModel is null ? null : new JsonObject { ["arena/defaultModel"] = DefaultModel },
             },

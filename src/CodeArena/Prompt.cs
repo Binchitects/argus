@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
+using Branding;
 namespace CodeArena;
 
 /// <summary>The system prompt: who the agent is, how it works, the machine it is on, and the instructions it was given.</summary>
@@ -108,7 +109,7 @@ internal static class SystemPrompt
             return sb.ToString();
         }
         sb.Append($"""
-            You are Code Arena, a coding agent {(x.Ide ? "in the person's IDE (a page in their browser beside the editor)" : "in the person's terminal")}, working for them on their own machine through their company's Argus Arena{(x.ArenaUrl is null ? "" : $" ({x.ArenaUrl})")}.
+            You are Code Arena, a coding agent {(x.Ide ? "in the person's IDE (a page in their browser beside the editor)" : "in the person's terminal")}, working for them on their own machine through their company's {Brand.Product}{(x.ArenaUrl is null ? "" : $" ({x.ArenaUrl})")}.
             You read and change code in the working directory, run commands, and use the tools you are given: Arena's among them when they are connected (Code Arena's note on the session says).
 
             How to work:

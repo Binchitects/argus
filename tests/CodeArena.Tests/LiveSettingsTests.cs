@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 namespace CodeArena.Tests;
 
 /// <summary>
-/// "When configs in argus-arena changes the code-arena requires restart to get new configs": a change made in Arena (the
+/// "When configs in arena changes the code-arena requires restart to get new configs": a change made in Arena (the
 /// models and their windows, the thinking default, when chats compact, the tools, the skills) reaches a Code Arena that
 /// runs, within seconds and without a restart; the IDE's page hears of it at once.
 /// </summary>
@@ -58,7 +58,7 @@ public sealed class LiveSettingsTests : IDisposable
         // An admin gives the model a larger window and thinking a default; the person chooses when their chats compact;
         // a tool is added for them.
         _gateway.Context = 65536;
-        _mcp.Chats.ChatConfig = Config(60, "account", "high", "web", "argus");
+        _mcp.Chats.ChatConfig = Config(60, "account", "high", "web", "code-intel");
         await Within(() => rt.SettingsVersion == 1);
         Assert.Equal((60, "account"), (rt.Compaction.At, rt.CompactAtSource));
         Assert.Equal("high", rt.Model.DefaultLevel);

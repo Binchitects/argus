@@ -49,7 +49,7 @@ public sealed class RealLayaMcp : FakeServer
             {
                 ["protocolVersion"] = "2025-06-18",
                 ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
-                ["serverInfo"] = new JsonObject { ["name"] = "argus-arena", ["version"] = "5.2.0" },
+                ["serverInfo"] = new JsonObject { ["name"] = "arena", ["version"] = "5.2.0" },
             },
             "tools/list" => new JsonObject
             {

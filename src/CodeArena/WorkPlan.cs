@@ -18,10 +18,10 @@ internal sealed record WorkStep(int Number, string Title, string Status = WorkSt
     public IReadOnlyList<string> Files { get; init; } = Files ?? [];
     public IReadOnlyList<int> DependsOn { get; init; } = DependsOn ?? [];
 
-    /// <summary>The functions, classes or types it changes, by name: what Argus looks up its callers and tests by.</summary>
+    /// <summary>The functions, classes or types it changes, by name: what code-intel looks up its callers and tests by.</summary>
     public IReadOnlyList<string> Symbols { get; init; } = [];
 
-    /// <summary>What a change to its symbols reaches, as Argus found it (repositories, lines that use them, tests that name them).</summary>
+    /// <summary>What a change to its symbols reaches, as code-intel found it (repositories, lines that use them, tests that name them).</summary>
     public string? Impact { get; init; }
 }
 

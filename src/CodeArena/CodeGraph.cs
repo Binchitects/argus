@@ -279,7 +279,7 @@ internal sealed partial class CodeGraph
             var text = Files.ReadText(full).Text;
             if (CodeIndex.Scan(file.Lang, text) is { } scanned)
             {
-                var code = Argus.Util.CodeText.Blank(file.Lang, text);
+                var code = CodeIntel.Util.CodeText.Blank(file.Lang, text);
                 now = new FileNow { File = file, Text = text, Code = code, Scanned = scanned, Types = TypesIn(code, Family(file.Lang)) };
                 Declare(now);
                 Bind(now);
@@ -330,7 +330,7 @@ internal sealed partial class CodeGraph
         var family = Family(now.File.Lang);
         if (family == "script")
         {
-            var code = Argus.Util.CodeText.Blank(now.File.Lang, now.Text, keepStrings: true);
+            var code = CodeIntel.Util.CodeText.Blank(now.File.Lang, now.Text, keepStrings: true);
             foreach (Match m in ScriptImport().Matches(code))
             {
                 var spec = m.Groups["spec"].Value;
@@ -499,7 +499,7 @@ internal sealed partial class CodeGraph
     /// <summary>A type's bases in the folder, by the names its first line gives.</summary>
     private List<SymbolRef> Bases(SymbolRef type) => _bases.GetOrAdd(type.Id, _ => BasesNow(type));
 
-    /// <summary>A type's bases in the folder (classes it extends, interfaces it implements), as Argus's symbol graph keeps them.</summary>
+    /// <summary>A type's bases in the folder (classes it extends, interfaces it implements), as code-intel's symbol graph keeps them.</summary>
     public List<SymbolRef> BasesOfType(SymbolRef type) => IsType(type) ? Bases(type) : [];
 
     private List<SymbolRef> BasesNow(SymbolRef type)

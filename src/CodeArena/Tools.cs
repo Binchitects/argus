@@ -76,7 +76,7 @@ internal sealed class ToolDef
     public bool AlwaysAsks { get; init; }
     /// <summary>
     /// The group a remote tool belongs to, which the person turns on and off and the model loads (<see cref="ToolDemand"/>):
-    /// Arena's tool it is a function of (argus, python, web...), "argus" for Argus's own, "mcp:NAME" for a server of the
+    /// Arena's tool it is a function of (code-intel, python, web...), "code-intel" for code-intel's own, "mcp:NAME" for a server of the
     /// person's. Null for a local tool, which is always there.
     /// </summary>
     public string? Group { get; init; }
@@ -328,7 +328,7 @@ internal sealed class Permissions(Ui ui, Mode mode)
 }
 
 /// <summary>
-/// The tools of a session: local ones, Arena's, Argus's, the person's MCP servers', and the sub-agent.
+/// The tools of a session: local ones, Arena's, code-intel's, the person's MCP servers', and the sub-agent.
 /// A server's tools join when it connects and go when it is lost (from a background thread): each
 /// read is of the list as it was at that moment.
 /// </summary>

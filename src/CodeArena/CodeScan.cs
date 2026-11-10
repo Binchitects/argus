@@ -211,7 +211,7 @@ internal sealed class CSharpScanner : ICodeScanner
 
     public ScannedFile Scan(string text)
     {
-        var blanked = Argus.Util.CodeText.Blank("csharp", text);
+        var blanked = CodeIntel.Util.CodeText.Blank("csharp", text);
         var tokens = CodeTokens.Of(blanked);
         var lines = text.Split('\n');
         var symbols = new List<CodeSymbol>();
@@ -753,8 +753,8 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
 
     public ScannedFile Scan(string text)
     {
-        var blanked = Argus.Util.CodeText.Blank(lang, text);
-        var withStrings = Argus.Util.CodeText.Blank(lang, text, keepStrings: true);
+        var blanked = CodeIntel.Util.CodeText.Blank(lang, text);
+        var withStrings = CodeIntel.Util.CodeText.Blank(lang, text, keepStrings: true);
         var tokens = CodeTokens.Of(withStrings, hashComments: true, quotes: true);
         var lines = text.Split('\n');
         var symbols = new List<CodeSymbol>();
@@ -1128,7 +1128,7 @@ internal sealed partial class PythonScanner : ICodeScanner
 
     public ScannedFile Scan(string text)
     {
-        var blanked = Argus.Util.CodeText.Blank("python", text);
+        var blanked = CodeIntel.Util.CodeText.Blank("python", text);
         var lines = text.Split('\n');
         var code = blanked.Split('\n');
         var symbols = new List<CodeSymbol>();

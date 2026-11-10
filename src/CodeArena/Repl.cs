@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Llm.Core.Chat;
 
+using Branding;
 namespace CodeArena;
 
 /// <summary>The interactive session: the prompt, turns, and the slash commands.</summary>
@@ -49,7 +50,7 @@ internal sealed partial class Repl(Runtime rt)
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
         ("/context", "what fills the model's window, piece by piece"),
         ("/cost", "tokens spent, and how full the window is"),
-        ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
+        ("/mcp [retry]", $"Arena's, {Brand.CodeIntel}'s and your MCP servers: connected or not; retry tries now"),
         ("/jobs [stop N]", "the commands run with no time limit or in the background; stop N stops job N"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
@@ -1068,7 +1069,7 @@ internal sealed partial class Repl(Runtime rt)
                 break;
             }
             case "/tools" when arg.Split(' ', 2, StringSplitOptions.TrimEntries) is [var verb, { Length: > 0 } which] && verb is "on" or "off":
-                // A group by its id or title (argus, Web search...), or by one of its functions.
+                // A group by its id or title (code-intel, Web search...), or by one of its functions.
                 var found = rt.Tools.All.Where(t => ToolBox.SwitchOf(t) is { } g && (g == which || t.Name == which || string.Equals(rt.ToolTitle(g), which, StringComparison.OrdinalIgnoreCase)))
                     .Select(t => ToolBox.SwitchOf(t)!).Distinct().ToList();
                 if (found.Count == 0)
@@ -1234,7 +1235,7 @@ internal sealed partial class Repl(Runtime rt)
                 }
                 if (rt.Links.Count == 0)
                 {
-                    Ui.Info("No MCP servers: Arena's and Argus's are off in config.json (arenaTools, argusTools), and none of your own is set up (mcpServers).");
+                    Ui.Info($"No MCP servers: Arena's and {Brand.CodeIntel}'s are off in config.json (arenaTools, codeIntelTools), and none of your own is set up (mcpServers).");
                 }
                 foreach (var link in rt.Links)
                 {
@@ -1249,7 +1250,7 @@ internal sealed partial class Repl(Runtime rt)
                 }
                 if (rt.Links.Any(l => l.State != LinkState.Connected))
                 {
-                    Ui.Info("/mcp retry tries those not connected now (or /mcp retry NAME). Turn Arena's or Argus's off with \"arenaTools\": false or \"argusTools\": false in config.json.");
+                    Ui.Info($"/mcp retry tries those not connected now (or /mcp retry NAME). Turn Arena's or {Brand.CodeIntel}'s off with \"arenaTools\": false or \"codeIntelTools\": false in config.json.");
                 }
                 break;
             case "/jobs":

@@ -171,10 +171,10 @@ internal sealed class Config
     public string? McpUrl { get; set; }
     /// <summary>Whether to use Arena's tools (its MCP endpoint) at all.</summary>
     public bool ArenaTools { get; set; } = true;
-    /// <summary>Argus's MCP endpoint, when it is not at https://argus.DOMAIN/mcp.</summary>
-    public string? ArgusUrl { get; set; }
-    /// <summary>Whether to connect to Argus's own MCP endpoint (with the same key) besides Arena's.</summary>
-    public bool ArgusTools { get; set; } = true;
+    /// <summary>code-intel's MCP endpoint, when it is not at https://code-intel.DOMAIN/mcp.</summary>
+    public string? CodeIntelUrl { get; set; }
+    /// <summary>Whether to connect to code-intel's own MCP endpoint (with the same key) besides Arena's.</summary>
+    public bool CodeIntelTools { get; set; } = true;
     /// <summary>Arena's and the MCP servers' tool definitions past this many characters go on demand (load_tools); 0: always whole; null: <see cref="ToolDemand.DefaultBudget"/>.</summary>
     public int? ToolChars { get; set; }
     /// <summary>The share of the model's window (in percent) at which the session compacts itself (0, "off": only when a request would not fit); null: the Arena account's, else <see cref="Compaction.DefaultAt"/>.</summary>
@@ -288,17 +288,17 @@ internal sealed class Config
     /// <summary>https://DOMAIN/mcp, or the address given.</summary>
     public string? ArenaMcpUrl => McpUrl is { Length: > 0 } m ? m : Url is { Length: > 0 } u ? u.TrimEnd('/') + "/mcp" : null;
 
-    /// <summary>https://argus.DOMAIN/mcp, or the address given; null for an Arena reached by an IP address or as localhost, which has no such name.</summary>
-    public string? ArgusMcpUrl => ArgusUrl is { Length: > 0 } a ? a : DeriveArgus(Url);
+    /// <summary>https://code-intel.DOMAIN/mcp, or the address given; null for an Arena reached by an IP address or as localhost, which has no such name.</summary>
+    public string? CodeIntelMcpUrl => CodeIntelUrl is { Length: > 0 } a ? a : DeriveCodeIntel(Url);
 
-    public static string? DeriveArgus(string? url)
+    public static string? DeriveCodeIntel(string? url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u) || u.HostNameType != UriHostNameType.Dns
             || u.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
-        return new UriBuilder(u) { Host = "argus." + u.Host, Path = "/mcp" }.Uri.ToString();
+        return new UriBuilder(u) { Host = "code-intel." + u.Host, Path = "/mcp" }.Uri.ToString();
     }
 
     /// <summary>Code Arena's page of the Arena's manual, https://DOMAIN/help/code-arena: the IDE's help links to it.</summary>
@@ -340,8 +340,8 @@ internal sealed class Config
         config.Gateway = raw.Str("gateway");
         config.McpUrl = raw.Str("mcpUrl");
         config.ArenaTools = raw.Bool("arenaTools") ?? true;
-        config.ArgusUrl = raw.Str("argusUrl");
-        config.ArgusTools = raw.Bool("argusTools") ?? true;
+        config.CodeIntelUrl = raw.Str("codeIntelUrl");
+        config.CodeIntelTools = raw.Bool("codeIntelTools") ?? true;
         config.ToolChars = raw.Int("toolChars") is { } chars ? Math.Max(0, chars) : null;
         config.CompactAt = Share(raw, "compactAt", file);
         config.CompactTarget = Share(raw, "compactTarget", file);
@@ -435,12 +435,12 @@ internal sealed class Config
         Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp) && u.Host.Length > 0;
 
     /// <summary>
-    /// The first of the addresses given (gateway, mcpUrl, argusUrl, from the file or the environment) that is not
+    /// The first of the addresses given (gateway, mcpUrl, codeIntelUrl, from the file or the environment) that is not
     /// an http or https one, said with where to fix it; null when they all are.
     /// </summary>
     public string? WrongAddress(string file)
     {
-        foreach (var (value, key, variable) in new[] { (Gateway, "gateway", "ARENA_GATEWAY_URL"), (McpUrl, "mcpUrl", "ARENA_MCP_URL"), (ArgusUrl, "argusUrl", "ARENA_ARGUS_URL") })
+        foreach (var (value, key, variable) in new[] { (Gateway, "gateway", "ARENA_GATEWAY_URL"), (McpUrl, "mcpUrl", "ARENA_MCP_URL"), (CodeIntelUrl, "codeIntelUrl", "ARENA_CODE_INTEL_URL") })
         {
             if (value is { Length: > 0 } && !IsWebAddress(value))
             {
@@ -450,12 +450,12 @@ internal sealed class Config
         return null;
     }
 
-    /// <summary>Overrides from the environment: ARENA_URL, ARENA_API_KEY, ARENA_GATEWAY_URL, ARENA_MCP_URL, ARENA_ARGUS_URL, ARENA_MODEL.</summary>
+    /// <summary>Overrides from the environment: ARENA_URL, ARENA_API_KEY, ARENA_GATEWAY_URL, ARENA_MCP_URL, ARENA_CODE_INTEL_URL, ARENA_MODEL.</summary>
     public void ApplyEnvironment(Func<string, string?> env)
     {
-        if (env("ARENA_ARGUS_URL") is { Length: > 0 } argus)
+        if (env("ARENA_CODE_INTEL_URL") is { Length: > 0 } codeIntel)
         {
-            ArgusUrl = argus;
+            CodeIntelUrl = codeIntel;
         }
         if (env("ARENA_URL") is { Length: > 0 } url)
         {
@@ -498,8 +498,8 @@ internal sealed class Config
         Set("gateway", Gateway);
         Set("mcpUrl", McpUrl);
         Set("arenaTools", ArenaTools ? null : false);
-        Set("argusUrl", ArgusUrl);
-        Set("argusTools", ArgusTools ? null : false);
+        Set("codeIntelUrl", CodeIntelUrl);
+        Set("codeIntelTools", CodeIntelTools ? null : false);
         Set("toolChars", ToolChars);
         Set("compactAt", CompactAt);
         Set("compactTarget", CompactTarget);

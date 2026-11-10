@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
-/// <summary>The files a workspace's folders hold, as the code index covers them (Code Arena's own: Argus lists a checkout's).</summary>
+/// <summary>The files a workspace's folders hold, as the code index covers them (Code Arena's own: code-intel lists a checkout's).</summary>
 internal static partial class CodeFiles
 {
     /// <summary>
