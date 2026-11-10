@@ -1,4 +1,4 @@
-import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon, Calculator, Gauge, Shield, Sparkles } from 'lucide-react'
+import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, Megaphone, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon, Calculator, Gauge, Shield, Sparkles } from 'lucide-react'
 import { codeIntelName } from '@/lib/brand'
 
 export interface NavItem {
@@ -162,6 +162,7 @@ export const navigation: NavSection[] = [
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], permission: 'audit.read' },
       { title: 'Prompt log', path: '/admin/prompts', icon: ScrollText, keywords: ['prompts', 'questions', 'answers', 'review', 'what people asked', 'log'], permission: 'prompts.review' },
       { title: 'Feedback', path: '/admin/feedback', icon: MessageSquareHeart, keywords: ['ideas', 'problems', 'praise', 'send feedback', 'suggestions', 'bugs'], permission: 'feedback.manage' },
+      { title: 'Broadcasts', path: '/admin/broadcasts', icon: Megaphone, keywords: ['announce', 'announcement', 'message everyone', 'banner', 'maintenance', 'notice'], permission: 'broadcasts.send' },
     ],
   },
   {

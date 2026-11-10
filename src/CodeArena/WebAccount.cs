@@ -86,6 +86,49 @@ internal sealed partial class WebApp
                 }
                 return true;
             }
+            case ("GET", "/api/broadcasts"):
+            {
+                // The admins' messages on now for the person, as the Arena shows them above its pages; none when signed out.
+                if (_rt.Config.Url is not { Length: > 0 } url || _rt.Config.ApiKey is not { Length: > 0 } key)
+                {
+                    await res.JsonAsync(200, new JsonArray(), ct);
+                    return true;
+                }
+                try
+                {
+                    using var ask = ChatSync.Request(HttpMethod.Get, url.TrimEnd('/') + "/api/code-arena/broadcasts", key, null);
+                    using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    within.CancelAfter(TimeSpan.FromSeconds(10));
+                    using var answer = await _rt.Http.SendAsync(ask, within.Token);
+                    await res.JsonAsync(200, answer.IsSuccessStatusCode && Json.Parse(await answer.Content.ReadAsStringAsync(within.Token)) is JsonArray list ? list : new JsonArray(), ct);
+                }
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                {
+                    // Arena not answering now: nothing to show, asked again in a minute.
+                    await res.JsonAsync(200, new JsonArray(), ct);
+                }
+                return true;
+            }
+            case ("POST", _) when req.Path.StartsWith("/api/broadcasts/", StringComparison.Ordinal) && req.Path.EndsWith("/dismiss", StringComparison.Ordinal):
+            {
+                if (_rt.Config.Url is not { Length: > 0 } url || _rt.Config.ApiKey is not { Length: > 0 } key)
+                {
+                    throw new IdeError(409, "signed_out", "Sign in to Arena first.");
+                }
+                var id = req.Path["/api/broadcasts/".Length..^"/dismiss".Length];
+                if (!Guid.TryParse(id, out var guid))
+                {
+                    throw new IdeError(404, "not_found", "There is no such message.");
+                }
+                using var send = ChatSync.Request(HttpMethod.Post, $"{url.TrimEnd('/')}/api/code-arena/broadcasts/{guid}/dismiss", key, new JsonObject());
+                using var answer = await _rt.Http.SendAsync(send, ct);
+                if (!answer.IsSuccessStatusCode)
+                {
+                    throw new IdeError((int)answer.StatusCode, "arena", Json.ParseObject(await answer.Content.ReadAsStringAsync(ct))?.Str("error") ?? $"Arena answered {(int)answer.StatusCode}.");
+                }
+                await res.NoContentAsync(ct);
+                return true;
+            }
             case ("POST", FeedbackPath):
             {
                 // Send feedback: to Arena with the person's key, as from its own pages (Admin → Feedback reads it).

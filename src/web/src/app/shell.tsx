@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { BookOpen, ChevronsLeft, ChevronsRight, CodeXml, Menu, Search } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
+import { BroadcastBanner, type ActiveBroadcast } from '@/components/app/broadcasts'
 import { confetti, useKonami, useQuickClicks } from '@/components/app/games-kit'
 import { NotificationBell } from '@/components/app/notifications'
 import { Button } from '@/components/ui/button'
@@ -12,7 +13,7 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { HelpButton, HelpPanel } from '@/help/help-button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
+import { api, infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { AcceptNotice } from './accept-notice'
 import { useFollowColorTheme } from './color-theme'
 import { continueTo } from './continue'
@@ -165,6 +166,9 @@ function SignedIn({ me }: { me: Me }) {
             <UserMenu me={me} onWhatsNew={() => setWhatsNew(true)} />
           </div>
         </header>
+        <div className="mx-auto w-full max-w-(--page-max) px-4 pt-3 empty:hidden sm:px-6 lg:px-8">
+          <BroadcastBanner get={(signal) => api<ActiveBroadcast[]>('/api/broadcasts', { signal })} dismiss={(id) => api(`/api/broadcasts/${id}/dismiss`, { body: {} })} />
+        </div>
         <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
           {notInstalled ? (
             <NotInstalled item={notInstalled} admin={me.isAdmin} />

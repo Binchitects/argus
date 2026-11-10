@@ -812,6 +812,9 @@ public sealed class FakeChats
         }
     }
 
+    /// <summary>The admins' messages on now (/api/code-arena/broadcasts); null: Arena does not answer it.</summary>
+    public JsonArray? Broadcasts { get; set; }
+
     /// <summary>Each rating Code Arena sent, in order: the chat, the message, and the rating (null: taken back).</summary>
     public List<(string Chat, string Message, JsonObject? Rating)> Ratings { get; } = [];
 
@@ -1459,6 +1462,12 @@ public sealed class FakeChats
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
             }
+            return;
+        }
+        if (parts is ["broadcasts"] && method == "GET" && Broadcasts is { } broadcasts)
+        {
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(broadcasts.ToJsonString()));
             return;
         }
         if (parts is ["chats", var ratedChat, "messages", var ratedMessage, "feedback"] && method is "PUT" or "DELETE")

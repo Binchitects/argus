@@ -109,6 +109,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Llm.Core.Notifications.Broadcast> Broadcasts => Set<Llm.Core.Notifications.Broadcast>();
+    public DbSet<Llm.Core.Notifications.BroadcastDismissal> BroadcastDismissals => Set<Llm.Core.Notifications.BroadcastDismissal>();
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<AccessAssignment> AccessAssignments => Set<AccessAssignment>();
     public DbSet<AccessRule> AccessRules => Set<AccessRule>();
@@ -976,6 +978,22 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Answer).HasMaxLength(4000);
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Llm.Core.Notifications.Broadcast>(e =>
+        {
+            e.ToTable("broadcasts");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Body).HasMaxLength(4000);
+            e.Property(x => x.Level).HasMaxLength(16);
+            e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => x.CreatedAt);
+        });
+        builder.Entity<Llm.Core.Notifications.BroadcastDismissal>(e =>
+        {
+            e.ToTable("broadcast_dismissals");
+            e.HasKey(x => new { x.BroadcastId, x.UserId });
+            e.HasOne<Llm.Core.Notifications.Broadcast>().WithMany().HasForeignKey(x => x.BroadcastId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ProductFeedbackImage>(e =>

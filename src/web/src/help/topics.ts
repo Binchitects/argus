@@ -1186,6 +1186,18 @@ export const topics = {
     manual: { doc: 'admin', section: 'feedback' },
   },
 
+  broadcasts: {
+    title: 'Broadcasts',
+    about: 'A message to everyone, or to some groups: it rings their bell (and their phone), shows above every page and in Code Arena until they dismiss it, it ends by itself, or it is ended here.',
+    admin: true,
+    parts: [
+      { name: 'New broadcast', text: 'A title, words if you want, how loud (info, warning or critical: a critical one cannot be dismissed), the groups it is for (none: everyone) and when it ends by itself.' },
+      { name: 'Broadcasts sent', text: 'Each with how many it reached and how many dismissed it; End it takes it off every page and Code Arena at once.' },
+    ],
+    tasks: [{ title: 'Tell everyone about maintenance', steps: ['Write its title and when it happens.', 'Choose Warning, and when it ends (after the maintenance).', 'Send it: everyone sees it above their pages and in Code Arena.'] }],
+    manual: { doc: 'admin', section: 'broadcasts' },
+  },
+
   prompts: {
     title: 'Prompt log',
     about: "Everyone's questions and the answers they got, in any state, in the chat and with API keys, for those with prompts.review. Every search is in the audit log.",

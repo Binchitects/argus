@@ -43,6 +43,7 @@ public static class Permissions
     public const string RuntimesRestart = "runtimes.restart";
     public const string HardwareRead = "hardware.read";
     public const string FeedbackManage = "feedback.manage";
+    public const string BroadcastsSend = "broadcasts.send";
     /// <summary>Not a ".read": the Auditor role, which holds every read, does not get it with them.</summary>
     public const string PromptsReview = "prompts.review";
     public const string AlertsManage = "alerts.manage";
@@ -206,6 +207,7 @@ public static class Permissions
         new(RuntimesRestart, "Oversight", "Restart the engines and the picture and video servers, and reset the sandboxes: what runs there is stopped.", true),
         new(HardwareRead, "Oversight", "See the hardware dashboards: the GPUs, CPUs, memory, disks, network, temperatures and power.", true),
         new(FeedbackManage, "Oversight", "Read what people send about Arena (Send feedback), mark it and answer it.", true),
+        new(BroadcastsSend, "Oversight", "Send a message to everyone, or to some groups: their bell, a banner above every page, and Code Arena.", true),
         new(PromptsReview, "Oversight", "Read everyone's questions and answers, in the chat and with API keys (the prompt log); each search is audited.", true),
         new(AlertsManage, "Oversight", "Set alert rules and where they go.", true),
         new(SafeguardsRead, "Safeguards", "See the safeguard rules, what they did, and try texts on the test bench.", true),

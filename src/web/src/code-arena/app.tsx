@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, use, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { BroadcastBanner, type ActiveBroadcast } from '@/components/app/broadcasts'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { SendFeedbackDialog } from '@/components/app/send-feedback'
 import { toast } from '@/components/ui/toaster'
@@ -1700,6 +1701,13 @@ function Workbench({
     // whole workbench up and left an empty band under it; one that clips cannot.
     <div className="flex h-dvh flex-col overflow-clip bg-background text-foreground">
       {!!lost && <Unreachable error={lost} />}
+      <div className="shrink-0 px-2 pt-2 empty:hidden">
+        <BroadcastBanner
+          queryKey={['code', 'broadcasts']}
+          get={(signal) => ideApi<ActiveBroadcast[]>('/api/broadcasts', { signal })}
+          dismiss={(id) => ideApi(`/api/broadcasts/${id}/dismiss`, { body: {} })}
+        />
+      </div>
       {opening && (
         <output className="fixed inset-0 z-[100] grid place-items-center bg-background/90 backdrop-blur-sm">
           <span className="flex items-center gap-2 text-sm">

@@ -7215,6 +7215,72 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("remote_servers", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Notifications.Broadcast", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Body")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<Guid[]>("Groups")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Sent")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("Until")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("broadcasts", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Notifications.BroadcastDismissal", b =>
+                {
+                    b.Property<Guid>("BroadcastId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("BroadcastId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("broadcast_dismissals", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Panels.Panel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9573,6 +9639,21 @@ namespace Llm.Core.Data.Migrations
                         });
 
                     b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("Llm.Core.Notifications.BroadcastDismissal", b =>
+                {
+                    b.HasOne("Llm.Core.Notifications.Broadcast", null)
+                        .WithMany()
+                        .HasForeignKey("BroadcastId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Llm.Core.Panels.Panel", b =>

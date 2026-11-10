@@ -6,7 +6,7 @@ import { codeIntelName } from '@/lib/brand'
 const order: { title: string; ids: TopicId[] }[] = [
   { title: 'Everywhere', ids: ['app', 'manual'] },
   { title: 'Workspace', ids: ['home', 'chat', 'projects', 'project', 'assistants', 'assistant', 'shared', 'skills', 'memory', 'checklists', 'meetings', 'meeting', 'plans', 'plan', 'lab', 'lab-notebook', 'apps', 'app-page', 'wiki', 'data', 'boards', 'board', 'decks', 'deck', 'media', 'studio', 'workflow', 'room-join', 'code', 'workspace', 'business', 'review', 'review-batch', 'security', 'security-review', 'security-batch', 'fixes', 'fix', 'tasks', 'usage', 'leaderboard', 'setup', 'account', 'ask'] },
-  { title: 'Administration', ids: ['overview', 'people', 'person', 'access', 'safeguards', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'data-sources', 'storage', 'settings', 'audit', 'compliance', 'access-review', 'incident', 'admin-security', 'prompts', 'feedback', 'quality'] },
+  { title: 'Administration', ids: ['overview', 'people', 'person', 'access', 'safeguards', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'data-sources', 'storage', 'settings', 'audit', 'compliance', 'access-review', 'incident', 'admin-security', 'prompts', 'feedback', 'broadcasts', 'quality'] },
   { title: `${codeIntelName}`, ids: ['indexing', 'packs', 'explore'] },
   { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'line', 'accounting', 'logs', 'alerts', 'traces'] },
   { title: 'Other pages', ids: ['login', 'design'] },

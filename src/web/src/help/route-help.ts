@@ -80,6 +80,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/admin/line': 'line',
   '/admin/accounting': 'accounting',
   '/admin/feedback': 'feedback',
+  '/admin/broadcasts': 'broadcasts',
   '/admin/prompts': 'prompts',
   '/admin/quality': 'quality',
   '/admin/indexing': 'indexing',

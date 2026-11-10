@@ -1260,6 +1260,33 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// signing in, with "syncChats" off, or closed while Arena was out of reach): one summary notice when it is done. The
     /// session open now is left to its own sync. Started once (the terminal's chat, the IDE).
     /// </summary>
+    private Task<List<(string Level, string Title, string? Body)>>? _broadcasts;
+
+    /// <summary>
+    /// The admins' messages on now for the person (the Arena's broadcasts), asked once in the background as the run starts:
+    /// the terminal says them under its banner. None when signed out, or when Arena does not answer within a few seconds.
+    /// </summary>
+    public Task<List<(string Level, string Title, string? Body)>> BroadcastsAsync() => _broadcasts ??= Task.Run(async () =>
+    {
+        if (Config.Url is not { Length: > 0 } url || Config.ApiKey is not { Length: > 0 } key)
+        {
+            return new List<(string, string, string?)>();
+        }
+        try
+        {
+            using var within = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var ask = ChatSync.Request(HttpMethod.Get, url.TrimEnd('/') + "/api/code-arena/broadcasts", key, null);
+            using var answer = await Http.SendAsync(ask, within.Token);
+            return answer.IsSuccessStatusCode && Json.Parse(await answer.Content.ReadAsStringAsync(within.Token)) is JsonArray list
+                ? [.. list.OfType<JsonObject>().Select(b => (b.Str("level") ?? "info", b.Str("title") ?? "", b.Str("body")))]
+                : new List<(string, string, string?)>();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return new List<(string, string, string?)>();
+        }
+    });
+
     public void SendLaterInBackground()
     {
         if (_sendingLater is not null || !Config.SyncChats || Config.Url is not { Length: > 0 } || Config.ApiKey is not { Length: > 0 })

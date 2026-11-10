@@ -432,6 +432,23 @@ internal sealed partial class Repl(Runtime rt)
         {
             Ui.Warn("yolo: edits and commands run without asking. Use it in a folder you can throw away.");
         }
+        // The admins' messages on now (the Arena's broadcasts), when they come in time.
+        var said = rt.BroadcastsAsync();
+        if (said.Wait(TimeSpan.FromSeconds(3)))
+        {
+            foreach (var (level, title, body) in said.Result)
+            {
+                var line = $"From the admins: {title}{(body is { Length: > 0 } b ? $" ({Fmt.OneLine(b, 200)})" : "")}";
+                if (level is "warning" or "critical")
+                {
+                    Ui.Warn(line);
+                }
+                else
+                {
+                    Ui.Info(line);
+                }
+            }
+        }
         if (rt.PlanToResume() is { } left)
         {
             // A long task goes on across sessions: an earlier one left its plan in progress here.

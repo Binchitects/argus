@@ -141,6 +141,17 @@ public static partial class CodeArenaSync
             var (me, refusal) = await CallerAsync(http, people);
             return me is null ? refusal! : await Quality.QualityEndpoints.UnrateForAsync(me, id, messageId, db, ct);
         });
+        // The broadcasts that are on for the person, and their dismissing: Code Arena shows them as the Arena does.
+        g.MapGet("/broadcasts", async (HttpContext http, McpPeople people, AppDbContext db, Access.AccessService access, TimeProvider clock, CancellationToken ct) =>
+        {
+            var (me, refusal) = await CallerAsync(http, people);
+            return me is null ? refusal! : Results.Ok(await Notifications.BroadcastEndpoints.ActiveForAsync(me, db, access, clock, ct));
+        });
+        g.MapPost("/broadcasts/{id:guid}/dismiss", async (Guid id, HttpContext http, McpPeople people, AppDbContext db, Access.AccessService access, TimeProvider clock, CancellationToken ct) =>
+        {
+            var (me, refusal) = await CallerAsync(http, people);
+            return me is null ? refusal! : await Notifications.BroadcastEndpoints.DismissAsync(me, id, db, access, clock, ct);
+        });
         g.MapPost("/feedback", async (HttpContext http, McpPeople people, Quality.ProductFeedbackRequest body, AppDbContext db, Notifications.Notifier notifier, Identity.Audit audit, TimeProvider clock) =>
         {
             // Send feedback from Code Arena: as from Arena's pages, from "Code Arena" (and its own page there, when it says).

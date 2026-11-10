@@ -473,6 +473,20 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', text: 'Change two to II', quote: null }))
   })
 
+  it("shows the Arena's broadcasts above the workbench, and dismisses one through code-arena", async () => {
+    const { calls } = backend({
+      extra: {
+        'GET /api/broadcasts': () => ({ json: [{ id: 'b1', title: 'Arena restarts at 22:00', body: null, level: 'warning', createdAt: '2026-11-10T10:00:00Z', until: null, dismissable: true }] }),
+        'POST /api/broadcasts/b1/dismiss': () => ({ status: 204 }),
+      },
+    })
+    renderCode()
+    const banner = await screen.findByRole('region', { name: 'Messages from the admins' })
+    expect(banner).toHaveTextContent('Arena restarts at 22:00')
+    await userEvent.click(within(banner).getByRole('button', { name: 'Dismiss: Arena restarts at 22:00' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/broadcasts/b1/dismiss')).toBe(true))
+  })
+
   it('rates an answer as the web chat does: down with a reason, kept by Arena through Code Arena, and taken back', async () => {
     const { calls } = backend({
       session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },

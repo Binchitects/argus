@@ -1379,7 +1379,24 @@ sent it and the page it came from (`Code Arena: …` from Code Arena). New
 ones come to the admins' bell. Mark each read or done, or answer it: the
 answer goes to the person's bell, and their **Your feedback** shows it.
 Sending is audited (`feedback.sent`), and so is handling it
-(`feedback.handled`); a person sends at most twenty a day.
+(`feedback.handled`); a person sends at most twenty a day. Up to three
+screenshots go with one (a picture picked or pasted, or one of the screen
+taken from the dialog), each a PNG, JPEG, GIF or WebP of at most 2 MB, read by
+its own bytes; they show small under it and open full size. Code Arena has
+**Send Feedback…** in its gear menu and its command palette too, and thumbs up
+and down on its answers, which **Quality** counts with the web chat's.
+
+### Broadcasts
+
+**Broadcasts** (Oversight, with `broadcasts.send`) sends a message to everyone,
+or to the members of some groups: a title, words if wanted, and how loud it is
+(info, warning or critical). It rings each one's bell (and their phone, where
+they turned that on), shows above every page of the Arena and in Code Arena
+(above the workbench, and under the terminal's banner) until they dismiss it,
+it ends by itself (when it was given an end), or it is ended here. A critical
+one cannot be dismissed while it lasts. The list says how many it reached and
+how many dismissed it. Sending and ending are audited (`broadcast.sent`,
+`broadcast.ended`).
 
 ### Prompt log
 
