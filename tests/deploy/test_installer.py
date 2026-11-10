@@ -56,7 +56,7 @@ DEFAULT_FEATURES = "chat-models,knowledge,code-intel,monitoring,meetings"
 COMPOSE_NEW = COMPOSE_NEW.replace("volumes:\n  postgres:\n  engine:\n", "volumes:\n" + "".join(
     f'  {v}:\n    driver_opts: {{ type: none, o: bind, device: "${{DATA_DIR:?set DATA_DIR}}/{v}" }}\n' for v in ("postgres", "engine")), 1)
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
-ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD.replace("ARGUS_KEY=", "CODE_INTEL_KEY=") + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
+ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD.replace("ARGUS_KEY=", "CODE_INTEL_KEY=\nCODE_INTEL_HOST=code-intel") + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
 OLD_ENV = ("DOMAIN=old.example\nADMIN_EMAIL=me@old.example\nMODELS_DIR=./models\nMODEL=lib/model.gguf\nADMIN_PASSWORD=old-admin-pass\n"
            "APP_KEY=old-app-key\nDB_PASSWORD=old-db\nGATEWAY_KEY=sk-old\nENGINE_KEY=old-engine\nARGUS_KEY=old-argus\nOLD_THING=1\n")
 
@@ -107,8 +107,11 @@ class Release:
         git(self.repo, "commit", "-q", "-m", "9.9.9")
         self.state = s.dir / "engine.json"
         # The third-party images, and the release's own as compose built them (latest).
-        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-code-intel:latest", "arena-laya:latest"]
+        # As compose built them; the 5.2.0 installation runs arena-argus (its service was named after a brand then).
+        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-code-intel:latest", "arena-argus:latest", "arena-laya:latest"]
         self.state.write_text(json.dumps({"images": {r: f"{i:064x}" for i, r in enumerate(refs, start=1)}}))
+        # 5.2.0's compose file names the code-intelligence service argus: the fake runs it under either name.
+        services = services + "argus\n" if "code-intel\n" in services else services
         s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": services,
                  "FAKE_COMPOSE_VOLUMES": "postgres\nengine\ncode-intel\n", "FAKE_WAITS_FOR": f"embed={EMBED}"}
         if embed_model:
@@ -763,11 +766,11 @@ class InstallerTests(unittest.TestCase):
     def test_An_upgrade_does_not_wait_for_a_service_that_was_down_before_it(self):
         self.old_install(version_file=True)
         store = self.r.store()
-        next(c for c in store["containers"] if c["service"] == "code-intel")["state"] = "restarting"
+        next(c for c in store["containers"] if c["service"] == "argus")["state"] = "restarting"
         self.r.state.write_text(json.dumps(store))
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_DOWN": "code-intel"})
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("not up before the upgrade: code-intel", r.stdout)
+        self.assertRegex(r.stdout, r"not up before the upgrade: (\S+ )*argus ")
         self.assertIn("not up, as before the upgrade: code-intel: restarting", r.stdout)
         # Down after the upgrade but up before: that fails it.
         shutil.rmtree(self.dir)
@@ -1004,7 +1007,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
         self.assertIn("would  stop it but postgres, back up the data as it is, put back 5.2.0's images", out)
-        self.assertIn("would  take out what the upgrade added: config/added.yml config/edited.yml.new-9.9.9", out)
+        self.assertIn("would  take out what the upgrade added: branding.env config/added.yml config/edited.yml.new-9.9.9", out)
         self.assertIn("would  put back as 5.2.0 had them: .env.example config/dropped.yml docker-compose.yml", out)
         self.assertIn("would  put back .env as 5.2.0 had it (it is as the upgrade left it: only the keys it added go)", out)
         self.assertIn("the certificates, the override and your other files stay as they are", out)
@@ -1098,9 +1101,9 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
         self.assertIn("the upgrade changed these, and they were changed here since: .env.example", out)
-        self.assertIn("would  take out of .env the keys the upgrade added: COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", out)
+        self.assertIn("would  take out of .env the keys the upgrade added: CODE_INTEL_HOST CODE_INTEL_KEY COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", out)
         self.assertIn(".env: changed since the upgrade, and the data goes back to a backup taken with 5.2.0's: DB_PASSWORD", out)
-        self.assertIn("would  put back 5.2.0's values in .env: DB_PASSWORD", out)
+        self.assertIn("would  put back 5.2.0's values in .env: ARGUS_KEY DB_PASSWORD", out)
         self.assertIn(".env: left as they are now: DOMAIN MY_SETTING", out)
         self.assertEqual((deploy / ".env").read_text(), env)
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
@@ -1117,7 +1120,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((snap / "files-before-rollback" / ".env").read_text(), env)
         self.assertEqual((deploy / ".env.example").read_text(), ENV_EXAMPLE_OLD)
         self.assertEqual((snap / "files-before-rollback" / ".env.example").read_text(), ENV_EXAMPLE_NEW + "# mine\n")
-        self.assertIn(".env: 5.2.0's values put back: DB_PASSWORD", r.stdout)
+        self.assertIn(".env: 5.2.0's values put back: ARGUS_KEY DB_PASSWORD", r.stdout)
         # Names only: no value of .env is printed or logged.
         for secret in ("rotated-db", "old-db", "old-app-key"):
             self.assertNotIn(secret, self.output(r) + self.logs())
@@ -1177,7 +1180,7 @@ class InstallerTests(unittest.TestCase):
         (deploy / ".env").write_text(env)
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn(".env: took out the keys the upgrade added: COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", r.stdout)
+        self.assertIn(".env: took out the keys the upgrade added: CODE_INTEL_HOST CODE_INTEL_KEY COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", r.stdout)
         values = dict(line.split("=", 1) for line in (deploy / ".env").read_text().splitlines() if "=" in line and not line.startswith("#"))
         self.assertEqual(values["DOMAIN"], "new.example")
         self.assertFalse({"NEW_KEY", "NEW_SETTING", "DATA_DIR", "COMPOSE_PROFILES"} & set(values), values)
@@ -1596,7 +1599,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn(gone, images)
         for kept in ("traefik:v3.6.7", "python:3.13-slim"):
             self.assertIn(kept, images)
-        self.assertIn("kept traefik:v3.6.7: on this host before Arena was installed", r.stdout)
+        self.assertIn("kept traefik:v3.6.7: on this host before Farzan Arena was installed", r.stdout)
         self.assertIn("arena_postgres", self.r.store()["volumes"])
         self.assertNotIn(anon, self.r.store()["volumes"])
         self.assertIn(other, self.r.store()["volumes"])
@@ -1722,9 +1725,9 @@ class InstallerTests(unittest.TestCase):
         for c in asks:
             self.assertEqual(c[c.index("--pull") + 1], "never")
             # The admin token goes in the environment (-e ASK_TOKEN), never on a command line.
-            self.assertNotIn("old-code-intel", " ".join(c))
+            self.assertNotIn("old-argus", " ".join(c))
         self.assertIn("ASK_TOKEN", [c for c in asks if c[-1].endswith("/admin/metrics")][0])
-        self.assertTrue((deploy / ".env").read_text().startswith(OLD_ENV))
+        self.assertTrue((deploy / ".env").read_text().startswith(OLD_ENV.replace("ARGUS_KEY=", "CODE_INTEL_KEY=")))
 
     # ------------------------------------------- the backup and the rollback
 

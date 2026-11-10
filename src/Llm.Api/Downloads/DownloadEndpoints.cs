@@ -1,3 +1,4 @@
+using System.Text;
 using Llm.Api.Access;
 namespace Llm.Api.Downloads;
 
@@ -54,6 +55,22 @@ public static class DownloadEndpoints
             ? Results.File(Path.Combine(SignatureRoot(config), "SHA256SUMS.sig"), "application/octet-stream") : Results.NotFound(new { error = "The builds are not signed." }));
         g.MapGet("/code-signing.crt", (IConfiguration config) => Signature(config) is not null
             ? Results.File(Path.Combine(SignatureRoot(config), "code-signing.crt"), "application/x-pem-file") : Results.NotFound(new { error = "The builds are not signed." }));
+        // A file to download and open, per system: it installs Code Arena from this Arena as an application (Settings >
+        // Apps on Windows, Applications on macOS, the menus on Linux), its address in it, and this Arena's CA when the site's
+        // certificate is its own (trusted for this Arena alone).
+        g.MapGet("/setup/{system}", async (string system, SiteCertificate site, Microsoft.Extensions.Options.IOptions<Identity.AuthOptions> auth, CancellationToken ct) =>
+        {
+            var arena = $"https://{auth.Value.Domain}";
+            var cert = await site.GetAsync(ct);
+            var ca = cert is { Trusted: false, Pem: { Length: > 0 } pem } ? pem : null;
+            return system switch
+            {
+                "windows" => Results.File(Encoding.UTF8.GetBytes(SetupCmd(arena, ca).ReplaceLineEndings("\r\n")), "application/octet-stream", "Install Code Arena.cmd"),
+                "macos" => Results.File(Encoding.UTF8.GetBytes(SetupSh(arena, ca, keepOpen: true)), "application/octet-stream", "Install Code Arena.command"),
+                "linux" => Results.File(Encoding.UTF8.GetBytes(SetupSh(arena, ca, keepOpen: false)), "application/octet-stream", "install-code-arena.sh"),
+                _ => Results.NotFound(new { error = "No setup for that system: windows, macos or linux." }),
+            };
+        });
         g.MapGet("/{rid}", Download);
         // On Windows, the IDE's launcher beside the program: a GUI program that starts it with no console window.
         g.MapGet("/{rid}/ide", (string rid, IConfiguration config) => Builds(config).FirstOrDefault(b => b.Rid == rid)?.Ide is { } ide
@@ -238,6 +255,7 @@ public static class DownloadEndpoints
             {{(isSigned ? SignedSh(signingRoot) : UnsignedSh)}}chmod 755 "$tmp"
             mv -f "$tmp" "$dir/code-arena"
             echo "Code Arena $version is in $dir/code-arena."
+            {{AppEntrySh}}
             case ":$PATH:" in *":$dir:"*) ;; *) echo "Add $dir to your PATH (e.g. in ~/.profile): export PATH=\"$dir:\$PATH\"" ;; esac
             echo "Next, sign in: code-arena login --url $arena${CODE_ARENA_CA:+ --ca $CODE_ARENA_CA}"
             echo "Then, in a project: code-arena (it checks this Arena for newer versions; code-arena update installs one)."
@@ -287,6 +305,118 @@ public static class DownloadEndpoints
         if ($auth.Status -eq 'Valid') { Write-Host "Windows names its publisher: $($auth.SignerCertificate.GetNameInfo('SimpleName', $false))." }
         else { Write-Host "Windows does not take its Authenticode signature ($($auth.Status): $($auth.StatusMessage)): it runs, with no publisher named." }
 
+        """;
+
+    /// <summary>
+    /// install.sh's registration of Code Arena as an application (not with CODE_ARENA_NO_DESKTOP): on Linux a desktop entry
+    /// with its icon, in the menus and offered for folders ("Open with"); on macOS Code Arena.app in ~/Applications, for the
+    /// Dock, Launchpad and Spotlight. Each starts the IDE (code-arena -C FOLDER, the home folder by default); code-arena
+    /// uninstall takes them off (src/CodeArena/AppInstall.cs: the same names).
+    /// </summary>
+    private static string AppEntrySh => $$"""
+        if [ -z "${CODE_ARENA_NO_DESKTOP:-}" ]; then
+          if [ "$os" = linux ]; then
+            share="${XDG_DATA_HOME:-$HOME/.local/share}"
+            mkdir -p "$share/applications" "$share/icons/hicolor/512x512/apps"
+            curl "$@" -o "$share/icons/hicolor/512x512/apps/code-arena.png" "$arena/icons/icon-512.png" 2>/dev/null || true
+            cat > "$share/applications/code-arena.desktop" <<DESKTOP
+        [Desktop Entry]
+        Type=Application
+        Name=Code Arena
+        GenericName=Coding agent and IDE
+        Comment=An IDE in your browser around a coding agent, on {{Branding.Brand.Product}}
+        Exec="$dir/code-arena" -C %f
+        Icon=code-arena
+        Terminal=false
+        Categories=Development;IDE;
+        MimeType=inode/directory;
+        StartupWMClass=code-arena
+        DESKTOP
+            command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$share/applications" >/dev/null 2>&1
+            echo "Code Arena is in your applications menu, and offered to open folders."
+          elif [ "$os" = osx ]; then
+            app="$HOME/Applications/Code Arena.app"
+            rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+            printf '#!/bin/sh\nexec "%s" -C "${1:-$HOME}"\n' "$dir/code-arena" > "$app/Contents/MacOS/code-arena"
+            chmod 755 "$app/Contents/MacOS/code-arena"
+            if curl "$@" -o "$app/Contents/Resources/icon.png" "$arena/icons/icon-512.png" 2>/dev/null && command -v sips >/dev/null 2>&1; then
+              sips -s format icns "$app/Contents/Resources/icon.png" --out "$app/Contents/Resources/code-arena.icns" >/dev/null 2>&1
+              rm -f "$app/Contents/Resources/icon.png"
+            fi
+            cat > "$app/Contents/Info.plist" <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>Code Arena</string>
+          <key>CFBundleDisplayName</key><string>Code Arena</string>
+          <key>CFBundleIdentifier</key><string>dev.arena.code-arena</string>
+          <key>CFBundleExecutable</key><string>code-arena</string>
+          <key>CFBundleIconFile</key><string>code-arena</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>$version</string>
+          <key>LSMinimumSystemVersion</key><string>12.0</string>
+        </dict></plist>
+        PLIST
+            echo "Code Arena is in your Applications folder ($app): Launchpad, Spotlight and the Dock find it."
+          fi
+        fi
+        """;
+
+    /// <summary>
+    /// Windows' setup: a command file, opened with a double-click, that runs install.ps1 from this Arena in Windows
+    /// PowerShell (no administrator rights: everything is the person's own). With the Arena's CA (<paramref name="ca"/>, when
+    /// the site's certificate is its own), the downloads trust the site's certificate when that CA signed it, and only then.
+    /// </summary>
+    public static string SetupCmd(string arena, string? ca) => $$"""
+        @echo off
+        rem Code Arena from {{arena}}: installed for you (no administrator rights), checked against this Arena's signature.
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$s = Get-Content -Raw -LiteralPath '%~f0'; Invoke-Expression ($s.Substring($s.IndexOf('#' + 'POWERSHELL#') + 12))"
+        echo.
+        pause
+        exit /b
+        #POWERSHELL#
+        $ErrorActionPreference = 'Stop'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        {{(ca is null ? "" : $$"""
+        $global:ArenaCa = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Text.Encoding]::ASCII.GetBytes(@'
+        {{ca.Trim()}}
+        '@))
+        # This Arena's own CA: its site's certificate is taken when that CA signed it (whether or not Windows trusts the CA).
+        [Net.ServicePointManager]::ServerCertificateValidationCallback = {
+          param($sender, $certificate, $chain, $errors)
+          if ($errors -eq 'None') { return $true }
+          $c = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+          $c.ChainPolicy.ExtraStore.Add($global:ArenaCa) | Out-Null
+          $c.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::AllowUnknownCertificateAuthority
+          $c.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+          $c.Build([System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate)) -and $c.ChainElements[$c.ChainElements.Count - 1].Certificate.Thumbprint -eq $global:ArenaCa.Thumbprint
+        }
+        """)}}
+        Invoke-RestMethod -UseBasicParsing -Uri '{{arena}}/api/downloads/code-arena/install.ps1' | Invoke-Expression
+
+        """;
+
+    /// <summary>
+    /// macOS' setup (Install Code Arena.command, which Finder opens in Terminal) and Linux': a script that runs install.sh
+    /// from this Arena. With the Arena's CA, kept as the person's (code-arena login uses it too), curl trusts it for this Arena.
+    /// </summary>
+    public static string SetupSh(string arena, string? ca, bool keepOpen) => $$"""
+        #!/bin/sh
+        # Code Arena from {{arena}}: installed for you (in your home, no sudo), checked against this Arena's signature.
+        set -eu
+        arena="{{arena}}"
+        set --
+        {{(ca is null ? "" : $$"""
+        ca="${XDG_CONFIG_HOME:-$HOME/.config}/code-arena/arena-ca.pem"
+        mkdir -p "$(dirname "$ca")"
+        cat > "$ca" <<'ARENA_CA'
+        {{ca.Trim()}}
+        ARENA_CA
+        export CODE_ARENA_CA="$ca"
+        set -- --cacert "$ca"
+        """)}}
+        curl -fsSL "$@" "$arena/api/downloads/code-arena/install.sh" | sh
+        {{(keepOpen ? "printf 'Done. Press Return to close this window. '; read -r _\n" : "")}}
         """;
 
     private const string UnsignedSh = "echo \"Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.\"\n";
@@ -373,6 +503,28 @@ public static class DownloadEndpoints
                 }
                 Write-Host 'Code Arena is on your desktop and in the Start menu: they open the IDE with no console window.'
               }
+            }
+            # An application of this person's, as Windows lists them: in Settings > Apps (Programs and Features), its
+            # uninstaller code-arena.exe uninstall; "Open in Code Arena" on folders. code-arena uninstall takes them off
+            # (src/CodeArena/AppInstall.cs: the same keys).
+            if (-not $env:CODE_ARENA_NO_DESKTOP) {
+              $app = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeArena'
+              New-Item -Path $app -Force | Out-Null
+              $values = @{ DisplayName = 'Code Arena'; DisplayVersion = '{{AppInfo.Current.Version}}'; Publisher = '{{Branding.Brand.Product.Replace("'", "''")}}'
+                DisplayIcon = "$exe,0"; InstallLocation = $dir; UninstallString = "`"$exe`" uninstall"; URLInfoAbout = $arena }
+              foreach ($v in $values.GetEnumerator()) { Set-ItemProperty -Path $app -Name $v.Key -Value $v.Value }
+              Set-ItemProperty -Path $app -Name NoModify -Value 1 -Type DWord
+              Set-ItemProperty -Path $app -Name NoRepair -Value 1 -Type DWord
+              Set-ItemProperty -Path $app -Name EstimatedSize -Value ([int]((Get-Item $exe).Length / 1KB)) -Type DWord
+              $opener = if ($ideSum) { $ide } else { $exe }
+              foreach ($menu in 'Directory\shell\CodeArena', 'Directory\Background\shell\CodeArena') {
+                $key = "HKCU:\Software\Classes\$menu"
+                New-Item -Path "$key\command" -Force | Out-Null
+                Set-ItemProperty -Path $key -Name '(default)' -Value 'Open in Code Arena'
+                Set-ItemProperty -Path $key -Name Icon -Value "$exe,0"
+                Set-ItemProperty -Path "$key\command" -Name '(default)' -Value "`"$opener`" -C `"%V`""
+              }
+              Write-Host 'Code Arena is in Settings > Apps (to uninstall it there), and "Open in Code Arena" is on folders.'
             }
             $path = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (-not (($path -split ';') -contains $dir)) { [Environment]::SetEnvironmentVariable('Path', "$path;$dir", 'User'); Write-Host "Added $dir to your PATH (new terminals have it)." }

@@ -7,7 +7,7 @@ for itself what to check. Nothing tells it which APIs matter.
 Two arms, same model, same file, same temperature:
 
     closed book   the model alone
-    with tools    native function calling against a live Argus MCP server
+    with tools    native function calling against a live code-intel MCP server
 
 Findings are not graded automatically. A review is prose and any keyword
 scoring would reward the reviewer that name-drops the most APIs. Instead both
@@ -142,7 +142,7 @@ async def main() -> None:
     plain = chat([{"role": "user", "content": prompt}], None).get("content", "")
     print(plain.strip()[:4000])
 
-    print("\n=== ARM B: with Argus tools ===", flush=True)
+    print("\n=== ARM B: with code-intel tools ===", flush=True)
     grounded, calls = await grounded_review(url, token, prompt)
     print(grounded.strip()[:4000])
 

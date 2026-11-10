@@ -146,11 +146,11 @@ def main() -> None:
 
     questions: list[dict] = []
     for pack in ("win32", "wdk"):
-        p = packs_dir / f"{pack}.arguspack"
+        p = packs_dir / f"{pack}.kpack"
         if p.exists():
             questions += from_api_pack(p, pack, per_pack, rng)
     for pack, fn in (("cpp", from_cpp_pack), ("scripting", from_scripting_pack)):
-        p = packs_dir / f"{pack}.arguspack"
+        p = packs_dir / f"{pack}.kpack"
         if p.exists():
             questions += (fn(p, per_pack, rng) if pack == "cpp"
                           else fn(p, per_pack, rng))

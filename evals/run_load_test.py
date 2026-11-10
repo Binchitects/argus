@@ -127,7 +127,7 @@ async def main() -> None:
                     help="index.db path; when given, a writer runs throughout")
     args = ap.parse_args()
 
-    print(f"Argus load test -- {args.url}\n")
+    print(f"code-intel load test -- {args.url}\n")
     rows = []
     for clients in (1, 2, 4, 8, 16):
         result = await measure(args.url, args.token, clients, args.rounds, None)

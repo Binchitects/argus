@@ -40,6 +40,8 @@ internal sealed class Options
     /// <summary>The IDE: the port (null: a free one), and whether to leave the browser closed.</summary>
     public int? Port { get; set; }
     public bool NoOpen { get; set; }
+    /// <summary>uninstall --all: the sessions and settings too.</summary>
+    public bool All { get; set; }
     /// <summary>The IDE in a tab of the person's browser, not in a window of its own.</summary>
     public bool Browser { get; set; }
     /// <summary>The agent answers in the IDE's page (Markdown, links to files), not in this terminal.</summary>
@@ -136,6 +138,8 @@ internal static partial class Cli
           code-arena logout                 forget the API key
           code-arena models                 the models you may use
           code-arena update                 install the newer Code Arena your Arena serves, if any
+          code-arena uninstall              take Code Arena off this computer (its shortcuts and menus too); your
+                                            sessions and settings stay (--all takes them too)
           code-arena sandbox [command]      what the agent's commands may do here; with a command, run it as they run
           code-arena index [--rebuild]      build or refresh this folder's code index and say what it holds
           code-arena search "question"      find code by what it does or by name, from the index, with no model
@@ -144,6 +148,7 @@ internal static partial class Cli
           code-arena vm login VM            keep a VM's guest user and password in your keyring (vm forget VM drops it)
 
         Options:
+          -C, --folder DIR           run in this folder, as if started there (the IDE's "Open in Code Arena")
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
           -c, --continue             carry on with this folder's last session
               --plan                 a new session that carries on the plan an earlier one left in progress here
@@ -220,6 +225,8 @@ internal static partial class Cli
                 return await ModelsAsync(o, env, MakeUi(env, o, quiet: false), ct);
             case "update":
                 return await UpdateAsync(o, env, MakeUi(env, o, quiet: false), ct);
+            case "uninstall":
+                return AppInstall.Uninstall(env, MakeUi(env, o, quiet: false), o.All);
             case "web":
                 return await WebAsync(o, env, ct);
             case "chat":
@@ -251,6 +258,40 @@ internal static partial class Cli
         }
     }
 
+    /// <summary>
+    /// -C DIR or --folder DIR (anywhere before --): the folder to run in (<paramref name="folder"/>, its full path, which the
+    /// program then makes its current one), taken out of the arguments. Why not, when the folder is not there; null when
+    /// it is there, or not asked (folder null).
+    /// </summary>
+    public static string? TakeFolder(string[] args, out string[] rest, out string? folder)
+    {
+        rest = args;
+        folder = null;
+        var end = Array.IndexOf(args, "--");
+        for (var i = 0; i < (end < 0 ? args.Length : end); i++)
+        {
+            if (args[i] is not ("-C" or "--folder"))
+            {
+                continue;
+            }
+            if (i + 1 >= args.Length || (end >= 0 && i + 1 >= end))
+            {
+                // Nothing after it (a desktop entry's -C %f started with no folder): where it is.
+                rest = [.. args[..i], .. args[(i + 1)..]];
+                return null;
+            }
+            var full = Path.GetFullPath(args[i + 1]);
+            if (!Directory.Exists(full))
+            {
+                return $"no folder {full}";
+            }
+            folder = full;
+            rest = [.. args[..i], .. args[(i + 2)..]];
+            return null;
+        }
+        return null;
+    }
+
     public static Options Parse(string[] args)
     {
         var o = new Options();
@@ -260,7 +301,7 @@ internal static partial class Cli
             var a = args[i];
             string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value.");
             bool NextIsValue() => i + 1 < args.Length && !args[i + 1].StartsWith('-');
-            if (i == 0 && a is "login" or "logout" or "models" or "update" or "web" or "chat" or "help" or "version")
+            if (i == 0 && a is "login" or "logout" or "models" or "update" or "uninstall" or "web" or "chat" or "help" or "version")
             {
                 o.Command = a;
                 continue;
@@ -332,6 +373,9 @@ internal static partial class Cli
                     break;
                 case "--gateway":
                     o.Gateway = Value();
+                    break;
+                case "--all":
+                    o.All = true;
                     break;
                 case "--no-color":
                     o.NoColor = true;

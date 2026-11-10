@@ -9,6 +9,18 @@ if (args is [PtyHelper.Flag, ..])
     return PtyHelper.Run(args[1..]);
 }
 
+// -C DIR (--folder DIR): this folder, as if started in it: "Open in Code Arena" on a folder, a shortcut to a project.
+if (Cli.TakeFolder(args, out var rest, out var folder) is { } folderProblem)
+{
+    Console.Error.WriteLine($"code-arena: {folderProblem}");
+    return 2;
+}
+if (folder is not null)
+{
+    Directory.SetCurrentDirectory(folder);
+}
+args = rest;
+
 // The IDE started on its own on Windows (a double-click): it starts itself again with a console that has no window, and
 // this one ends at once (DesktopStart). From a terminal, and for every other command, nothing changes.
 var ide = Cli.Ide(args, WebAssets.Embedded().Built);

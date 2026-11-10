@@ -72,3 +72,6 @@ tools/offline-nuget/*.nupkg
 
 # evals: downloaded test sets
 evals/.cache/
+
+# A test runner started in src/ leaves its cache here.
+/src/node_modules/

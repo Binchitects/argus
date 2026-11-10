@@ -442,10 +442,10 @@ class Scanners:
         subprocess.run(["docker", "network", "rm", self.network], capture_output=True)
 
 
-# ---- The security pack, from Argus, as the app reaches it (its key, on the stack's network); the key never on a command line.
+# ---- The security pack, from code-intel, as the app reaches it (its key, on the stack's network); the key never on a command line.
 PACK_CLIENT = r"""
 import json, os, sys, urllib.request
-base = "http://argus:7700/mcp"
+base = "http://code-intel:7700/mcp"
 H = {"x-llm-user-email": os.environ["EMAIL"], "Authorization": "Bearer " + os.environ["KEY"], "Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 session = None
 def post(body):
@@ -879,7 +879,7 @@ def main() -> int:
             code, config = admin.app("GET", "/api/chat/config")
             model_name = a.model or config["model"]
             model = Model(ft.u("gateway", "/v1/chat/completions"), person["apiKey"], model_name)
-            pack = Pack(ft.env("ARGUS_KEY"), ft.env("ADMIN_EMAIL"))
+            pack = Pack(ft.env("CODE_INTEL_KEY"), ft.env("ADMIN_EMAIL"))
             results["model"] = model_name
             started = time.time()
             for arm in model_arms:

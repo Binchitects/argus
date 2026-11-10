@@ -3,7 +3,7 @@
     direct   every tool's definition, one call at a time (Admin -> Models -> Tools: Direct)
     code     run_code, the tools named as Python functions for a program (As code)
 
-Runs through Arena's own chat, as a throwaway person with Argus's documentation
+Runs through Arena's own chat, as a throwaway person with code-intel's documentation
 tools and Tools as code, so what is measured is what people get: the system
 prompt, the tool notes, the sandbox. For each model and mode, each task in a
 new chat; recorded: pass or fail, the model's tokens (prompt, cached,
@@ -18,7 +18,7 @@ Two families of tasks:
   import libraries): six lookups, where a program should pay.
 
 **The answer key comes from the packs, before any model runs** (evals/README.md):
-each expected token is looked up with the same Argus tools the model gets, and a
+each expected token is looked up with the same code-intel tools the model gets, and a
 task whose token the packs do not say is dropped and reported, never graded.
 Grading is substring matching on facts; in a "many" task each symbol's own line
 must carry its fact.
@@ -205,7 +205,7 @@ def grade(task: dict, answer: str) -> tuple[str, list[str]]:
 
 def ask(arena: Arena, person, model: str, prompt: str) -> dict:
     """One task in a new chat of the person's: the answer's text after its last tool result, and what it took."""
-    chat = person.json("POST", "/api/chat/conversations", {"model": model, "tools": ["argus", "code"], "useArgus": True})
+    chat = person.json("POST", "/api/chat/conversations", {"model": model, "tools": ["code-intel", "code"], "useCodeIntel": True})
     started = time.monotonic()
     status, text, _ = person.call("POST", f"/api/chat/conversations/{chat['id']}/messages", {"content": prompt}, timeout=TIMEOUT)
     seconds = round(time.monotonic() - started, 1)

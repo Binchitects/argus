@@ -689,6 +689,16 @@ public sealed class Harness : IDisposable
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);
 
+    /// <summary>code-arena with these arguments, as if this were the program at <paramref name="exe"/>.</summary>
+    public async Task<int> RunAs(string exe, params string[] args)
+    {
+        var (output, error) = (new StringWriter(), new StringWriter());
+        var env = new CliEnv { In = new StringReader(""), Out = output, Err = error, Env = k => Env.GetValueOrDefault(k), Cwd = Cwd ?? Work, Paths = Paths, Exe = exe };
+        var code = await Cli.RunAsync(args, env);
+        (Out, Err) = (output.ToString(), error.ToString());
+        return code;
+    }
+
     /// <summary>code-arena update, as if this were the program it replaces.</summary>
     public async Task<int> RunUpdate(string exe)
     {

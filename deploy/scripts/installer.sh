@@ -561,14 +561,19 @@ carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their ne
     [[ -n "$(env_line "$env" "$old")" ]] || continue
     val="$(env_get "$old")"
     if [[ $1 == plan ]]; then would ".env: $old as $new$([[ -n "$(env_line "$env" "$new")" ]] && echo " ($new is there: kept, $old taken out)")"; continue; fi
-    # On its own line: .env keeps the order its owner gave it.
+    # On its own line: .env keeps the order its owner gave it. Recorded for the rollback (+ made, - taken out).
     if [[ -n "$(env_line "$env" "$new")" ]]; then env_edit "$env" "$old" || die "writing $env failed"
-    else env_edit "$env" "$old" "$new=$val" || die "writing $env failed"; fi
+    else env_edit "$env" "$old" "$new=$val" || die "writing $env failed"; [[ -n "$SNAP" ]] && echo "+$new" >> "$SNAP/env-carried"; fi
+    [[ -n "$SNAP" ]] && echo "-$old" >> "$SNAP/env-carried"
     did ".env: $old is $new now"
   done
   if [[ -z "$(env_line "$env" CODE_INTEL_HOST)" ]]; then
     if [[ $1 == plan ]]; then would ".env: CODE_INTEL_HOST=argus (the code-intelligence service's address stays argus.$DOMAIN)"
-    else env_edit "$env" CODE_INTEL_HOST "CODE_INTEL_HOST=argus" || die "writing $env failed"; did ".env: CODE_INTEL_HOST=argus: its address stays argus.$DOMAIN"; fi
+    else
+      env_edit "$env" CODE_INTEL_HOST "CODE_INTEL_HOST=argus" || die "writing $env failed"
+      [[ -n "$SNAP" ]] && echo "+CODE_INTEL_HOST" >> "$SNAP/env-carried"
+      did ".env: CODE_INTEL_HOST=argus: its address stays argus.$DOMAIN"
+    fi
   fi
   return 0
 }
@@ -1727,6 +1732,12 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
   local -a add=()
   local -A have=() known=() req=()
   while IFS= read -r key; do have["$key"]=1; done < <(env_keys "$env")
+  # From before 8.0: carry_env renames these (and sets CODE_INTEL_HOST to argus): not new, nor unread.
+  local -A carried=()
+  if from_old_names; then
+    for key in ARGUS_KEY ARGUS_PACK_LIBRARY_DIR; do [[ -n "${have[$key]:-}" ]] && { have["CODE_INTEL_${key#ARGUS_}"]=1; carried["$key"]=1; }; done
+    have[CODE_INTEL_HOST]=1
+  fi
   while IFS= read -r key; do req["$key"]=1; done < <(required_keys "$BUNDLE/deploy")
   while IFS=$'\t' read -r key def; do
     [[ -n "$key" && -z "${have[$key]:-}" ]] || continue
@@ -1769,7 +1780,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
   while IFS=$'\t' read -r key def; do known["$key"]=1; done < <(example_keys "$example")
   while IFS= read -r key; do known["$key"]=1; done < <(compose_keys "$BUNDLE/deploy")
   while IFS= read -r key; do
-    [[ -n "${known[$key]:-}" || "$key" == COMPOSE_* || "$key" == BACKUP_* ]] && continue
+    [[ -n "${known[$key]:-}" || -n "${carried[$key]:-}" || "$key" == COMPOSE_* || "$key" == BACKUP_* ]] && continue
     unused+=("$key")
   done < <(env_keys "$env" | sort -u)
   [[ ${#unused[@]} -gt 0 ]] && note ".env: not read by $BVERSION, kept: ${unused[*]}"
@@ -2335,6 +2346,9 @@ wait_healthy() {
   deadline=$(( $(date +%s) + secs ))
   services="$(dc config --services 2>/dev/null | sort -u)"
   models=" $(model_waits | tr '\n' ' ') "
+  # Those down before, under the names of both releases (argus before 8.0 is code-intel).
+  local e excused_any=" $EXCUSED "
+  for e in $EXCUSED; do excused_any+="$(feature_now_named "$e") "; done
   step "waiting for every service to be up and healthy (up to $(( secs / 60 )) min $(( secs % 60 )) s)"
   while :; do
     local -A STATEOF=()
@@ -2349,7 +2363,7 @@ wait_healthy() {
       m=$((m + 1))
       if [[ "$models" == *" $svc "* && ( "${STATEOF[$svc]:-}" == ok || "${STATEOF[$svc]:-}" == running* ) ]]; then for_model+=("$svc")
       elif [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1))
-      elif [[ " $EXCUSED " == *" $svc "* ]]; then excused+=("$svc: ${STATEOF[$svc]:-no container}")
+      elif [[ "$excused_any" == *" $svc "* ]]; then excused+=("$svc: ${STATEOF[$svc]:-no container}")
       else waiting+=("$svc: ${STATEOF[$svc]:-no container}"); fi
     done
     if [[ ${#waiting[@]} -eq 0 ]]; then
@@ -2986,6 +3000,10 @@ plan_restore() {
     while IFS= read -r key; do [[ -n "$key" ]] && added["$key"]=1; done < <(cat "$SNAP/env-added" 2>/dev/null)
     # The keys the upgrade changed (the features), with the value it gave them.
     while IFS=$'\t' read -r key v; do [[ -n "$key" ]] && set_by["$key"]="$v"; done < <(cat "$SNAP/env-changed" 2>/dev/null)
+    # The names it carried from before 8.0: the new ones go, the old ones come back with FROM's values.
+    while IFS= read -r key; do
+      case "$key" in +?*) added["${key#+}"]=1 ;; -?*) set_by["${key#-}"]="" ;; esac
+    done < <(cat "$SNAP/env-carried" 2>/dev/null)
     while IFS= read -r key; do
       [[ -n "$key" ]] || continue
       if [[ -n "${added[$key]:-}" ]]; then
@@ -3276,7 +3294,8 @@ cmd_upgrade() {
   # a feature new in this release asked about (unattended: off, and named).
   local svc active id
   local -a base=() was=() new=()
-  active=" $(dc config --services 2>/dev/null | tr '\n' ' ') "
+  # The services as this release names them (argus before 8.0 is code-intel).
+  active=" $(dc config --services 2>/dev/null | while read -r svc; do feature_now_named "$svc"; done | tr '\n' ' ') "
   if [[ -f "$DEPLOY/features" && -n "$(env_line "$DEPLOY/.env" COMPOSE_PROFILES)" ]]; then
     mapfile -t was < <(sed -n -E 's/^[[:space:]]*([a-z0-9][a-z0-9-]*)[[:space:]]*\|.*/\1/p' "$DEPLOY/features")
     read_features "$BUNDLE/deploy/features"
@@ -3357,7 +3376,7 @@ cmd_upgrade() {
     else ok "$(human $(( ${free:-0} * 1024 ))) free in $BACKUP_DIR, for volumes of $(human $((need * 1024)))"; fi
     step "a rollback point"
     mkdir -p "$SNAP" && chmod 700 "$STATE/rollback" "$SNAP" || die "cannot write $SNAP"
-    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/env-changed" "$SNAP/env-sha" "$SNAP/reapply" "$SNAP/kept" "$SNAP/beside" "$SNAP/info"
+    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/env-changed" "$SNAP/env-carried" "$SNAP/env-sha" "$SNAP/reapply" "$SNAP/kept" "$SNAP/beside" "$SNAP/info"
     (umask 077; cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT") || die "cannot write $BACKUP_SCRIPT"
     keep_old_images
     snapshot_deploy
@@ -3712,6 +3731,8 @@ images_to_remove() {
     dc config --images 2>/dev/null
     cut -f1 "$STATE/IMAGES" 2>/dev/null
     cut -f3 "$STATE"/rollback/*/IMAGES 2>/dev/null
+    # The release before an upgrade's own names too (an image of a service it renamed or dropped, kept for the rollback).
+    cut -f1 "$STATE"/rollback/*/IMAGES 2>/dev/null
   } | sed '/^$/d' | sort -u | while IFS= read -r ref; do
     id="$(image_id "$ref")"; [[ -n "$id" ]] || continue
     if [[ "$(state_image_pre "$ref")" == 1 ]]; then printf 'keep\t%s\t%s\n' "$ref" "on this host before $PRODUCT was installed"; continue; fi

@@ -92,6 +92,9 @@ public sealed class DownloadTests(AppFixture app)
                 await File.WriteAllTextAsync(file, script.Replace($"https://{AppFixture.Domain}", "file://" + Path.Combine(dir, "served"), StringComparison.Ordinal));
                 var start = new System.Diagnostics.ProcessStartInfo("sh", file) { RedirectStandardOutput = true, RedirectStandardError = true };
                 start.Environment["CODE_ARENA_DIR"] = Path.Combine(dir, "bin");
+                // A home of its own: the desktop entry goes there, never into the home of whoever runs the tests.
+                start.Environment["HOME"] = Path.Combine(dir, "home");
+                start.Environment["XDG_DATA_HOME"] = Path.Combine(dir, "home", "share");
                 using var run = System.Diagnostics.Process.Start(start)!;
                 var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
                 await run.WaitForExitAsync();
@@ -184,8 +187,13 @@ public sealed class DownloadTests(AppFixture app)
             // install.ps1 as Windows runs it, the downloads and the shortcuts' COM object answered from here.
             var fetched = Path.Combine(dir, "fetched.txt");
             var links = Path.Combine(dir, "links.txt");
+            var registry = Path.Combine(dir, "registry.txt");
             var mocked = $$"""
                 function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing) Add-Content -Path '{{fetched}}' -Value $Uri; Set-Content -Path $OutFile -Value 'MZ' -NoNewline }
+                function New-Item { param([string]$Path, [switch]$Force, [string]$ItemType)
+                  if ($Path -like 'HKCU:*') { Add-Content -Path '{{registry}}' -Value "key $Path"; return }
+                  Microsoft.PowerShell.Management\New-Item @PSBoundParameters }
+                function Set-ItemProperty { param([string]$Path, [string]$Name, $Value, [string]$Type) Add-Content -Path '{{registry}}' -Value "$Path|$Name|$Value" }
                 function New-Object { param([string]$ComObject)
                   $shell = [pscustomobject]@{}
                   $shell | Add-Member ScriptMethod CreateShortcut { param($path)
@@ -214,6 +222,18 @@ public sealed class DownloadTests(AppFixture app)
             Assert.NotEmpty(made);
             Assert.All(made, l => Assert.EndsWith($"Code Arena.lnk|{Path.Combine(installed, "code-arena-ide.exe")}|{Path.Combine(installed, "code-arena.exe")},0", l));
             Assert.Contains("open the IDE with no console window", said, StringComparison.Ordinal);
+            // An application as Windows lists them: its uninstaller, and "Open in Code Arena" on folders, through the IDE's launcher.
+            var keys = await File.ReadAllLinesAsync(registry);
+            var exe = Path.Combine(installed, "code-arena.exe");
+            Assert.Contains(@"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeArena|DisplayName|Code Arena", keys);
+            Assert.Contains($@"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeArena|UninstallString|""{exe}"" uninstall", keys);
+            Assert.Contains($@"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeArena|Publisher|{Branding.Brand.Product}", keys);
+            foreach (var menu in new[] { @"Directory\shell\CodeArena", @"Directory\Background\shell\CodeArena" })
+            {
+                Assert.Contains($@"HKCU:\Software\Classes\{menu}|(default)|Open in Code Arena", keys);
+                Assert.Contains($@"HKCU:\Software\Classes\{menu}\command|(default)|""{Path.Combine(installed, "code-arena-ide.exe")}"" -C ""%V""", keys);
+            }
+            Assert.Contains("Settings > Apps", said, StringComparison.Ordinal);
         }
         finally
         {
@@ -310,6 +330,9 @@ public sealed class DownloadTests(AppFixture app)
                     await File.WriteAllTextAsync(file, sh.Replace($"https://{AppFixture.Domain}", "file://" + Path.Combine(dir, "served"), StringComparison.Ordinal));
                     var start = new System.Diagnostics.ProcessStartInfo("sh", file) { RedirectStandardOutput = true, RedirectStandardError = true };
                     start.Environment["CODE_ARENA_DIR"] = Path.Combine(dir, "bin");
+                    // A home of its own: the desktop entry goes there, never into the home of whoever runs the tests.
+                    start.Environment["HOME"] = Path.Combine(dir, "home");
+                    start.Environment["XDG_DATA_HOME"] = Path.Combine(dir, "home", "share");
                     if (trusted is not null)
                     {
                         await File.WriteAllTextAsync(Path.Combine(dir, "trusted.crt"), trusted.ExportCertificatePem() + "\n");
@@ -326,6 +349,12 @@ public sealed class DownloadTests(AppFixture app)
                     var (code, output) = await RunAsync(trusted);
                     Assert.True(code == 0, output);
                     Assert.Contains("Signed by", output, StringComparison.Ordinal);
+                    // In the menus as an application, offered for folders, starting the IDE in the folder given.
+                    var entry = await File.ReadAllTextAsync(Path.Combine(dir, "home", "share", "applications", "code-arena.desktop"));
+                    Assert.Contains($"Exec=\"{Path.Combine(dir, "bin", "code-arena")}\" -C %f", entry, StringComparison.Ordinal);
+                    Assert.Contains("MimeType=inode/directory;", entry, StringComparison.Ordinal);
+                    Assert.Contains($"Comment=An IDE in your browser around a coding agent, on {Branding.Brand.Product}", entry, StringComparison.Ordinal);
+                    Assert.Contains("in your applications menu", output, StringComparison.Ordinal);
                     Assert.True(File.Exists(Path.Combine(dir, "bin", "code-arena")));
                     Assert.Equal(ca.ExportCertificatePem().Trim(), (await File.ReadAllTextAsync(Path.Combine(dir, "bin", "code-arena-signing-ca.pem"))).Trim());
                     Directory.Delete(Path.Combine(dir, "bin"), true);
@@ -351,6 +380,7 @@ public sealed class DownloadTests(AppFixture app)
                         function Get-AuthenticodeSignature { param($FilePath) [pscustomobject]@{ Status = 'NotSigned'; StatusMessage = 'not on Linux'; SignerCertificate = $null } }
                         $env:LOCALAPPDATA = '{{dir}}'
                         $env:CODE_ARENA_NO_SHORTCUTS = '1'
+                        $env:CODE_ARENA_NO_DESKTOP = '1'
                         """ + ps1;
                     await File.WriteAllTextAsync(Path.Combine(dir, "install.ps1"), mocked);
                     var start = new System.Diagnostics.ProcessStartInfo("pwsh", ["-NoProfile", "-NonInteractive", "-File", Path.Combine(dir, "install.ps1")]) { RedirectStandardOutput = true, RedirectStandardError = true };
@@ -388,6 +418,54 @@ public sealed class DownloadTests(AppFixture app)
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    [Fact]
+    public async Task Each_system_has_a_setup_to_download_and_open_that_installs_from_this_Arena()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("setup_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>());
+        using var http = f.CreateClient();
+        var arena = $"https://{AppFixture.Domain}";
+        var windows = await http.GetAsync("/api/downloads/code-arena/setup/windows");
+        await StatusAssert.Is(HttpStatusCode.OK, windows);
+        Assert.Equal("Install Code Arena.cmd", windows.Content.Headers.ContentDisposition?.FileNameStar ?? windows.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+        var cmd = await windows.Content.ReadAsStringAsync();
+        // A command file: Windows' line ends, and install.ps1 of this Arena run in Windows PowerShell.
+        Assert.Contains("\r\n", cmd, StringComparison.Ordinal);
+        Assert.StartsWith("@echo off", cmd, StringComparison.Ordinal);
+        Assert.Contains($"Invoke-RestMethod -UseBasicParsing -Uri '{arena}/api/downloads/code-arena/install.ps1' | Invoke-Expression", cmd, StringComparison.Ordinal);
+        foreach (var (system, file, keepOpen) in new[] { ("macos", "Install Code Arena.command", true), ("linux", "install-code-arena.sh", false) })
+        {
+            var r = await http.GetAsync($"/api/downloads/code-arena/setup/{system}");
+            await StatusAssert.Is(HttpStatusCode.OK, r);
+            Assert.Equal(file, r.Content.Headers.ContentDisposition?.FileNameStar ?? r.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+            var sh = await r.Content.ReadAsStringAsync();
+            Assert.StartsWith("#!/bin/sh", sh, StringComparison.Ordinal);
+            Assert.Contains($"curl -fsSL \"$@\" \"$arena/api/downloads/code-arena/install.sh\" | sh", sh, StringComparison.Ordinal);
+            Assert.Contains($"arena=\"{arena}\"", sh, StringComparison.Ordinal);
+            Assert.Equal(keepOpen, sh.Contains("Press Return to close", StringComparison.Ordinal));
+            if (File.Exists("/bin/sh"))
+            {
+                var file2 = Path.Combine(Path.GetTempPath(), $"setup-{Guid.NewGuid():N}.sh");
+                await File.WriteAllTextAsync(file2, sh);
+                using var check = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sh", ["-n", file2]) { RedirectStandardError = true })!;
+                var said = await check.StandardError.ReadToEndAsync();
+                await check.WaitForExitAsync();
+                File.Delete(file2);
+                Assert.True(check.ExitCode == 0, said);
+            }
+        }
+        await StatusAssert.Is(HttpStatusCode.NotFound, await http.GetAsync("/api/downloads/code-arena/setup/beos"));
+
+        // With the Arena's own CA, it is carried, and trusted for this Arena alone.
+        var (ca, _) = CodeSigning("site");
+        var pem = ca.ExportCertificatePem();
+        Assert.Contains(pem.Trim(), Llm.Api.Downloads.DownloadEndpoints.SetupCmd(arena, pem), StringComparison.Ordinal);
+        Assert.Contains("ServerCertificateValidationCallback", Llm.Api.Downloads.DownloadEndpoints.SetupCmd(arena, pem), StringComparison.Ordinal);
+        Assert.DoesNotContain("ServerCertificateValidationCallback", Llm.Api.Downloads.DownloadEndpoints.SetupCmd(arena, null), StringComparison.Ordinal);
+        var withCa = Llm.Api.Downloads.DownloadEndpoints.SetupSh(arena, pem, keepOpen: false);
+        Assert.Contains(pem.Trim(), withCa, StringComparison.Ordinal);
+        Assert.Contains("set -- --cacert \"$ca\"", withCa, StringComparison.Ordinal);
     }
 
     [Fact]
