@@ -785,6 +785,12 @@ verbose_json; browsers' preflights answered by the app. GatewayMediaTests. In th
 before: the fake LiteLLM answered keys and models our gateway refuses, a form spliced in front for the language (now
 one field), a speech body passed on before it had all come (now read first), and LiteLLM's "Invalid model name".
 
+Commit 13 (2026-11-11): with Mode own, `/v1/models` (the key's models, copies kept out), `/v1/models/{id}`,
+`/v1/model/info` (LiteLLM's shape, which Code Arena reads) and `/v1/embeddings` (the embeddings server, `Knowledge:EmbedUrl`,
+a route while it runs, booked by its prompt tokens) are answered by the app (`OwnApi`); rerank, moderations,
+translations and picture edits get 404 `model_not_found`; Anthropic's count_tokens goes by LiteLLM until commit 14.
+OwnApiTests; ApiPassageTests' NET-01 evidence holds in both modes.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

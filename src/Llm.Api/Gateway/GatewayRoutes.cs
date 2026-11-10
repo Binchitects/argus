@@ -23,6 +23,7 @@ public sealed record Deployment
     public const string Remote = "remote";
     public const string Image = "image";
     public const string Audio = "audio";
+    public const string Embed = "embed";
 
     /// <summary>The name callers ask for; a copy of a model of several copies is also its own, NAME@i, kept out of lists.</summary>
     public required string Name { get; init; }

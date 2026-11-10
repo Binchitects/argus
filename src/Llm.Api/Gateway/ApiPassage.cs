@@ -36,6 +36,11 @@ public static class ApiPassage
 
     private static async Task PassAsync(HttpContext http, IHttpClientFactory factory)
     {
+        // The app's own gateway (Gateway:Mode own) answers it, or LiteLLM below.
+        if (await OwnApi.TryAsync(http))
+        {
+            return;
+        }
         var request = http.Request;
         if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
         {

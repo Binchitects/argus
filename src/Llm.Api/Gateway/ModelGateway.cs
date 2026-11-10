@@ -75,6 +75,68 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     /// <summary>The routes are built again at the next call (a model loaded, a server or price changed).</summary>
     public void Invalidate() => _table = null;
 
+    /// <summary>Every route now (the models API lists them).</summary>
+    public Task<List<Deployment>> AllRoutesAsync(CancellationToken ct) => TableAsync(false, ct);
+
+    /// <summary>
+    /// Embeddings: sent to the embeddings server, booked by the prompt tokens it read at the input price. Errors come back
+    /// as the server sent them.
+    /// </summary>
+    public async Task<HttpResponseMessage> EmbedAsync(JsonObject body, Deployment d, GatewayCaller caller, CancellationToken ct)
+    {
+        EnsureWriter();
+        var started = clock.GetUtcNow();
+        var row = Row(caller, d.Name, d, null, 1, started);
+        row.Call = "embedding";
+        var shaped = (JsonObject)body.DeepClone();
+        shaped["model"] = d.Model;
+        using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + "/embeddings") { Content = new StringContent(shaped.ToJsonString(), Encoding.UTF8, "application/json") };
+        if (d.Key is { Length: > 0 } bearer)
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        }
+        HttpResponseMessage res;
+        try
+        {
+            res = await clients.CreateClient(Upstream).SendAsync(req, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
+            _ledger.Writer.TryWrite(row);
+            throw new ChatGatewayException("The embeddings server could not be reached: " + ex.Message, 502);
+        }
+        var text = await res.Content.ReadAsStringAsync(ct);
+        row.EndedAt = clock.GetUtcNow();
+        row.DurationMs = (int)(row.EndedAt - started).TotalMilliseconds;
+        if (res.IsSuccessStatusCode)
+        {
+            try
+            {
+                var answer = JsonNode.Parse(text);
+                row.PromptTokens = answer?["usage"]?["prompt_tokens"]?.GetValue<int>() ?? 0;
+                if (answer?["model"] is not null && answer is JsonObject o)
+                {
+                    o["model"] = d.Name;
+                    text = o.ToJsonString();
+                }
+            }
+            catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
+            {
+                row.UsageEstimated = true;
+            }
+            row.Cost = (d.Price ?? new TokenPrice(0, 0, 0)).Cost(row.PromptTokens, 0, 0);
+        }
+        else
+        {
+            (row.Status, row.HttpStatus, row.Error) = (GatewayRequest.Failed, (short)res.StatusCode, Short(PromptLogWriter.ErrorOf(text) ?? text));
+        }
+        _ledger.Writer.TryWrite(row);
+        var status = res.StatusCode;
+        res.Dispose();
+        return new HttpResponseMessage(status) { Content = new StringContent(text, Encoding.UTF8, "application/json") };
+    }
+
     /// <summary>The deployments answering a name, the table built again once when none does (a model just added).</summary>
     public async Task<List<Deployment>> RoutesForAsync(string name, CancellationToken ct)
     {
@@ -102,6 +164,19 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             }
             await using var scope = scopes.CreateAsyncScope();
             var routes = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().BuildAsync(ct);
+            // The embeddings server too (Knowledge:EmbedUrl), while it runs: API keys reach it by its model's name.
+            var knowledge = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<Knowledge.KnowledgeOptions>>().CurrentValue;
+            var embedder = scope.ServiceProvider.GetRequiredService<Knowledge.Embedder>();
+            if (await embedder.ReadyAsync(ct) && routes.All(r => r.Name != knowledge.EmbedModel))
+            {
+                var price = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<PriceOptions>>().CurrentValue;
+                routes = [.. routes, new Deployment
+                {
+                    Name = knowledge.EmbedModel, Kind = Deployment.Embed, BaseUrl = knowledge.EmbedUrl.TrimEnd('/') + "/v1", Model = knowledge.EmbedModel, Key = knowledge.EmbedKey,
+                    Mode = "embedding", Info = new JsonObject { ["mode"] = "embedding" }, LiteLlm = [], Fingerprint = "embed:" + knowledge.EmbedModel,
+                    Price = TokenPrice.Of(null, null, null, price),
+                }];
+            }
             _table = (routes, clock.GetUtcNow());
             return routes;
         }
