@@ -1670,6 +1670,37 @@ routed by Traefik: only the gateway, inside the network, reaches it. With
 `unreachable_fallback: fail_closed`, API requests are refused while the app is
 down (a restart); `fail_open` lets them through unchecked instead.
 
+### The model gateway: LiteLLM or the app's own
+
+**Settings → API keys → Model gateway** chooses who sends the requests to
+the models, from the next request on:
+
+- **litellm** (the default): LiteLLM, as before 8.0, with the checks above.
+- **chat**: the app sends its own chat, pictures and speech to the engines
+  itself; API keys still go by LiteLLM.
+- **own**: the app answers everything it serves: API keys' chat completions,
+  Anthropic's Messages API (Claude Code, with `x-api-key`) and
+  `count_tokens`, OpenAI's Responses API (Codex), the legacy completions,
+  pictures, speech and transcriptions (any format: json, text, srt, vtt,
+  verbose_json), the model list and `/v1/model/info`, and embeddings (the
+  embeddings server, while it runs). It checks each key itself in the order
+  above: the key, its expiry, the person, API access, the model, the requests
+  and tokens a minute (counted in `gateway.rate_windows`, shared by every
+  replica: a 429 says when to ask again, with `Retry-After` and the
+  `x-ratelimit-*` headers), the key's own budget, credit, the safeguards (a
+  masked text goes masked), and room for the model. A model of several copies
+  goes to the least busy one; its fallback answers when its server cannot be
+  reached. Every request is a row in the ledger, a refusal too (counted as
+  no request), so credit and usage count it at once. Rerank, moderations,
+  translations and picture edits answer 404: no server here serves them.
+
+With **own**, Admin → Overview's **Model gateway** is the app's own health
+(each model's server asked), the app's `/metrics` carries
+`arena_gateway_*` (requests, times, first tokens, tokens, errors, refusals,
+fallbacks), and the alert rules GatewayUpstreamErrors, GatewayLedgerBehind
+and GatewaySlowFirstToken watch them. `deploy/scripts/gateway-compare.py`
+measures the two side by side on a stack.
+
 ### The answer cache for API keys
 
 Pipelines and FAQ bots often ask the same thing again. **Settings → API keys →
