@@ -97,7 +97,10 @@ public sealed class CodeIndexTests : IDisposable
     {
         var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         var index = new CodeIndex(repo, CodeIndex.FileFor(_data, repo));
-        var sync = index.Sync(new Workspace(repo), [repo], CancellationToken.None);
+        // Listed once for both syncs: the repository is worked in while the tests run, and a file changed between them is
+        // rightly read again; with the same listing, nothing changed, so nothing is read.
+        var listed = CodeFiles.List(new Workspace(repo), [repo], CancellationToken.None);
+        var sync = index.Sync(listed, CancellationToken.None);
         Assert.True(sync.Read > 1000, $"read {sync.Read}");
         Assert.True(sync.Took < TimeSpan.FromSeconds(60), $"took {sync.Took}");
         index.Save();
@@ -106,7 +109,7 @@ public sealed class CodeIndexTests : IDisposable
         var clock = System.Diagnostics.Stopwatch.StartNew();
         Assert.NotNull(CodeIndex.Load(repo, index.File));
         var load = clock.Elapsed;
-        Assert.Equal(0, index.Sync(new Workspace(repo), [repo], CancellationToken.None).Read);
+        Assert.Equal(0, index.Sync(listed, CancellationToken.None).Read);
         Console.WriteLine($"code index of the repository: {sync.Read} files read in {sync.Took.TotalSeconds:0.0} s, {size / 1024.0 / 1024:0.0} MB, loaded in {load.TotalMilliseconds:0} ms, " +
             $"{index.Files.Sum(f => f.Symbols.Count):N0} symbols");
     }
