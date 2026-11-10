@@ -23,7 +23,7 @@ import { useAppIcon } from '@/lib/app-icon'
 import { findNavItem, mayOpen, spaceOf, spaces, spaceTitle, visibleNavigation, type NavItem, type NavSection, type Space } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
-import { codeIntelName, productName } from '@/lib/brand'
+import { productName } from '@/lib/brand'
 
 function readCollapsed(): boolean {
   try {

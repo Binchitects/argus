@@ -181,8 +181,13 @@ describe('connect your tools', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Code Arena (our own agent)' }))
     const steps = screen.getByRole('region', { name: 'Setting up Code Arena (our own agent)' })
-    expect(within(steps).getByText(/version 4.2.0/)).toBeInTheDocument()
-    // One line installs it (checked against its checksum); updates come from this Arena.
+    expect(within(steps).getAllByText(/version 4.2.0/).length).toBeGreaterThan(0)
+    // An installer per system to download and open: Code Arena as an application.
+    expect(within(steps).getByRole('link', { name: 'Download for Windows, Install Code Arena.cmd' })).toHaveAttribute('href', '/api/downloads/code-arena/setup/windows')
+    expect(within(steps).getByRole('link', { name: /^Download for macOS, Install Code Arena\.command/ })).toHaveAttribute('href', '/api/downloads/code-arena/setup/macos')
+    expect(within(steps).getByRole('link', { name: /^Download for Linux, install-code-arena\.sh/ })).toHaveAttribute('href', '/api/downloads/code-arena/setup/linux')
+    expect(steps).toHaveTextContent('code-arena uninstall takes it off again')
+    // Or one line installs it (checked against its checksum); updates come from this Arena.
     expect(within(steps).getByText(`curl -fsSL ${window.location.origin}/api/downloads/code-arena/install.sh | sh`)).toBeInTheDocument()
     expect(within(steps).getByText('code-arena update')).toBeInTheDocument()
     expect(within(steps).getByRole('link', { name: /Linux \(x64\)/ })).toHaveAttribute('href', '/api/downloads/code-arena/linux-x64')

@@ -162,14 +162,22 @@ export const tools: Tool[] = [
           },
         ]
       return [
+        {
+          text: `Install it as an application (version ${c.codeArena!.version}): download the installer for your system and open it. It puts Code Arena in your Start menu, Applications or app menu, with "Open in Code Arena" on folders, checked against its SHA-256${signedBy(c)}, and needs no administrator rights. code-arena uninstall takes it off again.`,
+          links: [
+            { label: 'Windows', href: '/api/downloads/code-arena/setup/windows', detail: 'Install Code Arena.cmd' },
+            { label: 'macOS', href: '/api/downloads/code-arena/setup/macos', detail: 'Install Code Arena.command (Finder opens it in Terminal)' },
+            { label: 'Linux', href: '/api/downloads/code-arena/setup/linux', detail: 'install-code-arena.sh (sh install-code-arena.sh)' },
+          ],
+        },
         unix(c)
           ? {
-              text: `Install it in one line (version ${c.codeArena!.version}): the build for your machine, checked against its SHA-256${signedBy(c)}, in ~/.local/bin.`,
+              text: `Or install it in one line (version ${c.codeArena!.version}): the build for your machine, checked against its SHA-256${signedBy(c)}, in ~/.local/bin.`,
               file: 'shell',
               code: `curl -fsSL ${c.origin}/api/downloads/code-arena/install.sh | sh`,
             }
           : {
-              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256${signedBy(c)}, on your PATH, with a Code Arena shortcut on your desktop and in the Start menu that opens the IDE with no console window.`,
+              text: `Or install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256${signedBy(c)}, on your PATH, with a Code Arena shortcut on your desktop and in the Start menu that opens the IDE with no console window.`,
               file: 'powershell',
               code: `irm ${c.origin}/api/downloads/code-arena/install.ps1 | iex`,
             },
