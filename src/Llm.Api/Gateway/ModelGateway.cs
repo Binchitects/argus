@@ -282,6 +282,120 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             : ChatGatewayException.From(lastError ?? "", lastStatus);
     }
 
+    /// <summary>
+    /// A picture, a transcription or speech: sent to the model's server (the app's picture or speech server), booked at its
+    /// price (per picture, per second of sound heard, per character read aloud) under its credit kind. A transcription's
+    /// answer is read whole (its length prices it); speech passes on as it is made. A refusal throws
+    /// <see cref="ChatGatewayException"/>, or, with <paramref name="passErrors"/>, comes back as the server sent it.
+    /// </summary>
+    public async Task<HttpResponseMessage> MediaAsync(string path, string model, Func<HttpContent> content, string accept, GatewayCaller caller, CancellationToken ct,
+        int pictures = 0, int characters = 0, bool passErrors = false)
+    {
+        EnsureWriter();
+        var call = path.Contains("/images/", StringComparison.Ordinal) ? "image" : path.EndsWith("/speech", StringComparison.Ordinal) ? "speech" : "transcription";
+        var started = clock.GetUtcNow();
+        var row = Row(caller, model, null, null, 1, started);
+        row.Call = call;
+        row.CreditKind = call == "image" ? "pictures" : "speech";
+        var copies = await RoutesForAsync(model, ct);
+        if (copies.Count == 0)
+        {
+            (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 404, $"There is no model {model}.", clock.GetUtcNow());
+            _ledger.Writer.TryWrite(row);
+            throw new ChatGatewayException($"There is no model {model}.", 404);
+        }
+        var d = Pick(copies);
+        row.Deployment = Uri.TryCreate(d.BaseUrl, UriKind.Absolute, out var u) ? u.Authority : d.BaseUrl;
+        HttpResponseMessage res;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + (path.StartsWith("/v1/", StringComparison.Ordinal) ? path[3..] : path)) { Content = await RenameAsync(content(), d.Model) };
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+            if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
+            {
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+            }
+            res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
+            _ledger.Writer.TryWrite(row);
+            throw new ChatGatewayException("The model server could not be reached: " + ex.Message, 502);
+        }
+        decimal Unit(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x : 0m;
+        if (!res.IsSuccessStatusCode)
+        {
+            var said = await res.Content.ReadAsStringAsync(ct);
+            res.Dispose();
+            (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, (short)res.StatusCode, Short(PromptLogWriter.ErrorOf(said) ?? said), clock.GetUtcNow());
+            row.DurationMs = (int)(row.EndedAt - started).TotalMilliseconds;
+            _ledger.Writer.TryWrite(row);
+            return passErrors ? new HttpResponseMessage(res.StatusCode) { Content = new StringContent(said, Encoding.UTF8, "application/json") } : throw ChatGatewayException.From(said, (int)res.StatusCode);
+        }
+        if (call == "transcription")
+        {
+            // Read whole: its length (verbose_json's duration) is its price.
+            var text = await res.Content.ReadAsStringAsync(ct);
+            var type = res.Content.Headers.ContentType?.ToString() ?? "application/json";
+            res.Content = new StringContent(text, Encoding.UTF8);
+            res.Content.Headers.TryAddWithoutValidation("Content-Type", type);
+            try
+            {
+                row.Seconds = JsonNode.Parse(text)?["duration"]?.GetValue<double>();
+            }
+            catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
+            {
+                row.Seconds = null;
+            }
+            row.Cost = (decimal)(row.Seconds ?? 0) * Unit("input_cost_per_second");
+        }
+        else if (call == "image")
+        {
+            row.Pictures = Math.Max(1, pictures);
+            row.Cost = row.Pictures.Value * Unit("input_cost_per_image");
+        }
+        else
+        {
+            row.Characters = characters;
+            row.Cost = characters * Unit("input_cost_per_character");
+        }
+        row.EndedAt = clock.GetUtcNow();
+        row.DurationMs = (int)(row.EndedAt - started).TotalMilliseconds;
+        _ledger.Writer.TryWrite(row);
+        return res;
+    }
+
+    /// <summary>The request's model named as its server knows it: a JSON body's "model", a form's model field.</summary>
+    private static async Task<HttpContent> RenameAsync(HttpContent content, string model)
+    {
+        switch (content)
+        {
+            case MultipartFormDataContent form:
+                var renamed = new MultipartFormDataContent();
+                foreach (var part in form)
+                {
+                    if (part.Headers.ContentDisposition?.Name?.Trim('"') == "model")
+                    {
+                        renamed.Add(new StringContent(model), "model");
+                        continue;
+                    }
+                    renamed.Add(part);
+                }
+                return renamed;
+            case StringContent or ByteArrayContent when content.Headers.ContentType?.MediaType == "application/json":
+                var text = await content.ReadAsStringAsync();
+                if (JsonNode.Parse(text) is JsonObject o)
+                {
+                    o["model"] = model;
+                    return new StringContent(o.ToJsonString(), Encoding.UTF8, "application/json");
+                }
+                return content;
+            default:
+                return content;
+        }
+    }
+
     private static string? Short(string? s) => s is null ? null : s.Length <= 500 ? s : s[..499] + "…";
 
     private static GatewayRequest Row(GatewayCaller caller, string model, Deployment? d, string? fallbackFrom, short attempts, DateTimeOffset started) => new()

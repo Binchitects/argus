@@ -152,7 +152,10 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             HttpResponseMessage res;
             try
             {
-                res = await PostAsync("/v1/images/generations", body, personEmail, "application/json", ct);
+                res = own.ForChat
+                    ? await own.MediaAsync("/v1/images/generations", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), "application/json",
+                        new Gateway.GatewayCaller(personEmail), ct, pictures: 1)
+                    : await PostAsync("/v1/images/generations", body, personEmail, "application/json", ct);
             }
             catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
             {
@@ -175,7 +178,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
     {
         media.Touch(model);
         // verbose_json says the sound's length: the gateway prices a transcription by it (a plain json answer is priced at nothing).
-        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () =>
+        using var res = await WithKeyAsync(() => MediaPostAsync("/v1/audio/transcriptions", model, () =>
         {
             var form = new MultipartFormDataContent
             {
@@ -204,7 +207,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         CancellationToken ct, string? language = null)
     {
         media.Touch(model);
-        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () =>
+        using var res = await WithKeyAsync(() => MediaPostAsync("/v1/audio/transcriptions", model, () =>
         {
             var form = new MultipartFormDataContent
             {
@@ -304,7 +307,8 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         {
             body["speed"] = speed;
         }
-        return WithKeyAsync(() => PostAsync("/v1/audio/speech", body, personEmail, "audio/mpeg", ct), ct);
+        return WithKeyAsync(() => MediaPostAsync("/v1/audio/speech", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), personEmail,
+            "audio/mpeg", ct, characters: text.Length), ct);
     }
 
     /// <summary>The chat key removed at the gateway: a new one is made and the request tried once more.</summary>
@@ -320,6 +324,10 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             return await send();
         }
     }
+
+    /// <summary>A picture or speech request: to the app's own gateway with Gateway:Mode chat or own, else to LiteLLM.</summary>
+    private Task<HttpResponseMessage> MediaPostAsync(string path, string model, Func<HttpContent> content, string personEmail, string accept, CancellationToken ct, int characters = 0) =>
+        own.ForChat ? own.MediaAsync(path, model, content, accept, new Gateway.GatewayCaller(personEmail), ct, characters: characters) : PostAsync(path, content, personEmail, accept, ct);
 
     private Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct) =>
         PostAsync("/v1/chat/completions", request, personEmail, "text/event-stream", ct);

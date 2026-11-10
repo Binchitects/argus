@@ -104,6 +104,7 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
                 s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => server);
                 s.AddHttpClient("probe").ConfigurePrimaryHttpMessageHandler(() => server);
                 s.AddHttpClient(Llm.Api.Gateway.KeySpeech.Client).ConfigurePrimaryHttpMessageHandler(() => Pictures);
+                s.AddHttpClient(Llm.Api.Gateway.ModelGateway.Upstream).ConfigurePrimaryHttpMessageHandler(() => Pictures);
             });
         var media = f.Services.GetRequiredService<MediaControl>();
         return new Setup(f, media, server, clock, Path.Combine(config, "imagegen.conf"), dir);

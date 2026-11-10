@@ -132,7 +132,7 @@ public sealed class FakeModel : HttpMessageHandler
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MeetingHeard, Encoding.UTF8, "application/json") };
             }
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"What is the capital of France?"}""", Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"What is the capital of France?","duration":4.5,"segments":[{"start":0.0,"end":4.5,"text":" What is the capital of France?"}]}""", Encoding.UTF8, "application/json") };
         }
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
         // Text to speech answers with an MP3.

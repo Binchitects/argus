@@ -777,6 +777,14 @@ ModelGateway instead of LiteLLM, the engine's own error passed through. Admissio
 LiteLLM's behaviour, not the app's: a model the fake LiteLLM took without its being registered (now 404), the chat key on
 the wire, 401 for a key whose API access is off (now 403 with why), and LiteLLM's budget error from the fake engine.
 
+Commit 12 (2026-11-11): pictures, speech and transcriptions through the app's own gateway: the app's own (`GatewayChat`,
+with Mode chat or own) and API keys' (`KeyMedia`, Mode own: Admission with the prompt or the text read aloud checked by
+the safeguards, the person's voice and language, a picture model loaded first), booked per picture, per character and
+per second heard at the route's price; a transcription asked as `verbose_json` and given back as json, text, srt, vtt or
+verbose_json; browsers' preflights answered by the app. GatewayMediaTests. In the mode, LiteLLM-only checks fail as
+before: the fake LiteLLM answered keys and models our gateway refuses, a form spliced in front for the language (now
+one field), a speech body passed on before it had all come (now read first), and LiteLLM's "Invalid model name".
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

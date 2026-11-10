@@ -520,7 +520,15 @@ public static class AnswerCacheEndpoints
         // The app's own gateway (Gateway:Mode own): the request read whole and let in here (Admission), then sent to the
         // engine by ModelGateway instead of LiteLLM, booked in the ledger.
         var own = http.RequestServices.GetRequiredService<ModelGateway>();
+        if (KeyMedia.Preflight(http))
+        {
+            return;
+        }
         var ownMode = completions && own.ForApi;
+        if (ownMode)
+        {
+            http.Response.Headers.AccessControlAllowOrigin = "*";
+        }
         Admitted? admitted = null;
         if (ownMode)
         {

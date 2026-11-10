@@ -37,6 +37,11 @@ public static class KeySpeech
 
     public static async Task ProxyAsync(HttpContext http, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory, Models.MediaControl media)
     {
+        // The app's own gateway (Gateway:Mode own) answers it, or LiteLLM by the way below.
+        if (KeyMedia.Preflight(http) || await KeyMedia.TryAsync(http))
+        {
+            return;
+        }
         var ct = http.RequestAborted;
         var request = http.Request;
         if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
