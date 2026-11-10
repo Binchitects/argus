@@ -3297,7 +3297,8 @@ cmd_upgrade() {
   # The services as this release names them (argus before 8.0 is code-intel).
   active=" $(dc config --services 2>/dev/null | while read -r svc; do feature_now_named "$svc"; done | tr '\n' ' ') "
   if [[ -f "$DEPLOY/features" && -n "$(env_line "$DEPLOY/.env" COMPOSE_PROFILES)" ]]; then
-    mapfile -t was < <(sed -n -E 's/^[[:space:]]*([a-z0-9][a-z0-9-]*)[[:space:]]*\|.*/\1/p' "$DEPLOY/features")
+    # The old release's features, as this release names them (its argus is code-intel: not new).
+    mapfile -t was < <(sed -n -E 's/^[[:space:]]*([a-z0-9][a-z0-9-]*)[[:space:]]*\|.*/\1/p' "$DEPLOY/features" | while read -r id; do feature_now_named "$id"; done)
     read_features "$BUNDLE/deploy/features"
     for id in $(features_now); do if feat_known "$id"; then base+=("$id"); else note "the feature $id is not in $BVERSION: it goes"; fi; done
     for id in "${FEAT_IDS[@]}"; do [[ " ${was[*]} " == *" $id "* ]] || new+=("$id"); done

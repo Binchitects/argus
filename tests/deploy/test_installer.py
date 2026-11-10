@@ -801,6 +801,21 @@ class InstallerTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- upgrade
 
+    def test_An_upgrade_from_a_release_with_the_feature_argus_keeps_it_on_as_code_intel_and_asks_nothing_about_it(self):
+        deploy = self.old_install()
+        # A 7.x installation: its list of features names the code-intelligence service argus, and it is on.
+        (deploy / "features").write_text(FEATURES.replace("code-intel       | on  | code-intel", "argus | on  | argus"))
+        with open(deploy / ".env", "a") as f:
+            f.write("COMPOSE_PROFILES=chat-models,knowledge,argus,monitoring,meetings\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("new in 9.9.9, off: code-intel", r.stdout)
+        self.assertNotIn("the feature argus is not in", r.stdout)
+        profiles = [line for line in (deploy / ".env").read_text().splitlines() if line.startswith("COMPOSE_PROFILES=")]
+        self.assertEqual(len(profiles), 1, profiles)
+        self.assertIn("code-intel", profiles[0].split("=", 1)[1].split(","))
+        self.assertNotIn("argus", profiles[0].split("=", 1)[1].split(","))
+
     def test_Upgrade_from_5_2_0_backs_up_updates_merges_and_runs_the_new_release(self):
         deploy = self.old_install()
         # The compose file changed here too (its changes belong in the override).

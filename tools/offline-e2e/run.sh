@@ -133,16 +133,51 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   OLD_FLAGS=(${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"}); [[ " ${OLD_FLAGS[*]} " == *" --hosts "* ]] || OLD_FLAGS+=(--hosts)
   cp -f "$here/data.py" "$DIR/bundle/data.py"
   rm -f "$DIR/bundle/data.json"
-  OLD_VERSION="$(basename "$UPGRADE_FROM" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
-  # The old release installs only the features it has: those in its own deploy/features (its tag's).
+  # Before 8.0 the bundles were argus-arena-VERSION-offline.run.
+  OLD_VERSION="$(basename "$UPGRADE_FROM" | sed -n 's/^\(argus-\)\{0,1\}arena-\(.*\)-offline\.run$/\2/p')"
+  [[ -n "$OLD_VERSION" ]] || fail "--upgrade-from: $UPGRADE_FROM is not named as a bundle (arena-VERSION-offline.run)"
+  # The old release installs only the features it has: those in its own deploy/features (its tag's), under the names
+  # it had (before 8.0 the code-intelligence service's feature was argus).
   OLD_WITH="$WITH"
+  OLD_CODE_INTEL=""
   if old_features="$(git -C "$here/../.." show "v$OLD_VERSION:deploy/features" 2>/dev/null)"; then
-    OLD_WITH="$(tr ',' '\n' <<< "$WITH" | grep -xF -f <(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' <<< "$old_features") | paste -sd, -)"
+    old_names="$(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' <<< "$old_features")"
+    grep -qx argus <<< "$old_names" && ! grep -qx code-intel <<< "$old_names" && OLD_CODE_INTEL=argus
+    OLD_WITH="$(tr ',' '\n' <<< "$WITH" | sed "s/^code-intel\$/${OLD_CODE_INTEL:-code-intel}/" | grep -xF -f <(printf '%s\n' "$old_names") | paste -sd, -)"
+  else
+    fail "--upgrade-from: no tag v$OLD_VERSION here to read its features from"
   fi
   # Features the old release cannot install (a bug of its own, fixed since): left out of it, turned on by the upgrade.
   [[ -n "$OLD_WITHOUT" ]] && OLD_WITH="$(tr ',' '\n' <<< "$OLD_WITH" | grep -vxF -f <(tr ',' '\n' <<< "$OLD_WITHOUT") | paste -sd, -)"
 fi
 NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
+
+# An upgrade from before 8.0 with the code-intelligence service: its names moved (installer.sh carry_env, carry_data),
+# or after a rollback they are back. DATA_DIR from the installation's .env.
+names_moved() { # NEW|OLD WHEN
+  [[ -n "$OLD_CODE_INTEL" && ",$OLD_WITH," == *",$OLD_CODE_INTEL,"* ]] || return 0
+  local envf=/srv/arena/deploy/.env data
+  data="$(H sh -c "sed -n 's/^DATA_DIR=//p' $envf | tail -n1")"
+  [[ -n "$data" ]] || fail "no DATA_DIR in the installation's .env ($2)"
+  if [[ $1 == NEW ]]; then
+    H grep -q '^CODE_INTEL_KEY=.' "$envf" || fail "the .env has no CODE_INTEL_KEY $2"
+    H grep -q '^ARGUS_KEY=' "$envf" && fail "the .env still has ARGUS_KEY $2"
+    H grep -qx 'CODE_INTEL_HOST=argus' "$envf" || fail "the .env does not keep the address argus.DOMAIN (CODE_INTEL_HOST=argus) $2"
+    H grep -E '^COMPOSE_PROFILES=' "$envf" | grep -qE '(=|,)argus(,|$)' && fail "COMPOSE_PROFILES still names argus $2"
+    H test -d "$data/code-intel" || fail "$data/code-intel is not there $2"
+    H test ! -e "$data/argus" || fail "$data/argus is left $2"
+    H sh -c 'docker ps --format "{{.Names}}"' | grep -qx code-intel || fail "no code-intel container runs $2"
+    H sh -c 'docker ps -a --format "{{.Names}}"' | grep -qx argus && fail "the argus container is left $2"
+    say "  names moved $2: CODE_INTEL_KEY, CODE_INTEL_HOST=argus, $data/code-intel, the code-intel container"
+  else
+    H grep -q '^ARGUS_KEY=.' "$envf" || fail "the .env has no ARGUS_KEY $2"
+    H grep -q '^CODE_INTEL_KEY=' "$envf" && fail "the .env still has CODE_INTEL_KEY $2"
+    H test -d "$data/argus" || fail "$data/argus is not back $2"
+    H test ! -e "$data/code-intel" || fail "$data/code-intel is left $2"
+    H sh -c 'docker ps --format "{{.Names}}"' | grep -qx argus || fail "no argus container runs $2"
+    say "  names back $2: ARGUS_KEY, $data/argus, the argus container"
+  fi
+}
 
 gpu=(); [[ $CPU -eq 0 ]] && gpu=(--device nvidia.com/gpu=all)
 say "==> the test host ($NAME: no network, its own Docker in $DIR)"
@@ -299,11 +334,13 @@ if [[ -n "$UPGRADE_FROM" ]]; then
     [[ $RC -eq 0 ]] || fail "the upgrade failed (exit $RC)"
   fi
   data_run check "$([[ $FAIL_UPGRADE -eq 1 ]] && echo "after its rollback" || echo "after the upgrade")"
+  if [[ $FAIL_UPGRADE -eq 1 ]]; then names_moved OLD "after its rollback"; else names_moved NEW "after the upgrade"; fi
   if [[ $ROLLBACK -eq 1 ]]; then
     upgrade_run "$RUN" rollback "" --rollback
     [[ $RC -eq 0 ]] || fail "upgrade --rollback failed (exit $RC)"
     EXPECT="$OLD_VERSION"
     data_run check "after the rollback"
+    names_moved OLD "after the rollback"
   fi
 else install_run "$RUN" install ${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"} || fail "install failed"; fi
 
