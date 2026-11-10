@@ -663,7 +663,14 @@ function Workbench({
     (e: CodeEvent) => {
       // A VM's sign-in the agent's VM tools ask for: a dialog.
       if (e.type === 'vm_login' || e.type === 'vm_login_done') loginEvent(e)
-      if (e.type !== 'tool_result' || !e.diff) return
+      if (e.type !== 'tool_result') return
+      // A command (or code, a sub-agent, a server's tool) changed files: they are the agent's changes too.
+      if (e.changed?.length) {
+        for (const path of e.changed) void refresh(path)
+        languageServers.filesChanged(e.changed.map((path) => ({ path, type: 2 })))
+        void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
+      }
+      if (!e.diff) return
       void refresh(e.diff.path)
       // The language servers see it too (a file the editor does not hold, most of all).
       languageServers.filesChanged([{ path: e.diff.path, type: e.diff.created ? 1 : 2 }])

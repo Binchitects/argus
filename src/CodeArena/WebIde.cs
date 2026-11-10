@@ -18,6 +18,7 @@ internal sealed partial class WebApp
 
     private IdeFiles _files = null!;
     private AgentChanges _changes = null!;
+    private TurnFiles _turnFiles = null!;
     private Terminals _terminals = null!;
     private PagePreferences _preferences = null!;
     private Problems _problems = null!;
@@ -57,6 +58,7 @@ internal sealed partial class WebApp
         // Search goes through the folders added to the workspace too, as VS Code's does in a multi-root workspace.
         _files = new IdeFiles(_rt.Workspace) { AlsoEdits = full => IdeSkills.ProjectSkillFile(_rt, full), SearchAlso = () => [.. Folders.Added(_state).Where(_rt.Workspace.Allowed)] };
         _changes = new AgentChanges(_rt.Workspace);
+        _turnFiles = new TurnFiles(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
         _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
         _problems = new Problems(_rt.Workspace, _rt.Config, _state);
@@ -377,12 +379,14 @@ internal sealed partial class WebApp
                     {
                         throw new IdeError(400, "invalid", "Send the file's text.");
                     }
+                    PersonTouched(body.Str("path"));
                     await res.JsonAsync(200, _files.Write(body.Str("path"), text, body.Str("version")), ct);
                     return true;
                 }
                 case ("POST", "/api/files/new"):
                 {
                     var body = Body(req);
+                    PersonTouched(body.Str("path"));
                     await res.JsonAsync(200, _files.Create(body.Str("path"), body.Str("kind") == "dir"), ct);
                     return true;
                 }
@@ -391,6 +395,8 @@ internal sealed partial class WebApp
                     var body = Body(req);
                     var (from, to) = _files.Rename(body.Str("from"), body.Str("to"));
                     _changes.Moved(from, to);
+                    _turnFiles.PersonTouched(from);
+                    _turnFiles.PersonTouched(to);
                     await res.JsonAsync(200, new JsonObject { ["from"] = _files.Show(from), ["to"] = _files.Show(to) }, ct);
                     return true;
                 }
@@ -398,17 +404,23 @@ internal sealed partial class WebApp
                 {
                     var body = Body(req);
                     var (from, to) = await Task.Run(() => _files.Copy(body.Str("from"), body.Str("to")), ct);
+                    _turnFiles.PersonTouched(to);
                     await res.JsonAsync(200, new JsonObject { ["from"] = _files.Show(from), ["to"] = _files.Show(to) }, ct);
                     return true;
                 }
                 case ("POST", UploadPath):
                     // The file's bytes as they are (Content-Type: application/octet-stream, which no form sends).
+                    PersonTouched(Query(req, "path"));
                     await res.JsonAsync(200, await Task.Run(() => _files.Upload(Query(req, "path"), req.Body, Flag(req, "overwrite")), ct), ct);
                     return true;
                 case ("POST", "/api/files/delete"):
-                    _files.Delete(Body(req).Str("path"));
+                {
+                    var gone = Body(req).Str("path");
+                    PersonTouched(gone);
+                    _files.Delete(gone);
                     await res.NoContentAsync(ct);
                     return true;
+                }
                 case ("GET", "/api/search"):
                 {
                     var q = new SearchQuery(Query(req, "q") ?? "", Flag(req, "regex"), Flag(req, "case"), Flag(req, "word"), Query(req, "include"), Query(req, "exclude"));
@@ -425,6 +437,11 @@ internal sealed partial class WebApp
                     return true;
                 }
                 case ("GET", "/api/changes"):
+                    // What commands the agent ran changed since, too (a background one may still be writing).
+                    if (Busy() || _rt.Jobs.Running.Count > 0)
+                    {
+                        await Task.Run(() => FoundChanges(ct), ct);
+                    }
                     await res.JsonAsync(200, _changes.List(), ct);
                     return true;
                 case ("GET", "/api/changes/diff"):
@@ -802,6 +819,41 @@ internal sealed partial class WebApp
         }
         var dir = await IdeGit.RepositoryOfAsync(GitRoots(), file, ct);
         return dir is null || string.Equals(dir, _rt.Workspace.Root, StringComparison.Ordinal) ? _git : new IdeGit(_rt.Workspace, dir);
+    }
+
+    /// <summary>A path the person acts on in the IDE: its change is theirs, not the agent's.</summary>
+    private void PersonTouched(string? path)
+    {
+        if (path is { Length: > 0 })
+        {
+            try
+            {
+                _turnFiles.PersonTouched(_files.Resolve(path));
+            }
+            catch (IdeError)
+            {
+                // Not a path of the folder: the call says so itself.
+            }
+        }
+    }
+
+    /// <summary>The agent's changes made by any means since the turn began (commands, code it ran): kept as its changes. The paths.</summary>
+    private List<string> FoundChanges(CancellationToken ct)
+    {
+        var found = new List<string>();
+        try
+        {
+            foreach (var (full, before, now) in _turnFiles.Changed(ct))
+            {
+                _changes.RecordFound(full, before, now);
+                found.Add(_files.Show(full));
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            // Looked at again at the next step.
+        }
+        return found;
     }
 
     private static JsonObject Body(HttpRequest req) => req.Json() ?? throw new IdeError(400, "invalid", "Send a JSON object.");

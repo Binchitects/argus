@@ -211,7 +211,7 @@ export type CodeEvent =
   | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' } | { type: 'took_in' }>
   /** A queued message the answer took in at its next step, with what went with it (path, or path:first-last) and its files. */
   | (Extract<ChatEvent, { type: 'took_in' }> & { files?: string[] | null; attachments?: Attachment[] | null })
-  | (Extract<ChatEvent, { type: 'tool_result' }> & { diff?: FileDiff })
+  | (Extract<ChatEvent, { type: 'tool_result' }> & { diff?: FileDiff; changed?: string[] })
   | (Extract<ChatEvent, { type: 'approval' }> & { always?: string; risk?: string })
   | { type: 'reset'; messages: Message[]; diffs: Record<string, FileDiff> }
   | { type: 'job'; job: number; command: string; running: true; status: string; background?: boolean }

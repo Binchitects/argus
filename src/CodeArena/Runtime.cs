@@ -690,6 +690,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             if (await offered is { } arenaWord)
             {
+                // What the person may not use first: whoever sees Arena's word sees it already followed.
+                FollowDenied(arenaWord);
                 ArenaChat = arenaWord;
             }
             UseProviders();
@@ -772,8 +774,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             if (t.IsCompletedSuccessfully && t.Result is { } chat)
             {
                 Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
-                ArenaChat = chat;
                 FollowDenied(chat);
+                ArenaChat = chat;
             }
         }, TaskScheduler.Default);
 
@@ -1031,8 +1033,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         static string Tools(JsonObject? config) => string.Join(",", (config?["tools"] as JsonArray ?? []).OfType<JsonObject>().Select(t => t.Str("id")).Order(StringComparer.Ordinal));
         var toolsChanged = ArenaChat is { } before && Tools(before) != Tools(chat);
         Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
-        ArenaChat = chat;
         FollowDenied(chat);
+        ArenaChat = chat;
         if (chat.Int("compactAt") is { } at)
         {
             AccountCompactAt = new AccountCompaction(at, chat.Str("compactSource") == "account");

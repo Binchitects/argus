@@ -726,6 +726,22 @@ internal sealed class AgentChanges(Workspace workspace)
         }
     }
 
+    /// <summary>A change found on disk (a command's, code the agent ran): what the file held before the agent, unless known already.</summary>
+    public void RecordFound(string full, string? before, string? now)
+    {
+        lock (_gate)
+        {
+            if (!_before.TryGetValue(full, out var had))
+            {
+                _before[full] = had = before;
+            }
+            if (had == now)
+            {
+                _before.Remove(full);
+            }
+        }
+    }
+
     public bool Has(string full)
     {
         lock (_gate)

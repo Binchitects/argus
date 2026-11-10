@@ -1735,6 +1735,15 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         var turn = new Spend();
         _rt.Turn = turn;
         _answerId = null;
+        // What each file of the folder is as the turn begins: what the agent changes by any means is found against it.
+        try
+        {
+            _turnFiles.Begin(CancellationToken.None);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            // Its file tools' changes are listed still.
+        }
         // What fills the window as the turn finds it (before it adds to it), for a Context view first opened while it runs.
         try
         {
@@ -1815,6 +1824,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await AfterGoalTurnAsync(job, turn, clock.Elapsed);
             }
             _rt.Turn = null;
+            // What the turn changed by any means, before the page reads the agent's changes.
+            FoundChanges(CancellationToken.None);
             // The turn ended however it did (stopped before the model was asked, too): the web chat is let go.
             _rt.Sync?.EndTurn();
             End(job, new JsonObject
@@ -2338,6 +2349,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["noAccess"] = false,
             ["durationMs"] = (long)took.TotalMilliseconds,
         };
+        if (result.Change is null && !declined && !ReadOnlyTools.Contains(name))
+        {
+            // A command, code it ran, a sub-agent, a server's tool: what it changed in the folder is the agent's change too.
+            if (FoundChanges(CancellationToken.None) is { Count: > 0 } found)
+            {
+                e["changed"] = new JsonArray([.. found.Select(f => (JsonNode)f)]);
+            }
+        }
         if (result.Change is { } change && !result.Error)
         {
             _changes.Record(change);
@@ -2427,8 +2446,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
     }
 
+    /// <summary>The tools that only read: no look for changes after them.</summary>
+    private static readonly HashSet<string> ReadOnlyTools = new(StringComparer.Ordinal)
+    {
+        "read_file", "list_dir", "glob", "grep", "read_result", "command_output", "recall", "search_history", "search_sessions", "session_search",
+        "session_read", "web_search", "web_fetch", "find_symbol", "plan", "checklist_check", "screenshot", "open_chat", "use_skill",
+    };
+
     private void JobEnded(CommandJob job)
     {
+        // What the command changed, once it ended (a background one after its turn too).
+        FoundChanges(CancellationToken.None);
         FlushJob(job.Id);
         lock (_jobOutput)
         {
