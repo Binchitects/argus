@@ -18,6 +18,46 @@ describe('shell', () => {
     expect(within(nav).getByRole('link', { name: 'Chat' })).toBeInTheDocument()
     expect(within(nav).queryByRole('link', { name: 'People' })).not.toBeInTheDocument()
     expect(within(nav).queryByText('Administration')).not.toBeInTheDocument()
+    // The workspace only: no tabs.
+    expect(screen.queryByRole('tablist', { name: 'Sidebar' })).not.toBeInTheDocument()
+  })
+
+  it("gives an admin three sidebars, the workspace's, the dashboards' and the administration's, each by the page opened", async () => {
+    fakeApi(admin)
+    renderApp('/')
+    const tabs = await screen.findByRole('tablist', { name: 'Sidebar' })
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Workspace', 'Monitoring', 'Admin'])
+    expect(within(tabs).getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true')
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    // The most used first: the everyday pages, then building, creating, organising, and one's own.
+    expect(within(nav).getAllByRole('link').slice(0, 5).map((l) => l.textContent)).toEqual(['Home', 'Chat', 'Assistants', 'Projects', 'Wiki'])
+    expect(within(nav).queryByRole('link', { name: 'People' })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('link', { name: 'Dashboards' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(tabs).getByRole('tab', { name: 'Admin' }))
+    expect(within(tabs).getByRole('tab', { name: 'Admin' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(nav).getByRole('link', { name: 'People' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Models' })).toBeInTheDocument()
+    expect(within(nav).queryByRole('link', { name: 'Chat' })).not.toBeInTheDocument()
+    expect(within(nav).queryByRole('link', { name: 'Dashboards' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(tabs).getByRole('tab', { name: 'Monitoring' }))
+    expect(within(nav).getByRole('link', { name: 'Dashboards' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    // A page opened shows its own tab, and its tab in the breadcrumb.
+    await userEvent.click(within(nav).getByRole('link', { name: 'Logs' }))
+    expect(await within(screen.getByRole('navigation', { name: 'Breadcrumb' })).findByText('Logs')).toBeInTheDocument()
+    expect(within(tabs).getByRole('tab', { name: 'Monitoring' })).toHaveAttribute('aria-selected', 'true')
+    expect(await within(screen.getByRole('navigation', { name: 'Breadcrumb' })).findByText('Monitoring')).toBeInTheDocument()
+  })
+
+  it('opens on the tab of the page it starts on, and shows only the tabs an admin has pages in', async () => {
+    fakeApi({ ...member, permissions: ['people.read'] })
+    const { router } = renderApp('/admin/people')
+    const tabs = await screen.findByRole('tablist', { name: 'Sidebar' })
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Workspace', 'Admin'])
+    expect(within(tabs).getByRole('tab', { name: 'Admin' })).toHaveAttribute('aria-selected', 'true')
+    expect(router.state.location.pathname).toBe('/admin/people')
   })
 
   const source = 'https://github.com/Binchitects/argus'
@@ -86,7 +126,10 @@ describe('shell', () => {
     fakeApi(admin)
     renderApp('/')
     const nav = await screen.findByRole('navigation', { name: 'Main' })
-    for (const name of ['People', 'Settings', 'Audit log', 'Indexing', 'Monitoring']) expect(within(nav).getByRole('link', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'Admin' }))
+    for (const name of ['People', 'Settings', 'Audit log', 'Indexing']) expect(within(nav).getByRole('link', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'Monitoring' }))
+    expect(within(nav).getByRole('link', { name: 'Monitoring' })).toBeInTheDocument()
     expect(await screen.findByText('All 1 up')).toBeInTheDocument()
   })
 
@@ -185,7 +228,9 @@ describe('shell', () => {
     expect(people.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'size-9', 'bg-sidebar-accent']))
     expect(people.className).not.toMatch(/isActive|=>/)
     expect(people).toHaveAttribute('aria-current', 'page')
-    expect(within(nav).getByRole('link', { name: 'Chat' })).not.toHaveAttribute('aria-current')
+    expect(within(nav).getByRole('link', { name: 'Groups' })).not.toHaveAttribute('aria-current')
+    // Collapsed, the tabs are icons, named.
+    expect(screen.getByRole('tab', { name: 'Admin' })).toHaveAttribute('aria-selected', 'true')
     await userEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
     expect(within(nav).getByRole('link', { name: 'People' })).toHaveAttribute('aria-current', 'page')
   })

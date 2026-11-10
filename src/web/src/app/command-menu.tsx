@@ -7,7 +7,7 @@ import { colorThemes } from '@/lib/color-themes'
 import { commandFilter } from '@/lib/command-filter'
 import { useTheme } from '@/lib/theme'
 import { useChooseColorTheme } from './color-theme'
-import { visibleNavigation } from './nav'
+import { spaceTitle, visibleNavigation } from './nav'
 import { useSignOut } from './use-sign-out'
 
 interface Command {
@@ -35,7 +35,7 @@ export function CommandMenu({ open, onOpenChange, me, onWhatsNew }: { open: bool
   const commands = useMemo<Command[]>(
     () => [
       ...visibleNavigation(me).flatMap((s) =>
-        s.items.map((i) => ({ id: i.path, title: i.title, group: s.title, icon: i.icon, keywords: i.keywords, run: () => navigate(i.path) })),
+        s.items.map((i) => ({ id: i.path, title: i.title, group: spaceTitle(s.space), icon: i.icon, keywords: i.keywords, run: () => navigate(i.path) })),
       ),
       { id: 'account', title: 'Your account', group: 'Account', icon: UserRound, keywords: ['password', '2fa', 'api key', 'profile'], run: () => navigate('/account') },
       { id: 'help', title: 'Manual', group: 'Account', icon: BookOpen, keywords: ['help', 'docs', 'documentation', 'how to', 'guide'], run: () => navigate('/help') },

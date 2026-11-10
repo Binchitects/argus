@@ -81,10 +81,14 @@ test('navigation: the sidebar on desktop, a drawer on the phone', async ({ page,
     await expect(page.getByRole('complementary', { name: 'Sidebar' })).toBeHidden()
     await page.getByRole('button', { name: 'Open navigation' }).click()
     await page.getByRole('dialog').getByRole('link', { name: 'Your account' }).or(page.getByRole('dialog').getByRole('link', { name: 'Home' })).first().waitFor()
+    // The dashboards have a sidebar of their own: its tab first.
+    await page.getByRole('dialog').getByRole('tab', { name: 'Monitoring' }).click()
     await page.getByRole('dialog').getByRole('link', { name: 'Dashboards' }).click()
     await expect(page.getByRole('dialog')).toBeHidden()
   } else {
     const sidebar = page.getByRole('complementary', { name: 'Sidebar' })
+    await expect(sidebar.getByRole('link', { name: 'Dashboards' })).toHaveCount(0)
+    await sidebar.getByRole('tab', { name: 'Monitoring' }).click()
     await sidebar.getByRole('link', { name: 'Dashboards' }).click()
     await page.getByRole('button', { name: 'Collapse sidebar' }).click()
     await expect(sidebar.getByRole('link', { name: 'Dashboards' })).toBeVisible()

@@ -19,7 +19,7 @@ import { continueTo } from './continue'
 import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
-import { findNavItem, mayOpen, visibleNavigation, type NavItem, type NavSection } from './nav'
+import { findNavItem, mayOpen, spaceOf, spaces, spaceTitle, visibleNavigation, type NavItem, type NavSection, type Space } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
 
@@ -320,22 +320,76 @@ function SidebarLink({ item, collapsed, onNavigate }: { item: NavItem; collapsed
   )
 }
 
-function SidebarNav({ sections, collapsed, onNavigate }: { sections: NavSection[]; collapsed: boolean; onNavigate?: () => void }) {
+/**
+ * The sidebar's tabs, each a sidebar of its own (the tools and chats, the dashboards, the administration): only those the
+ * person has pages in, none for one who has the workspace only. The tab follows the page opened; another is a click away.
+ */
+function useSpace(sections: NavSection[]) {
+  const { pathname } = useLocation()
+  const available = spaces.filter((sp) => sections.some((s) => s.space === sp.id))
+  // A tab chosen by hand holds while its page stays open; opening a page shows that page's tab.
+  const [picked, setPicked] = useState<{ path: string; space: Space } | null>(null)
+  const chosen = picked?.path === pathname ? picked.space : spaceOf(pathname)
+  const space = available.some((a) => a.id === chosen) ? chosen : 'work'
+  return { space, setSpace: (s: Space) => setPicked({ path: pathname, space: s }), available }
+}
+
+function SpaceTabs({ available, space, onChoose, collapsed }: { available: typeof spaces; space: Space; onChoose: (s: Space) => void; collapsed: boolean }) {
   return (
-    <nav aria-label="Main" className="flex-1 overflow-y-auto px-2 py-3">
-      {sections.map((s, i) => (
-        <div key={s.title} className={collapsed ? 'mb-2' : 'mb-4'}>
-          {collapsed ? i > 0 && <div className="mx-2 mb-2 h-px bg-sidebar-border" aria-hidden="true" /> : <p className="px-2 pb-1.5 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">{s.title}</p>}
-          <ul className="grid gap-0.5">
-            {s.items.map((item) => (
-              <li key={item.path}>
-                <SidebarLink item={item} collapsed={collapsed} onNavigate={onNavigate} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </nav>
+    <div role="tablist" aria-label="Sidebar" aria-orientation={collapsed ? 'vertical' : 'horizontal'} className={cn('border-b border-sidebar-border p-2', collapsed ? 'grid gap-1' : 'grid grid-cols-3 gap-1')}>
+      {available.map((sp) => {
+        const selected = sp.id === space
+        const tab = (
+          <button
+            key={sp.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-label={collapsed ? sp.title : undefined}
+            onClick={() => onChoose(sp.id)}
+            className={cn(
+              'flex items-center justify-center rounded-md text-xs font-medium transition-colors duration-150 hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+              collapsed ? 'mx-auto size-9' : 'h-12 flex-col gap-1 px-1',
+              selected ? 'bg-sidebar-accent text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            <sp.icon className="size-4 shrink-0" aria-hidden="true" />
+            {!collapsed && <span className="truncate">{sp.title}</span>}
+          </button>
+        )
+        return collapsed ? (
+          <Tooltip key={sp.id} content={sp.title} side="right">
+            {tab}
+          </Tooltip>
+        ) : (
+          tab
+        )
+      })}
+    </div>
+  )
+}
+
+function SidebarNav({ sections, collapsed, onNavigate }: { sections: NavSection[]; collapsed: boolean; onNavigate?: () => void }) {
+  const { space, setSpace, available } = useSpace(sections)
+  const shown = sections.filter((s) => s.space === space)
+  return (
+    <>
+      {available.length > 1 && <SpaceTabs available={available} space={space} onChoose={setSpace} collapsed={collapsed} />}
+      <nav aria-label="Main" className="flex-1 overflow-y-auto px-2 py-3">
+        {shown.map((s, i) => (
+          <div key={s.title} className={collapsed ? 'mb-2' : 'mb-4'}>
+            {collapsed ? i > 0 && <div className="mx-2 mb-2 h-px bg-sidebar-border" aria-hidden="true" /> : <p className="px-2 pb-1.5 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">{s.title}</p>}
+            <ul className="grid gap-0.5">
+              {s.items.map((item) => (
+                <li key={item.path}>
+                  <SidebarLink item={item} collapsed={collapsed} onNavigate={onNavigate} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </>
   )
 }
 
@@ -347,9 +401,9 @@ function Breadcrumbs() {
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
       <ol className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">
-        {section && section.title !== 'Workspace' && (
+        {section && section.space !== 'work' && (
           <>
-            <li className="hidden sm:block">{section.title}</li>
+            <li className="hidden sm:block">{spaceTitle(section.space)}</li>
             <li className="hidden sm:block" aria-hidden="true">/</li>
           </>
         )}
