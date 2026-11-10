@@ -7,14 +7,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Projects;
 
-public sealed record ProjectTotals(long Requests, long Input, long Cached, long Output, decimal Cost, double AgentSeconds, double ActiveSeconds, int People, int Messages);
+/// <param name="AgentSeconds">The time the models were answering: requests at once counted once.</param>
+/// <param name="ActiveSeconds">The people's own time: reading the answers and writing back (from an answer's end to their next message; a longer break than <see cref="ProjectReport.Idle"/> a minute).</param>
+/// <param name="WaitingSeconds">The time the people waited for the answers: from each question to the end of its answer.</param>
+public sealed record ProjectTotals(long Requests, long Input, long Cached, long Output, decimal Cost, double AgentSeconds, double ActiveSeconds, int People, int Messages, double WaitingSeconds = 0);
 
 public sealed record ProjectBucket(DateTimeOffset At, long Input, long Output, decimal Cost);
 
 /// <summary>A person's share: their requests and what they cost, the model's time on them (agent) and their own time in the chats (active).</summary>
 /// <param name="Input">Input not read from the prompt cache; <paramref name="Cached"/> read from it; <paramref name="Output"/> the answers' (adding up to <paramref name="Tokens"/>).</param>
 public sealed record ProjectPerson(Guid? Id, string Name, string? Email, long Requests, long Tokens, decimal Cost, double AgentSeconds, double ActiveSeconds, int Messages,
-    long Input = 0, long Cached = 0, long Output = 0);
+    long Input = 0, long Cached = 0, long Output = 0, double WaitingSeconds = 0);
 
 public sealed record ProjectUse(string Name, long Requests, long Tokens, decimal Cost);
 
@@ -81,19 +84,39 @@ public static class ProjectReport
             """, p, ct);
         var byModel = await sql.QueryAsync($"select r.model, count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0) {Where} group by 1 order by 4 desc, 2 desc", p, ct);
         var bySurface = await sql.QueryAsync($"select r.surface, count(*), coalesce(sum(r.total_tokens),0), coalesce(sum(r.cost),0) {Where} group by 1 order by 4 desc, 2 desc", p, ct);
-        // The people's own time: each person's questions in the project's chats (Code Arena's sessions are among them), in stretches.
+        // The models' time: each request from its start to its end, those at once (sub-agents, steps side by side) counted
+        // once: the islands of overlapping requests, per person and for the whole project.
+        static string Busy(string who) => $"""
+            with r as (select {who} as who, r.started_at as s, greatest(r.ended_at, r.started_at) as e {Where}),
+            o as (select who, s, e, max(e) over (partition by who order by s, e rows between unbounded preceding and 1 preceding) as prev from r),
+            i as (select who, s, e, sum(case when prev is null or s > prev then 1 else 0 end) over (partition by who order by s, e) as island from o)
+            select who, coalesce(sum(extract(epoch from l - f)), 0) from (select who, island, min(s) as f, max(e) as l from i group by who, island) x group by who
+            """;
+        var busyBy = (await sql.QueryAsync(Busy("r.user_id::text"), p, ct)).Rows.Where(r => r[0] is string).ToDictionary(r => Guid.Parse((string)r[0]!), r => Dbl(r[1]));
+        var busyAll = (await sql.QueryAsync(Busy("1"), p, ct)).Rows.Select(r => Dbl(r[1])).FirstOrDefault();
+        // The people's own time and their waiting, from the project's chats (Code Arena's sessions are among them): each
+        // question's time since the answer before it ended (reading, then writing; a break past the idle time is a minute),
+        // and from it to the end of its answer (waiting).
         var active = await sql.QueryAsync("""
-            with m as (
-              select coalesce(m."AuthorId", c."UserId") as who, m."CreatedAt" as at
+            with ev as (
+              select c."Id" as conv, coalesce(m."AuthorId", c."UserId") as who, m."Role" as role, m."CreatedAt" as at,
+                     m."CreatedAt" + make_interval(secs => coalesce(m."DurationMs", 0) / 1000.0) as ends
               from chat_messages m join conversations c on c."Id" = m."ConversationId"
-              where c."WorkProjectId" = @p and c."DeletedAt" is null and m."Role" = 'user' and m."CreatedAt" >= @from and m."CreatedAt" < @to
-            ), g as (
-              select who, extract(epoch from at - lag(at) over (partition by who order by at)) as gap from m
+              where c."WorkProjectId" = @p and c."DeletedAt" is null and m."Role" in ('user', 'assistant') and m."CreatedAt" >= @from and m."CreatedAt" < @to
+            ), q as (
+              select u.who, u.at,
+                     (select max(a.ends) from ev a where a.conv = u.conv and a.role = 'assistant' and a.at < u.at) as before_end,
+                     (select max(a.ends) from ev a where a.conv = u.conv and a.role = 'assistant' and a.at >= u.at
+                        and a.at < coalesce((select min(n.at) from ev n where n.conv = u.conv and n.role = 'user' and n.at > u.at), 'infinity'::timestamptz)) as answered
+              from ev u where u.role = 'user'
             )
-            select who, count(*), coalesce(sum(case when gap is null or gap > @idle then 60 else gap end), 0) from g group by who
+            select who, count(*),
+                   coalesce(sum(case when before_end is null or at <= before_end or extract(epoch from at - before_end) > @idle then 60 else extract(epoch from at - before_end) end), 0),
+                   coalesce(sum(greatest(extract(epoch from answered - at), 0)), 0)
+            from q group by who
             """, p, ct);
 
-        var seconds = active.Rows.Where(r => r[0] is string).ToDictionary(r => Guid.Parse((string)r[0]!), r => (Messages: (int)Num(r[1]), Seconds: Dbl(r[2])));
+        var seconds = active.Rows.Where(r => r[0] is string).ToDictionary(r => Guid.Parse((string)r[0]!), r => (Messages: (int)Num(r[1]), Seconds: Dbl(r[2]), Waiting: Dbl(r[3])));
         var ids = byPerson.Rows.Select(r => Id(r[0])).OfType<Guid>().Concat(seconds.Keys).Distinct().ToList();
         var names = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id))
             .Select(u => new { u.Id, Name = u.DisplayName == null || u.DisplayName == "" ? u.UserName : u.DisplayName, u.Email }).ToDictionaryAsync(u => u.Id, ct);
@@ -101,14 +124,16 @@ public static class ProjectReport
         foreach (var r in byPerson.Rows)
         {
             var id = Id(r[0]);
-            var (messages, secs) = id is { } i && seconds.TryGetValue(i, out var s) ? s : (0, 0d);
+            var (messages, secs, waiting) = id is { } i && seconds.TryGetValue(i, out var s) ? s : (0, 0d, 0d);
             var known = id is { } k && names.TryGetValue(k, out var n) ? n : null;
-            people.Add(new ProjectPerson(id, known?.Name ?? (r[1] as string) ?? "(no one)", known?.Email ?? r[1] as string, Num(r[2]), Num(r[3]), Dec(r[4]), Num(r[5]) / 1000.0, secs, messages, Num(r[6]), Num(r[7]), Num(r[8])));
+            var busy = id is { } b && busyBy.TryGetValue(b, out var bs) ? bs : 0;
+            people.Add(new ProjectPerson(id, known?.Name ?? (r[1] as string) ?? "(no one)", known?.Email ?? r[1] as string, Num(r[2]), Num(r[3]), Dec(r[4]), busy, secs, messages,
+                Num(r[6]), Num(r[7]), Num(r[8]), waiting));
         }
-        foreach (var (id, (messages, secs)) in seconds.Where(s => people.All(x => x.Id != s.Key)))
+        foreach (var (id, (messages, secs, waiting)) in seconds.Where(s => people.All(x => x.Id != s.Key)))
         {
             var known = names.GetValueOrDefault(id);
-            people.Add(new ProjectPerson(id, known?.Name ?? "(a former member)", known?.Email, 0, 0, 0, 0, secs, messages));
+            people.Add(new ProjectPerson(id, known?.Name ?? "(a former member)", known?.Email, 0, 0, 0, 0, secs, messages, WaitingSeconds: waiting));
         }
         people = [.. people.OrderByDescending(x => x.Cost).ThenByDescending(x => x.ActiveSeconds).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)];
 
@@ -133,8 +158,8 @@ public static class ProjectReport
             chats.Count(c => c.Kind == null && c.Origin != Chat.CodeArenaSync.Origin), chats.Count(c => c.Kind == Core.Chat.RoomMember.Room), chats.Count(c => c.Origin == Chat.CodeArenaSync.Origin));
 
         var month = (await ProjectBudgets.SpentAsync(db, [project.Id], DateTimeOffset.UtcNow, ct)).GetValueOrDefault(project.Id);
-        var total = new ProjectTotals(Num(totals[0]), Num(totals[1]), Num(totals[2]), Num(totals[3]), Dec(totals[4]), Num(totals[5]) / 1000.0,
-            seconds.Values.Sum(s => s.Seconds), people.Count(x => x.Requests > 0 || x.Messages > 0), seconds.Values.Sum(s => s.Messages));
+        var total = new ProjectTotals(Num(totals[0]), Num(totals[1]), Num(totals[2]), Num(totals[3]), Dec(totals[4]), busyAll,
+            seconds.Values.Sum(s => s.Seconds), people.Count(x => x.Requests > 0 || x.Messages > 0), seconds.Values.Sum(s => s.Messages), seconds.Values.Sum(s => s.Waiting));
         // The work done in the time, by hand: each task's estimate; a goal's own only when none of its tasks has one.
         bool InRange(DateTimeOffset? at) => at >= from && at < to;
         var estimatedGoals = tasks.Where(t => t.HumanHours is not null && t.GoalId is not null).Select(t => t.GoalId!.Value).ToHashSet();
@@ -179,7 +204,8 @@ public static class ProjectReport
             new("Requests", t.Requests.ToString("#,##0", CultureInfo.InvariantCulture), $"{n.Models.Count} model{(n.Models.Count == 1 ? "" : "s")}"),
             new("People", t.People.ToString(CultureInfo.InvariantCulture), $"{t.Messages:#,##0} messages"),
             new("Active time", ReportFiles.Hours(t.ActiveSeconds), "People's own time in the chats"),
-            new("Agent time", ReportFiles.Hours(t.AgentSeconds), "The models' time answering"),
+            new("Agent time", ReportFiles.Hours(t.AgentSeconds), "The models' time answering, at once counted once"),
+            new("Waiting", ReportFiles.Hours(t.WaitingSeconds), "People's time waiting for the answers"),
             new("Goals done", $"{progress.GoalsDone} of {progress.Goals}", progress.Goals == 0 ? "No goals yet" : $"{100 * progress.GoalsDone / progress.Goals}%"),
             new("Tasks done", $"{progress.TasksDone + progress.StepsDone} of {progress.Tasks + progress.Steps}", $"{progress.TasksDoneInRange} in this time; {merged.Count} change{(merged.Count == 1 ? "" : "s")} merged"),
         };
@@ -198,8 +224,8 @@ public static class ProjectReport
         var tables = new List<ReportTable>
         {
             new("People", [new("Person", Width: 2.2), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("In", ReportKind.Number), new("Cached", ReportKind.Number),
-                    new("Out", ReportKind.Number), new("Cost", ReportKind.Money), new("Agent time", ReportKind.Hours), new("Active time", ReportKind.Hours), new("Messages", ReportKind.Number, 0.8)],
-                [.. shown.Select(x => (object?[])[x.Name, x.Requests, x.Tokens, x.Input, x.Cached, x.Output, x.Cost, x.AgentSeconds, x.ActiveSeconds, x.Messages])],
+                    new("Out", ReportKind.Number), new("Cost", ReportKind.Money), new("Agent time", ReportKind.Hours), new("Active time", ReportKind.Hours), new("Waiting", ReportKind.Hours), new("Messages", ReportKind.Number, 0.8)],
+                [.. shown.Select(x => (object?[])[x.Name, x.Requests, x.Tokens, x.Input, x.Cached, x.Output, x.Cost, x.AgentSeconds, x.ActiveSeconds, x.WaitingSeconds, x.Messages])],
                 everyone ? null : "Only your own row: each person's share is for the project's owners."),
             new("Models", [new("Model", Width: 2.4), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("Cost", ReportKind.Money)],
                 [.. n.Models.Select(m => (object?[])[m.Name, m.Requests, m.Tokens, m.Cost])]),

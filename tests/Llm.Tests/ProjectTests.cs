@@ -186,6 +186,44 @@ public sealed class ProjectTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_persons_time_is_reading_and_writing_after_each_answer_and_their_waiting_is_until_the_answer_ends()
+    {
+        var admin = await AdminAsync();
+        var (_, ann, _, _) = await PersonAsync(admin);
+        var id = await ProjectAsync(ann, new { name = "Timing" });
+        var chat = await ChatAsync(ann);
+        await StatusAssert.Is(HttpStatusCode.OK, await PutAsync(ann, $"/api/chat/conversations/{chat}/project", new { projectId = id }));
+        // A chat whose times are known: a question; its answer 30 s later, written for 20 s; the next question 2 min after the
+        // answer ended (reading and writing); its answer at once, for 10 s; then a question an hour later (a break: a minute).
+        var t0 = DateTimeOffset.UtcNow.AddHours(-3);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Guid? parent = null;
+            var n = 0;
+            void Add(string role, DateTimeOffset at, int? ms = null)
+            {
+                var m = new Llm.Core.Chat.ChatMessage { ConversationId = chat, ParentId = parent, Role = role, Content = role, Sequence = ++n, CreatedAt = at, DurationMs = ms };
+                db.ChatMessages.Add(m);
+                parent = m.Id;
+            }
+            Add("user", t0);
+            Add("assistant", t0.AddSeconds(30), 20_000);
+            Add("user", t0.AddSeconds(50 + 120));
+            Add("assistant", t0.AddSeconds(170), 10_000);
+            Add("user", t0.AddSeconds(180).AddHours(1));
+            await db.SaveChangesAsync();
+        }
+        var report = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}/report?{Window(t0.AddMinutes(-1), DateTimeOffset.UtcNow)}"));
+        var totals = report.GetProperty("totals");
+        // Her time: a minute for the first, 120 s after the first answer, a minute after the break.
+        Assert.Equal(60 + 120 + 60, totals.GetProperty("activeSeconds").GetDouble(), 1);
+        // Her waiting: 50 s for the first answer (30 s to start, 20 s written), 10 s for the second, none for the last.
+        Assert.Equal(50 + 10, totals.GetProperty("waitingSeconds").GetDouble(), 1);
+        Assert.Equal(60, report.GetProperty("people").EnumerateArray().Single().GetProperty("waitingSeconds").GetDouble(), 1);
+    }
+
+    [Fact]
     [Trait("Control", "DAT-09")]
     public async Task A_projects_usage_is_its_chats_requests_and_those_tagged_with_it_and_a_moved_chat_takes_its_own()
     {
@@ -225,7 +263,8 @@ public sealed class ProjectTests(AppFixture app)
         Assert.Equal(0.042m, totals.GetProperty("cost").GetDecimal());
         Assert.Equal(1000 + 50 + 3000, totals.GetProperty("input").GetInt64() + totals.GetProperty("cached").GetInt64());
         Assert.Equal(410, totals.GetProperty("output").GetInt64());
-        Assert.Equal(12, totals.GetProperty("agentSeconds").GetDouble());
+        // The models' time: three requests of 4 s, two of them at once (counted once), the third later.
+        Assert.Equal(8, totals.GetProperty("agentSeconds").GetDouble());
         // Her question in the chat is a stretch of her own time.
         Assert.True(totals.GetProperty("activeSeconds").GetDouble() >= 60);
         var person = report.GetProperty("people").EnumerateArray().Single();
@@ -496,7 +535,7 @@ public sealed class ProjectTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, xlsx);
         var sheets = Llm.Api.Insights.TabularFiles.Read("report.xlsx", await xlsx.Content.ReadAsByteArrayAsync());
         var people = sheets.Single(s => s.Name == "report People");
-        Assert.Equal(["Person", "Requests", "Tokens", "In", "Cached", "Out", "Cost", "Agent time (hours)", "Active time (hours)", "Messages"], people.Header);
+        Assert.Equal(["Person", "Requests", "Tokens", "In", "Cached", "Out", "Cost", "Agent time (hours)", "Active time (hours)", "Waiting (hours)", "Messages"], people.Header);
         Assert.Equal(6.0, Convert.ToDouble(people.Rows[0][1], System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal(1.5, Convert.ToDouble(people.Rows[0][6], System.Globalization.CultureInfo.InvariantCulture), 6);
         Assert.Contains(sheets, s => s.Name == "report Summary");
@@ -509,7 +548,7 @@ public sealed class ProjectTests(AppFixture app)
         // A viewer's export has their own row only, and says so.
         var at = Array.IndexOf(lines, "People");
         Assert.StartsWith("Only your own row", lines[at + 1], StringComparison.Ordinal);
-        Assert.Equal("Person,Requests,Tokens,In,Cached,Out,Cost ($),Agent time (hours),Active time (hours),Messages", lines[at + 2]);
+        Assert.Equal("Person,Requests,Tokens,In,Cached,Out,Cost ($),Agent time (hours),Active time (hours),Waiting (hours),Messages", lines[at + 2]);
         Assert.Equal("", lines[at + 3]);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ann.GetAsync($"/api/projects/{id}/report/export?format=docx&{window}"));
 

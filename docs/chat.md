@@ -1019,10 +1019,12 @@ before. Deleting one leaves its chats their owners', in no project.
 The project's page shows, over the time chosen (see
 [time windows](#time-windows)): its cost, tokens in (and how many came from
 the engine's cache) and out, requests, the people who worked in it, the
-**active time** (each person's own time in its chats, a stretch at a time:
-messages less than 15 minutes apart are one stretch, and each stretch counts
-a minute more) and the **agent time** (the models' time answering for it),
-by day, by person, by model and by where it came from (the chat, API keys and
+**active time** (each person's own time in its chats: from an answer's end to
+their next message, reading it and writing back; a break of more than 15
+minutes, or a first message, counts a minute), the **agent time** (the models'
+time answering for it, from each request's start to its end, requests at once,
+such as sub-agents, counted once) and the **waiting** (each person's time from
+a question to the end of its answer), by day, by person, by model and by where it came from (the chat, API keys and
 Code Arena, the app's own work). Owners see each person's row; others see
 their own.
 

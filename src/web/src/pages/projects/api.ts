@@ -84,6 +84,8 @@ export interface ProjectPerson {
   name: string
   email: string | null
   requests: number
+  /** The time they waited for the answers. */
+  waitingSeconds?: number
   tokens: number
   /** Input not read from the prompt cache, input read from it, output. */
   input: number
@@ -106,7 +108,7 @@ export interface ProjectReport {
   from: string
   to: string
   intervalMs: number
-  totals: { requests: number; input: number; cached: number; output: number; cost: number; agentSeconds: number; activeSeconds: number; people: number; messages: number }
+  totals: { requests: number; input: number; cached: number; output: number; cost: number; agentSeconds: number; activeSeconds: number; people: number; messages: number; waitingSeconds?: number }
   progress: { goals: number; goalsDone: number; tasks: number; tasksDone: number; tasksDoneInRange: number; steps: number; stepsDone: number; chats: number; rooms: number; sessions: number }
   models: ProjectUse[]
   surfaces: ProjectUse[]

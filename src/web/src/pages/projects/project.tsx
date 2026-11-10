@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AppWindow, Bot, Clock, Coins, ExternalLink, Gauge, FolderGit2, GitMerge, Globe2, Hash, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
+import { AppWindow, Bot, Clock, Coins, ExternalLink, Gauge, FolderGit2, GitMerge, Globe2, Hash, Hourglass, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -57,6 +57,7 @@ const peopleColumns: ColumnDef<ProjectPerson>[] = [
   { id: 'cost', header: 'Cost', accessorKey: 'cost', meta: right, cell: ({ row }) => money(row.original.cost) },
   { id: 'active', header: 'Active time', accessorKey: 'activeSeconds', meta: right, cell: ({ row }) => hours(row.original.activeSeconds) },
   { id: 'agent', header: 'Agent time', accessorKey: 'agentSeconds', meta: right, cell: ({ row }) => hours(row.original.agentSeconds) },
+  { id: 'waiting', header: 'Waiting', accessorKey: 'waitingSeconds', meta: right, cell: ({ row }) => hours(row.original.waitingSeconds ?? 0) },
 ]
 
 const usageColumns = (what: string): ColumnDef<ProjectUse>[] => [
@@ -206,8 +207,9 @@ function Overview({ project: p, time }: { project: Project; time: TimeWindowStat
             <Stat icon={Hash} label="Tokens" value={formatValue(t.input + t.cached + t.output, 'short')} hint={`${formatValue(t.input + t.cached, 'short')} in (${formatValue(t.cached, 'short')} cached), ${formatValue(t.output, 'short')} out`} />
             <Stat icon={MessageSquare} label="Requests" value={formatValue(t.requests)} hint={`${r.models.length} model${r.models.length === 1 ? '' : 's'}`} />
             <Stat icon={Users} label="People" value={formatValue(t.people)} hint={`${formatValue(t.messages)} messages`} />
-            <Stat icon={Clock} label="Active time" value={hours(t.activeSeconds)} hint="People's own time in its chats" />
-            <Stat icon={Timer} label="Agent time" value={hours(t.agentSeconds)} hint="The models' time answering" />
+            <Stat icon={Clock} label="Active time" value={hours(t.activeSeconds)} hint="People reading the answers and writing back (a longer break counts a minute)" />
+            <Stat icon={Timer} label="Agent time" value={hours(t.agentSeconds)} hint="The models answering, requests at once counted once" />
+            <Stat icon={Hourglass} label="Waiting" value={hours(t.waitingSeconds ?? 0)} hint="People waiting for the answers: from each question to its answer's end" />
             <Stat icon={Target} label="Goals done" value={`${progress.goalsDone} of ${progress.goals}`} hint={done !== null ? `${done}% done` : 'No goals yet'} />
             <Stat icon={ListChecks} label="Tasks done" value={`${tasksDone} of ${tasksAll}`} hint={`${progress.tasksDoneInRange} in this time; ${r.merged.length} merged`} />
           </StatGrid>
