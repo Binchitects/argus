@@ -1,7 +1,7 @@
 # Pointing Hermes at this stack
 
 
-Two independent halves: **the model**, served by the gateway, and **Argus**,
+Two independent halves: **the model**, served by the gateway, and **Farzan Graph**,
 an MCP server for code and documentation lookup. Either works without the
 other.
 
@@ -158,19 +158,19 @@ a checkpoint the gateway no longer serves — `Qwen3.8-27B-AWQ-MTP`, say — Her
 offers it, cannot resolve a window for it, and refuses with the same message
 naming that model. Keep the list equal to what `/v1/models` returns.
 
-## Argus
+## Farzan Graph
 
 ```yaml
 mcp_servers:
-  argus:
-    url: https://argus.llm.localhost/mcp
+  code-intel:
+    url: https://code-intel.llm.localhost/mcp
     headers:
       Authorization: Bearer <your API key>
 ```
 
 The key is your own API key (the app's **Your account → API key**, the same as
-for the gateway). Argus asks the app whose it is and answers as your GitLab
-account, so what you can see through Argus is exactly what you can see in
+for the gateway). Farzan Graph asks the app whose it is and answers as your GitLab
+account, so what you can see through Farzan Graph is exactly what you can see in
 GitLab. It takes no GitLab token.
 
 ## When the agent runs for an hour and lands nothing
@@ -287,7 +287,7 @@ the master key in `api_key`, or a repeated prompt served from cache.
 
 Tool calling needs a model that can hold context across several tool calls and
 choose sensibly. Small models will not manage it well. An 8B will
-struggle to drive Argus well; the 27B is better but still not a frontier
-model. If Argus tool use disappoints, that is a model limit rather than a
+struggle to drive Farzan Graph well; the 27B is better but still not a frontier
+model. If Farzan Graph tool use disappoints, that is a model limit rather than a
 wiring fault — check the wiring with the curl above before concluding
 otherwise.

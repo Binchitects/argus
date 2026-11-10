@@ -3,7 +3,7 @@
 The chat searches the company's own documents: GitLab wikis and issues,
 GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV
 folders, S3 buckets, folders, websites, feeds and uploaded files. Each person finds
-only what they may read, with the title and link to cite. Argus stays the
+only what they may read, with the title and link to cite. Farzan Graph stays the
 code path; this is the documents path.
 
 The same store also feeds **retrieval**: a chat's long files and an assistant's
@@ -13,7 +13,7 @@ first part ([below](#long-files-and-assistants)).
 ## What it needs
 
 - **The embedder**: the `embed` module (llama.cpp with nomic-embed-text, the
-  one Argus uses). The app finds it by its name on the stack's network, as it
+  one Farzan Graph uses). The app finds it by its name on the stack's network, as it
   finds every module. Without it there is no company knowledge: Admin →
   Knowledge says so, the tool is not offered, and files go into answers as
   before.
@@ -22,7 +22,7 @@ first part ([below](#long-files-and-assistants)).
   plain SQL: the same answers, slower.
 - For GitLab sources, **the GitLab bot** (Settings → Scheduled tasks: GitLab
   address and bot token). Its token needs `api` (or `read_api`) and Reporter
-  in the projects. It is never Argus's token.
+  in the projects. It is never Farzan Graph's token.
 - For Confluence and SharePoint sources, **APP_DATA_KEY**: their token or
   client secret is stored encrypted with it, as the other secrets are.
 
@@ -61,7 +61,7 @@ Every add, change, sync now and removal is in the audit log
 
 ### GitLab
 
-- People are matched to GitLab accounts **by username**, as Argus does: a
+- People are matched to GitLab accounts **by username**, as Farzan Graph does: a
   person's user name here is their GitLab username (case does not matter).
 - A project's members are read at every sync and every 15 minutes besides:
   someone who leaves a project stops finding its documents within 15 minutes.
@@ -273,7 +273,7 @@ Each takes an account that only reads, and its secret is stored encrypted
   `s3:ListBucket` and `s3:GetObject` on the bucket is enough.
 - **Feeds**: their addresses, one a line; no secret.
 
-These services do not say who may read what in a form Argus Arena mirrors, so
+These services do not say who may read what in a form Farzan Arena mirrors, so
 the groups you choose read the whole source: give a source to whom may read
 all of it, and make one source per audience.
 
@@ -285,7 +285,7 @@ model in between, each person only what they may read:
 - **Search**: words, a name in the code, a table. **Documents** are the
   passages of the knowledge sources that hold every word (a title holding them
   first), then, when the embedder runs, those nearest in meaning; each with its
-  source, heading and the words around what matched. **Code** is Argus's, asked
+  source, heading and the words around what matched. **Code** is Farzan Graph's, asked
   as the person (the repositories they may read in GitLab), ranked:
   1. the symbol a name means, with what qualifies it matched against its
      scope: `MyLib::TestFunc`, `a.b.c` and `obj->field` find the definition of
@@ -313,7 +313,7 @@ model in between, each person only what they may read:
   how many; open one to list its documents by title.
 - **A document**: read whole, from its passages in order, with **Open the
   original** where it lives (a wiki page, an issue, a SharePoint file).
-- **Repositories** and a code file: what Argus indexed, each repository once
+- **Repositories** and a code file: what Farzan Graph indexed, each repository once
   with how many branches of it are indexed, and the file's first 64 KB.
 
 Every list and search applies the same readers as the chat's search: a

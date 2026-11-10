@@ -43,7 +43,7 @@ export interface CodeState {
   compactAtAccount?: number | null
   /** A newer Code Arena on the Arena ("Code Arena 7.0.0 is available…"), or what updating did; null: none. */
   update?: string | null
-  /** Arena's, Argus's and the person's MCP servers, each connected in the background. */
+  /** Arena's, code-intel's and the person's MCP servers, each connected in the background. */
   servers: ServerStatus[]
   /** The commands run with no time limit in this session, running or ended. */
   jobs: JobSummary[]
@@ -117,12 +117,12 @@ export type Mode = 'ask' | 'auto-edit' | 'plan' | 'yolo'
 
 /** One MCP server of the session, as code-arena sees it now. */
 export interface ServerStatus {
-  /** arena, argus, or the name in the config. */
+  /** arena, code-intel, or the name in the config. */
   name: string
   title: string
   url: string | null
   state: 'connecting' | 'connected' | 'unavailable' | 'failed'
-  /** Its tools in the session (Argus's that Arena serves count as Arena's). */
+  /** Its tools in the session (code-intel's that Arena serves count as Arena's). */
   tools: number
   /** In words: "Arena: 14 tools", "CodeIntel: not connected, tried again at 10:41:07 (…)". */
   status: string
@@ -270,7 +270,7 @@ export interface CodePlanStep {
   notes: string | null
   checkResult: 'passed' | 'failed' | null
   checkOutput: string | null
-  /** The functions, classes or types it changes; what they reach, as Argus found it. */
+  /** The functions, classes or types it changes; what they reach, as code-intel found it. */
   symbols?: string[]
   impact?: string | null
 }

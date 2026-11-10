@@ -19,7 +19,8 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { agoSeconds, formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { NotConfigured } from './argus'
+import { NotConfigured } from './code-intel'
+import { codeIntelName } from '@/lib/brand'
 
 interface PackDetails {
   docs: number | null
@@ -46,7 +47,7 @@ interface PackMeta {
 
 interface Packs {
   configured?: boolean
-  /** What Argus searches: loaded from the library (a link) or installed from a URL (a copy). */
+  /** What code-intel searches: loaded from the library (a link) or installed from a URL (a copy). */
   packs: (PackMeta & { source?: 'library' | 'installed' })[]
   /** The pack library's files, and which are loaded. */
   library?: (PackMeta & { file: string; loaded: boolean })[]
@@ -66,7 +67,7 @@ function contents(k: PackMeta) {
 }
 
 /**
- * Knowledge packs, as the models are: the packs Argus searches, each on a card,
+ * Knowledge packs, as the models are: the packs code-intel searches, each on a card,
  * and "Add a pack" to pick one from the pack library, see what it holds, and
  * install it (a link, so instant and nothing copied), or to install one from a URL.
  */
@@ -75,15 +76,15 @@ export function PacksPage() {
   const confirm = useConfirm()
   const [adding, setAdding] = useState(false)
   const p = useQuery({
-    queryKey: ['admin', 'argus', 'packs'],
-    queryFn: ({ signal }) => api<Packs>('/api/admin/argus/packs', { signal }),
+    queryKey: ['admin', 'code-intel', 'packs'],
+    queryFn: ({ signal }) => api<Packs>('/api/admin/code-intel/packs', { signal }),
     refetchInterval: (q) => (q.state.data?.job?.state === 'running' ? 3000 : false),
   })
   const act = useMutation({
-    mutationFn: ({ action, body }: { action: string; body: object }) => api(`/api/admin/argus/packs/${action}`, { body }),
+    mutationFn: ({ action, body }: { action: string; body: object }) => api(`/api/admin/code-intel/packs/${action}`, { body }),
     onSuccess: (_, { action, body }) => {
-      if (action === 'remove') toast.success(`${(body as { name: string }).name} removed`, { description: 'Argus no longer searches it.' })
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'packs'] })
+      if (action === 'remove') toast.success(`${(body as { name: string }).name} removed`, { description: `${codeIntelName} no longer searches it.` })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'packs'] })
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
@@ -101,7 +102,7 @@ export function PacksPage() {
     if (
       await confirm({
         title: `Remove ${name}?`,
-        description: copy ? 'Argus stops searching it, and its file is deleted: it was installed from a URL.' : 'Argus stops searching it. It stays in the pack library, to add again.',
+        description: copy ? `${codeIntelName} stops searching it, and its file is deleted: it was installed from a URL.` : `${codeIntelName} stops searching it. It stays in the pack library, to add again.`,
         confirm: 'Remove',
         destructive: true,
       })
@@ -112,7 +113,7 @@ export function PacksPage() {
     <>
       <PageHeader
         title="Knowledge packs"
-        description="Prebuilt indexes of documentation (SDKs, standards) that Argus searches next to your code. A pack added here is searched from the next question."
+        description={`Prebuilt indexes of documentation (SDKs, standards) that ${codeIntelName} searches next to your code. A pack added here is searched from the next question.`}
         actions={
           <>
             {p.data.index_url && (
@@ -131,7 +132,7 @@ export function PacksPage() {
         {running && <Alert title={`${p.data.job.action} of ${p.data.job.target ?? 'packs'} running`}>This page follows it; the log is below.</Alert>}
         {p.data.packs.length === 0 ? (
           <EmptyState icon={Package} title="No packs yet">
-            Add one from the pack library: Argus then answers from its documentation next to your code.
+            Add one from the pack library: {codeIntelName} then answers from its documentation next to your code.
           </EmptyState>
         ) : (
           <div className="stagger grid gap-4 xl:grid-cols-2">
@@ -165,7 +166,7 @@ export function PacksPage() {
                       <p className="text-sm text-muted-foreground">
                         {p.data.advisories?.renew_hours
                           ? `Renewed every ${p.data.advisories.renew_hours} hours from GitHub's advisory database and CISA's catalog.`
-                          : "Renewed only when asked (ARGUS_ADVISORIES_RENEW_HOURS is not set)."}
+                          : "Renewed only when asked (CODE_INTEL_ADVISORIES_RENEW_HOURS is not set)."}
                         {p.data.advisories?.last &&
                           (p.data.advisories.last.ok ? ` Last renewed ${agoSeconds(p.data.advisories.last.at)}.` : ` The last renewal failed ${agoSeconds(p.data.advisories.last.at)}: ${p.data.advisories.last.error}`)}
                       </p>
@@ -228,11 +229,11 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
   const shaBad = sha !== '' && !/^[0-9a-fA-F]{64}$/.test(sha)
   const install = useMutation({
     mutationFn: () =>
-      tab === 'library' ? api('/api/admin/argus/packs/load', { body: { file } }) : api('/api/admin/argus/packs/install', { body: { source: source.trim(), sha256: sha || null } }),
+      tab === 'library' ? api('/api/admin/code-intel/packs/load', { body: { file } }) : api('/api/admin/code-intel/packs/install', { body: { source: source.trim(), sha256: sha || null } }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'packs'] })
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'packs'] })
       toast.success(tab === 'library' ? `${chosen?.name} installed` : 'Installing', {
-        description: tab === 'library' ? 'Argus searches it from the next question.' : 'The page follows the download.',
+        description: tab === 'library' ? `${codeIntelName} searches it from the next question.` : 'The page follows the download.',
       })
       onClose()
     },
@@ -241,7 +242,7 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
     <>
       <DialogHeader>
         <DialogTitle>Add a pack</DialogTitle>
-        <DialogDescription>A knowledge pack from the pack library, or from a URL. Only a pack built with Argus's embedding model can be searched.</DialogDescription>
+        <DialogDescription>A knowledge pack from the pack library, or from a URL. Only a pack built with {codeIntelName}'s embedding model can be searched.</DialogDescription>
       </DialogHeader>
       {install.error && <Alert variant="destructive">{errorMessage(install.error)}</Alert>}
       <Tabs value={tab} onValueChange={setTab} className="grid grid-cols-[minmax(0,1fr)]">
@@ -252,7 +253,7 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
         <TabsContent value="library" className="grid gap-4">
           {!packs.library_dir ? (
             <Alert>
-              No pack library is set up: the platform mounts the repository's <code className="font-mono">packs/</code> folder, or <code className="font-mono">ARGUS_PACK_LIBRARY_DIR</code>.
+              No pack library is set up: the platform mounts the repository's <code className="font-mono">packs/</code> folder, or <code className="font-mono">CODE_INTEL_PACK_LIBRARY_DIR</code>.
             </Alert>
           ) : (
             <Field
@@ -262,7 +263,7 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
                   ? `The library is empty: build packs into it with tools/build-packs.sh in the checkout, or bring them in a bundle made with ./arenactl bundle --packs (${packs.library_dir}).`
                   : available.length === 0
                     ? 'Every pack in the library is installed.'
-                    : 'Packs in the library that Argus does not search yet.'
+                    : `Packs in the library that ${codeIntelName} does not search yet.`
               }
             >
               <Select value={file} onValueChange={setFile}>
@@ -287,8 +288,8 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
           {replaces && <Alert>A pack named {chosen.name} is installed already: this one takes its place.</Alert>}
         </TabsContent>
         <TabsContent value="url" className="grid gap-4">
-          <Field label="Pack URL or path" hint="A URL, or a path Argus can read. It is copied into Argus.">
-            <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://…/win32.arguspack" />
+          <Field label="Pack URL or path" hint={`A URL, or a path ${codeIntelName} can read. It is copied into ${codeIntelName}.`}>
+            <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="https://…/win32.kpack" />
           </Field>
           <Field label="SHA-256" hint="Recommended: a changed download is refused." error={shaBad ? '64 hexadecimal characters.' : undefined}>
             <Input value={sha} onChange={(e) => setSha(e.target.value.trim())} className="font-mono text-xs" />

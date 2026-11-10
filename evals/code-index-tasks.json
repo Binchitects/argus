@@ -266,13 +266,13 @@
    "commit": "e553a5ad6446206da4ee03febeb3eff59c0d22f5",
    "at": "e553a5ad6446206da4ee03febeb3eff59c0d22f5^",
    "files": [
-    "argus/mcpsrv/tools.py",
-    "argus/store/packs.py",
+    "code-intel/mcpsrv/tools.py",
+    "code-intel/store/packs.py",
     "evals/run_code_review.py",
     "evals/run_code_review_local.py"
    ],
    "hunks": {
-    "argus/mcpsrv/tools.py": [
+    "code-intel/mcpsrv/tools.py": [
      [
       434,
       434
@@ -286,7 +286,7 @@
       746
      ]
     ],
-    "argus/store/packs.py": [
+    "code-intel/store/packs.py": [
      [
       672,
       672
@@ -407,10 +407,10 @@
    "commit": "d7a3bca8407e16e98c8f5857f0a7d2635e671050",
    "at": "d7a3bca8407e16e98c8f5857f0a7d2635e671050^",
    "files": [
-    "argus/store/packs.py"
+    "code-intel/store/packs.py"
    ],
    "hunks": {
-    "argus/store/packs.py": [
+    "code-intel/store/packs.py": [
      [
       219,
       219
@@ -1007,10 +1007,10 @@
    "commit": "063f7b01b47221fd8d0044dd463fb3acdee26568",
    "at": "063f7b01b47221fd8d0044dd463fb3acdee26568^",
    "files": [
-    "argus/store/packs.py"
+    "code-intel/store/packs.py"
    ],
    "hunks": {
-    "argus/store/packs.py": [
+    "code-intel/store/packs.py": [
      [
       989,
       989
@@ -1235,10 +1235,10 @@
    "commit": "c3698d07b72b68e36975b3674a12e82afd4d3062",
    "at": "c3698d07b72b68e36975b3674a12e82afd4d3062^",
    "files": [
-    "argus/mcpsrv/tools.py"
+    "code-intel/mcpsrv/tools.py"
    ],
    "hunks": {
-    "argus/mcpsrv/tools.py": [
+    "code-intel/mcpsrv/tools.py": [
      [
       384,
       384
@@ -1448,10 +1448,10 @@
    "commit": "b22d91e5422c53a32f6b030ba29b5ecabd3b4185",
    "at": "b22d91e5422c53a32f6b030ba29b5ecabd3b4185^",
    "files": [
-    "argus/store/queries.py"
+    "code-intel/store/queries.py"
    ],
    "hunks": {
-    "argus/store/queries.py": [
+    "code-intel/store/queries.py": [
      [
       91,
       91
@@ -1777,10 +1777,10 @@
    "commit": "e7c8f995b431c91eb8b806d2da035d5f6f968385",
    "at": "e7c8f995b431c91eb8b806d2da035d5f6f968385^",
    "files": [
-    "argus/packs/chunk.py"
+    "code-intel/packs/chunk.py"
    ],
    "hunks": {
-    "argus/packs/chunk.py": [
+    "code-intel/packs/chunk.py": [
      [
       33,
       33
@@ -1808,11 +1808,11 @@
    "commit": "103b1742b72d3fee4d030e1b19cb2eb4895e170a",
    "at": "103b1742b72d3fee4d030e1b19cb2eb4895e170a^",
    "files": [
-    "argus/whichrepo.py",
+    "code-intel/whichrepo.py",
     "deploy/test-gitlab/seed_corpus.py"
    ],
    "hunks": {
-    "argus/whichrepo.py": [
+    "code-intel/whichrepo.py": [
      [
       49,
       49
@@ -1887,11 +1887,11 @@
    "commit": "a0366edd5483812682eba71acbfd01f32a4e859c",
    "at": "a0366edd5483812682eba71acbfd01f32a4e859c^",
    "files": [
-    "argus/cli.py",
-    "argus/worker.py"
+    "code-intel/cli.py",
+    "code-intel/worker.py"
    ],
    "hunks": {
-    "argus/cli.py": [
+    "code-intel/cli.py": [
      [
       41,
       41
@@ -1909,7 +1909,7 @@
       145
      ]
     ],
-    "argus/worker.py": [
+    "code-intel/worker.py": [
      [
       167,
       168
@@ -2382,10 +2382,10 @@
    "commit": "44a5bfe77e9895e281ebf27eab1762cd5635c365",
    "at": "44a5bfe77e9895e281ebf27eab1762cd5635c365^",
    "files": [
-    "argus/mcpsrv/tools.py"
+    "code-intel/mcpsrv/tools.py"
    ],
    "hunks": {
-    "argus/mcpsrv/tools.py": [
+    "code-intel/mcpsrv/tools.py": [
      [
       430,
       433
@@ -2488,10 +2488,10 @@
    "commit": "29196ea38260ec6a3095b55c87218504de8e0de5",
    "at": "29196ea38260ec6a3095b55c87218504de8e0de5^",
    "files": [
-    "argus/store/queries.py"
+    "code-intel/store/queries.py"
    ],
    "hunks": {
-    "argus/store/queries.py": [
+    "code-intel/store/queries.py": [
      [
       5,
       5
@@ -2785,10 +2785,10 @@
    "commit": "322ed6b11d6c962dff847f985ecabc12f6216f3f",
    "at": "322ed6b11d6c962dff847f985ecabc12f6216f3f^",
    "files": [
-    "argus/cli.py"
+    "code-intel/cli.py"
    ],
    "hunks": {
-    "argus/cli.py": [
+    "code-intel/cli.py": [
      [
       11,
       11
@@ -2820,10 +2820,10 @@
    "commit": "b5995f0a1b11141854a385900ceb31f6563dac3d",
    "at": "b5995f0a1b11141854a385900ceb31f6563dac3d^",
    "files": [
-    "argus/cli.py"
+    "code-intel/cli.py"
    ],
    "hunks": {
-    "argus/cli.py": [
+    "code-intel/cli.py": [
      [
       4,
       4
@@ -2851,10 +2851,10 @@
    "commit": "ceff03fa4abbda21f360b5430977cadcd480c127",
    "at": "ceff03fa4abbda21f360b5430977cadcd480c127^",
    "files": [
-    "argus/packs/sources/python_docs.py"
+    "code-intel/packs/sources/python_docs.py"
    ],
    "hunks": {
-    "argus/packs/sources/python_docs.py": [
+    "code-intel/packs/sources/python_docs.py": [
      [
       52,
       52

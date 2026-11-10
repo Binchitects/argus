@@ -26,9 +26,9 @@ const config: ChatConfig = {
   ],
   presets: [{ level: 'xhigh', label: 'Deep think' }, { level: 'off', label: 'No thinking' }],
   defaultThinking: 'xhigh',
-  argus: true,
+  codeIntel: true,
   tools: [
-    { id: 'argus', title: 'Argus', description: 'Searches the code you can read in GitLab.', icon: 'search-code', onByDefault: true, askFirst: false },
+    { id: 'code-intel', title: 'Farzan Graph', description: 'Searches the code you can read in GitLab.', icon: 'search-code', onByDefault: true, askFirst: false },
     { id: 'calculator', title: 'Calculator', description: 'Exact arithmetic.', icon: 'calculator', onByDefault: true, askFirst: true },
   ],
   gitlabUrl: null,
@@ -40,7 +40,7 @@ const config: ChatConfig = {
 const researchTool = { id: 'research', title: 'Deep research', description: 'A plan, sub-agents that search the web, and a report.', icon: 'telescope', onByDefault: true, askFirst: true }
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
-  id: 'c1', title: 'New chat', thinking: null, tools: ['argus', 'calculator'], useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'New chat', thinking: null, tools: ['code-intel', 'calculator'], useCodeIntel: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [], ...over,
 })
 
@@ -246,7 +246,7 @@ describe('chat', () => {
     expect(within(a).getByRole('note')).toHaveTextContent('root/secret (maintainers: @alice)')
   })
 
-  it("Argus's answers link to the code in GitLab, and a file it read is in the Files panel", async () => {
+  it("Farzan Graph's answers link to the code in GitLab, and a file it read is in the Files panel", async () => {
     const rows = [
       { repo_id: 1, path_with_namespace: 'group/app', path: 'src/parse.c', name: 'ParseHeader', kind: 'function', line: 10, end_line: 24, signature: 'int ParseHeader(const char *buf)', is_public: 1, doc: null },
       { repo_id: 1, path_with_namespace: 'group/app', path: 'include/parse.h', name: 'ParseHeader', kind: 'prototype', line: 3, end_line: 3, signature: 'int ParseHeader(const char *buf);', is_public: 1, doc: null },
@@ -278,7 +278,7 @@ describe('chat', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^Files \(1\)$/, hidden: true }))
     const panel = await screen.findByRole('complementary', { name: 'Files' })
-    await userEvent.click(within(panel).getByRole('button', { name: /parse\.c.*read by Argus from group\/app/ }))
+    await userEvent.click(within(panel).getByRole('button', { name: /parse\.c.*read by Farzan Graph from group\/app/ }))
     expect(within(panel).getByRole('link', { name: /Open in GitLab/ })).toHaveAttribute('href', 'https://gitlab.example.com/group/app/-/blob/HEAD/src/parse.c')
     expect(within(panel).getByRole('figure', { name: 'Code: src/parse.c' })).toHaveTextContent('return 0;')
   })
@@ -422,12 +422,12 @@ describe('chat', () => {
     const calls = backend({ events: answer, saved: answered, extra: { 'PATCH /api/chat/conversations/c1': () => ({ status: 204 }) } })
     renderApp('/chat')
     await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
-    const argus = await screen.findByRole('switch', { name: /Argus/ })
+    const codeIntel = await screen.findByRole('switch', { name: /Farzan Graph/ })
     // How a tool asks is a mark on its row; its details are behind its info button.
     expect(screen.getByLabelText('Asks you before each call')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'About Calculator' }))
     expect(screen.getByText('Asks you before each call.')).toBeInTheDocument()
-    await userEvent.click(argus)
+    await userEvent.click(codeIntel)
     expect(screen.getByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
     await ask('hello there')
@@ -436,7 +436,7 @@ describe('chat', () => {
     expect(await within(await screen.findByRole('region', { name: 'Answer' })).findByText(/Here is code/)).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('button', { name: /^Tools:/ }))
     await userEvent.click(await screen.findByRole('switch', { name: /Calculator/ }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ tools: ['argus'] }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ tools: ['code-intel'] }))
   })
 
   it('a tool that asks first waits for Allow, and a picture a tool made is shown', async () => {
@@ -1257,7 +1257,7 @@ describe('chat', () => {
     backend({})
     renderApp('/chat')
     await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
-    await screen.findByRole('switch', { name: /Argus/ })
+    await screen.findByRole('switch', { name: /Farzan Graph/ })
     expect(screen.queryByRole('switch', { name: /Deep research/ })).not.toBeInTheDocument()
   })
 

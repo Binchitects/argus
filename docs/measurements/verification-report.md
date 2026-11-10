@@ -1,4 +1,4 @@
-# Argus end-to-end verification
+# Farzan Graph end-to-end verification
 
 > **History.** Measured with the evaluation harness of the Python implementation, which
 > has since been retired; the retrieval logic it measured is unchanged in the .NET backend.

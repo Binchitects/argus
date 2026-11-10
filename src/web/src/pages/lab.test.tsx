@@ -19,7 +19,7 @@ const message = (over: Pick<Message, 'id' | 'role'> & Partial<Omit<Message, 'id'
 })
 
 const notebook = (messages: Message[] = []): Conversation => ({
-  id: 'n1', title: 'Gaussian integral', thinking: null, tools: ['lab', 'python'], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'n1', title: 'Gaussian integral', thinking: null, tools: ['lab', 'python'], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: messages.at(-1)?.id ?? null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages, labField: 'mathematics',
 })
 

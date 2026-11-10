@@ -13,7 +13,7 @@ Produced by the retired harness's `evals/run_model_bench.py`.
 
 ## The numbers
 
-| model | params | closed book | with Argus | delta | tool calls |
+| model | params | closed book | with Farzan Graph | delta | tool calls |
 |---|---|---|---|---|---|
 | `qwen3.6:27b` (dense) | 27.8B | 5 / 10 | **10 / 10** | +5 | 26 |
 | `qwen3.6:35b` (MoE) | 36.0B | 5 / 10 | 9 / 10 | +4 | 19 |
@@ -25,7 +25,7 @@ denominator rather than counted as a wrong answer.
 
 ## Every model scores 5 closed book, and fails the same five tasks
 
-| | closed book | with Argus |
+| | closed book | with Farzan Graph |
 |---|---|---|
 | coding-style, performance, scripting, sdk-support, code-safety | all three PASS | all three PASS |
 | test-development, code-review, wdk-support, win32-support | all three FAIL | all three PASS |

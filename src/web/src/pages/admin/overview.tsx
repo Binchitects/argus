@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
 import { indexExit, type CertificateStatus, type IndexSummary, type Overview } from './ops-api'
 import { ServiceList } from './services'
+import { codeIntelName } from '@/lib/brand'
 
 export function OverviewPage() {
   const o = useQuery({ queryKey: ['admin', 'overview'], queryFn: ({ signal }) => api<Overview>('/api/admin/overview', { signal }), refetchInterval: 30_000 })
@@ -35,7 +36,7 @@ export function OverviewPage() {
               label="Code index"
               value={d.index.error ? 'Unreachable' : idx?.repos ? `${idx.repos - (idx.stale ?? 0)}/${idx.repos}` : 'Empty'}
               tone={d.index.error || !idx?.repos ? 'destructive' : idx.stale ? 'warning' : undefined}
-              hint={d.index.error ? 'Argus did not answer' : idx?.stale ? `${idx.stale} out of date` : idx?.repos ? 'repositories current' : 'nothing indexed yet'}
+              hint={d.index.error ? `${codeIntelName} did not answer` : idx?.stale ? `${idx.stale} out of date` : idx?.repos ? 'repositories current' : 'nothing indexed yet'}
             />
           )}
           {d.certificate && <CertificateStat cert={d.certificate} />}

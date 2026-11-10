@@ -1,14 +1,14 @@
 import { lexer, type Token, type Tokens } from 'marked'
 import admin from '@docs/admin.md?raw'
 import architecture from '@docs/architecture.md?raw'
-import argusBackup from '@docs/argus/backup-and-restore.md?raw'
-import argusBranches from '@docs/argus/branches.md?raw'
-import argusClients from '@docs/argus/clients.md?raw'
-import argusGraph from '@docs/argus/graph.md?raw'
-import argusPacks from '@docs/argus/knowledge-packs.md?raw'
-import argusOverview from '@docs/argus/overview.md?raw'
-import argusPgvector from '@docs/argus/pgvector-backend.md?raw'
-import argus from '@docs/argus/README.md?raw'
+import codeIntelBackup from '@docs/code-intel/backup-and-restore.md?raw'
+import codeIntelBranches from '@docs/code-intel/branches.md?raw'
+import codeIntelClients from '@docs/code-intel/clients.md?raw'
+import codeIntelGraph from '@docs/code-intel/graph.md?raw'
+import codeIntelPacks from '@docs/code-intel/knowledge-packs.md?raw'
+import codeIntelOverview from '@docs/code-intel/overview.md?raw'
+import codeIntelPgvector from '@docs/code-intel/pgvector-backend.md?raw'
+import codeIntel from '@docs/code-intel/README.md?raw'
 import authentication from '@docs/authentication.md?raw'
 import chat from '@docs/chat.md?raw'
 import ci from '@docs/ci.md?raw'
@@ -65,6 +65,7 @@ import plugins from '@docs/plugins.md?raw'
 import settings from '@docs/settings.md?raw'
 import studio from '@docs/studio.md?raw'
 import { Slugger } from './slug'
+import { codeIntelName, named } from '@/lib/brand'
 
 /**
  * The manual: the pages of docs/ that people and admins need, built into the web when it is
@@ -75,7 +76,7 @@ import { Slugger } from './slug'
 export type Audience = 'everyone' | 'admins'
 
 export interface ManualDoc {
-  /** Its address: /help/<id>. A folder's README is the folder (argus). */
+  /** Its address: /help/<id>. A folder's README is the folder (code-intel). */
   id: string
   /** Its file under docs/. */
   file: string
@@ -117,20 +118,20 @@ export const manualGroups: ManualGroup[] = [
       doc('mcp.md', 'Arena MCP', 'Your chat tools for your own agent, at /mcp (or as code at /mcp/code), signed in with your API key.', 'everyone', mcp),
       doc('code-arena.md', 'Code Arena', 'Our own coding agent and its IDE: getting it, signing in, modes, tools and sessions.', 'everyone', codeArena),
       doc('ci.md', 'The API in CI', 'A review of each merge request and an explanation of each failed pipeline, from your own GitLab pipeline.', 'everyone', ci),
-      doc('hermes.md', 'Hermes', 'Pointing Hermes at the model and at Argus.', 'everyone', hermes),
+      doc('hermes.md', 'Hermes', `Pointing Hermes at the model and at ${codeIntelName}.`, 'everyone', hermes),
     ],
   },
   {
-    title: 'Argus, the code index',
+    title: `${codeIntelName}, the code index`,
     docs: [
-      doc('argus/overview.md', 'What Argus does', 'What it gives an agent, keeping the index current, knowledge packs.', 'everyone', argusOverview),
-      doc('argus/graph.md', 'How repositories are linked', 'How sure each link is, its layers and evidence, and what the graph tools walk.', 'everyone', argusGraph),
-      doc('argus/clients.md', 'Connecting an MCP client', 'Argus from any MCP client.', 'everyone', argusClients),
-      doc('argus/README.md', 'Argus in the platform', 'Per-person access, choosing what is indexed, private CAs, the audit stream.', 'admins', argus),
-      doc('argus/knowledge-packs.md', 'Knowledge packs', 'Building and publishing packs.', 'admins', argusPacks),
-      doc('argus/branches.md', 'More than one branch', 'Indexing more than one branch of a repository.', 'admins', argusBranches),
-      doc('argus/backup-and-restore.md', 'Backup and restore', 'What is worth keeping, and how to get it back.', 'admins', argusBackup),
-      doc('argus/pgvector-backend.md', 'The pgvector backend', 'The optional Postgres backend for embeddings.', 'admins', argusPgvector),
+      doc('code-intel/overview.md', `What ${codeIntelName} does`, 'What it gives an agent, keeping the index current, knowledge packs.', 'everyone', codeIntelOverview),
+      doc('code-intel/graph.md', 'How repositories are linked', 'How sure each link is, its layers and evidence, and what the graph tools walk.', 'everyone', codeIntelGraph),
+      doc('code-intel/clients.md', 'Connecting an MCP client', `${codeIntelName} from any MCP client.`, 'everyone', codeIntelClients),
+      doc('code-intel/README.md', `${codeIntelName} in the platform`, 'Per-person access, choosing what is indexed, private CAs, the audit stream.', 'admins', codeIntel),
+      doc('code-intel/knowledge-packs.md', 'Knowledge packs', 'Building and publishing packs.', 'admins', codeIntelPacks),
+      doc('code-intel/branches.md', 'More than one branch', 'Indexing more than one branch of a repository.', 'admins', codeIntelBranches),
+      doc('code-intel/backup-and-restore.md', 'Backup and restore', 'What is worth keeping, and how to get it back.', 'admins', codeIntelBackup),
+      doc('code-intel/pgvector-backend.md', 'The pgvector backend', 'The optional Postgres backend for embeddings.', 'admins', codeIntelPgvector),
     ],
   },
   {
@@ -192,7 +193,7 @@ export const manualGroups: ManualGroup[] = [
   },
 ]
 
-/** Pages of docs/ kept out of the manual: the developers', and Argus run alone, without this platform. */
+/** Pages of docs/ kept out of the manual: the developers', and code-intel run alone, without this platform. */
 export const notInTheManual = [
   'README.md',
   'development.md',
@@ -200,16 +201,20 @@ export const notInTheManual = [
   'plan.md',
   // Designs for the work under way, as plan.md is: not how the app works yet.
   'design/code-arena-parity.md',
-  'design/argus-graph.md',
+  'design/code-intel-graph.md',
+  'design/code-intel-rename.md',
   'design/code-index.md',
   'design/own-gateway.md',
   'design/v5.9-code-review-access.md',
   'design/v5.9-rooms.md',
-  'argus/roadmap.md',
-  'argus/standalone/architecture.md',
-  'argus/standalone/configuration.md',
-  'argus/standalone/operations.md',
+  'code-intel/roadmap.md',
+  'code-intel/standalone/architecture.md',
+  'code-intel/standalone/configuration.md',
+  'code-intel/standalone/operations.md',
 ]
+
+// The docs are written with the default names: shown with the names built (branding.env).
+for (const g of manualGroups) for (const d of g.docs) Object.assign(d, { text: named(d.text), title: named(d.title), about: named(d.about) })
 
 export const manualDocs: ManualDoc[] = manualGroups.flatMap((g) => g.docs)
 

@@ -54,7 +54,7 @@ beside the canvas. Press **+** between two steps to add one there.
   pipeline, a job or a deployment ran on. **Labels** keeps it to merge
   requests and issues with one of them. **A comment holds** keeps comments to
   those with one of its words (a mention such as `@arena`). A comment the
-  app made itself (it ends with its signature, "by Argus Arena for …") never
+  app made itself (it ends with its signature, "by Farzan Arena for …") never
   starts a run, so a workflow that comments cannot start itself again.
 - **On a room's message**: a message in a room that starts with its word
   (`#triage`). The rest of the message is the input, and `{{input.by}}` is

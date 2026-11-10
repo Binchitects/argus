@@ -43,7 +43,7 @@ describe('business map', () => {
   it('lists the mapped systems in Code Studio, with one being mapped, and maps a project', async () => {
     const calls = fakeApi(member, {
       ...code,
-      'GET /api/code/business': () => ({ json: { argus: true, systems: [checkout, billing] } }),
+      'GET /api/code/business': () => ({ json: { codeIntel: true, systems: [checkout, billing] } }),
       'POST /api/code/business': () => ({ status: 201, json: { ...billing, id: 'b3', project: 'shop/stock' } }),
       'GET /api/code/business/b3': () => ({ json: { system: { ...billing, id: 'b3', project: 'shop/stock' }, profile: { capabilities: [], entities: [], rules: [], processes: [], integrations: [], glossary: [] }, web: null } }),
     })
@@ -61,7 +61,7 @@ describe('business map', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/code/business/b3'))
   })
 
-  it('shows a system part by part, each item with its sources, finds in it, and asks Argus about it', async () => {
+  it('shows a system part by part, each item with its sources, finds in it, and asks Farzan Graph about it', async () => {
     const calls = fakeApi(member, {
       'GET /api/code/business/b1': () => ({ json: { system: checkout, profile, web: 'https://gitlab.test/shop/checkout' } }),
       'POST /api/code/ask': () => ({ json: { id: 'c9', message: 'About the project shop/checkout:\n\nExplain' } }),
@@ -85,7 +85,7 @@ describe('business map', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Map again' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/code/business/b1/again')).toBe(true))
-    await userEvent.click(screen.getByRole('button', { name: 'Ask Argus' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Farzan Graph' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/code/ask')?.body).toMatchObject({ project: 'shop/checkout' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c9'))
   })
@@ -95,7 +95,7 @@ describe('business map', () => {
       ...code,
       'GET /api/code/business/b1': () => ({ json: { system: checkout, profile, web: null } }),
       'DELETE /api/code/business/b1': () => ({ status: 204 }),
-      'GET /api/code/business': () => ({ json: { argus: true, systems: [] } }),
+      'GET /api/code/business': () => ({ json: { codeIntel: true, systems: [] } }),
     })
     const { router } = renderApp('/code/business/b1')
     await userEvent.click(await screen.findByRole('button', { name: 'Remove the map' }))

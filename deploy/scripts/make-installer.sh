@@ -364,9 +364,9 @@ for f in LICENSE.md LICENSING.md; do cp -p "$REPO/$f" "$B/$f" || die "no $f in $
 # The names people read, as this bundle's images were built with them: beside installer.sh, and in deploy/
 # for the installation's scripts (make-cert.sh, sign-code-arena.sh, its own installer.sh).
 for f in "$B/branding.env" "$B/deploy/branding.env"; do
-  { grep '^#' "$REPO/branding.env"
-    echo "PRODUCT_NAME=${PRODUCT_NAME:-$(sed -n 's/^PRODUCT_NAME=//p' "$REPO/branding.env")}"
-    echo "CODE_INTEL_NAME=${CODE_INTEL_NAME:-$(sed -n 's/^CODE_INTEL_NAME=//p' "$REPO/branding.env")}"; } > "$f" || die "cannot write $f"
+  { [[ -f "$REPO/branding.env" ]] && grep '^#' "$REPO/branding.env"
+    echo "PRODUCT_NAME=${PRODUCT_NAME:-$(sed -n 's/^PRODUCT_NAME=//p' "$REPO/branding.env" 2>/dev/null)}"
+    echo "CODE_INTEL_NAME=${CODE_INTEL_NAME:-$(sed -n 's/^CODE_INTEL_NAME=//p' "$REPO/branding.env" 2>/dev/null)}"; } > "$f" || die "cannot write $f"
 done
 mkdir -p "$B/docs" && cp -a "$REPO/docs/." "$B/docs/" || die "no docs/ in $REPO"
 # The project's own plans are not documentation for those who run it.

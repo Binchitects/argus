@@ -9,7 +9,7 @@ const config = (over: object = {}) => ({
     { name: 'Big-Model', context: 262144, maxOutput: 32768, vision: false, tools: true, thinking: true, loaded: true },
     { name: 'Small-Model', context: 40960, maxOutput: 20480, vision: false, tools: true, thinking: true, loaded: false },
   ],
-  argus: false,
+  codeIntel: false,
   gitlabUrl: null,
   presets: [],
   tools: [],
@@ -34,34 +34,34 @@ describe('connect your tools', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Qwen Code' }))
     expect(screen.getByText(/export OPENAI_BASE_URL=/)).toHaveTextContent('OPENAI_MODEL=Big-Model')
-    // Argus is not offered to someone who may not use it.
-    expect(screen.queryByText('Argus, the code index')).not.toBeInTheDocument()
+    // code-intel is not offered to someone who may not use it.
+    expect(screen.queryByText('Farzan Graph, the code index')).not.toBeInTheDocument()
   })
 
-  it('offers Argus over MCP with the API key, not a GitLab token', async () => {
+  it('offers Farzan Graph over MCP with the API key, not a GitLab token', async () => {
     fakeApi(member, {
-      'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: 'https://gitlab.example.com' }) }),
+      'GET /api/chat/config': () => ({ json: config({ codeIntel: true, gitlabUrl: 'https://gitlab.example.com' }) }),
     })
     renderApp('/setup')
-    const argus = (await screen.findByText('Argus, the code index')).closest('section')!
-    expect(within(argus).getByText('your API key', { selector: 'strong' })).toBeInTheDocument()
-    expect(within(argus).queryByRole('link', { name: /GitLab token/ })).not.toBeInTheDocument()
-    expect(within(argus).getByText(/"Authorization": "Bearer <your API key>"/)).toBeInTheDocument()
-    // The chosen tool's steps carry Argus too, with this deployment's address and the key from the environment.
+    const codeIntel = (await screen.findByText('Farzan Graph, the code index')).closest('section')!
+    expect(within(codeIntel).getByText('your API key', { selector: 'strong' })).toBeInTheDocument()
+    expect(within(codeIntel).queryByRole('link', { name: /GitLab token/ })).not.toBeInTheDocument()
+    expect(within(codeIntel).getByText(/"Authorization": "Bearer <your API key>"/)).toBeInTheDocument()
+    // The chosen tool's steps carry code-intel too, with this deployment's address and the key from the environment.
     const steps = screen.getByRole('region', { name: 'Setting up Claude Code' })
-    const add = within(steps).getByText(/claude mcp add --transport http --scope user argus/)
-    expect(add).toHaveTextContent(`${window.location.protocol}//argus.${window.location.host}/mcp`)
+    const add = within(steps).getByText(/claude mcp add --transport http --scope user code-intel/)
+    expect(add).toHaveTextContent(`${window.location.protocol}//code-intel.${window.location.host}/mcp`)
     expect(add).toHaveTextContent('--header "Authorization: Bearer $LLM_SERVICE_API_KEY"')
     expect(screen.queryByText(/GITLAB_TOKEN/)).not.toBeInTheDocument()
   })
 
-  it('fills a key just made into the Argus setups, only when asked', async () => {
+  it('fills a key just made into the Farzan Graph setups, only when asked', async () => {
     fakeApi(member, {
-      'GET /api/chat/config': () => ({ json: config({ argus: true }) }),
+      'GET /api/chat/config': () => ({ json: config({ codeIntel: true }) }),
       'POST /api/account/keys/rotate': () => ({ json: { apiKey: 'sk-just-made-key' } }),
     })
     renderApp('/setup')
-    const argus = (await screen.findByText('Argus, the code index')).closest('section')!
+    const codeIntel = (await screen.findByText('Farzan Graph, the code index')).closest('section')!
     expect(screen.queryByRole('switch')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /New key/ }))
@@ -70,9 +70,9 @@ describe('connect your tools', () => {
     // Still hidden until asked.
     expect(screen.queryByText(/sk-just-made-key/)).not.toBeInTheDocument()
     await userEvent.click(fill)
-    expect(within(argus).getByText(/"Authorization": "Bearer sk-just-made-key"/)).toBeInTheDocument()
+    expect(within(codeIntel).getByText(/"Authorization": "Bearer sk-just-made-key"/)).toBeInTheDocument()
     // A setup that reads the environment keeps reading it; one that cannot gets the key.
-    expect(screen.getByText(/claude mcp add --transport http --scope user argus/)).toHaveTextContent('$LLM_SERVICE_API_KEY')
+    expect(screen.getByText(/claude mcp add --transport http --scope user code-intel/)).toHaveTextContent('$LLM_SERVICE_API_KEY')
     await userEvent.click(screen.getByRole('combobox', { name: 'Your tool' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Cline' }))
     expect(within(screen.getByRole('region', { name: 'Setting up Cline' })).getByText(/mcpServers/)).toHaveTextContent('"Authorization": "Bearer sk-just-made-key"')
@@ -88,7 +88,7 @@ describe('connect your tools', () => {
           enabled: true,
           url: 'https://llm.example.com/mcp',
           tools: [
-            { id: 'argus', title: 'Argus', askFirst: false },
+            { id: 'code-intel', title: 'Farzan Graph', askFirst: false },
             { id: 'mcp:1', title: 'Jira', askFirst: true },
           ],
         },
@@ -100,7 +100,7 @@ describe('connect your tools', () => {
     // Without Tools as code, one address.
     expect(screen.queryByRole('switch', { name: /Tools as code/ })).not.toBeInTheDocument()
     const served = screen.getByRole('list', { name: 'Tools it serves you' })
-    expect(within(served).getByText('Argus')).toBeInTheDocument()
+    expect(within(served).getByText('Farzan Graph')).toBeInTheDocument()
     expect(within(served).getByText('Jira · asks first')).toBeInTheDocument()
     expect(screen.getByText(/let it ask, rather than trusting every tool/)).toBeInTheDocument()
     // Each with the person's key from the environment, never --trust (asking first is the client's job here).
@@ -165,7 +165,7 @@ describe('connect your tools', () => {
   it('offers Code Arena to download for each system it was built for, with the login and the CA note', async () => {
     const build = (rid: string, system: string, fileName = 'code-arena') => ({ rid, system, fileName, size: 38 * 1024 * 1024, sha256: 'abc' })
     fakeApi(member, {
-      'GET /api/chat/config': () => ({ json: config({ argus: true }) }),
+      'GET /api/chat/config': () => ({ json: config({ codeIntel: true }) }),
       'GET /api/downloads/code-arena': () => ({
         json: {
           version: '4.2.0',
@@ -200,8 +200,8 @@ describe('connect your tools', () => {
     expect(steps).toHaveTextContent('Or keep the agent in this terminal: code-arena chat for a conversation')
     expect(within(steps).getByText(/^cd your-project\s+code-arena chat$/)).toBeInTheDocument()
     expect(steps).not.toHaveTextContent('code-arena web')
-    // Argus comes through Arena's own tools: no GitLab token to add.
-    expect(within(steps).getByText(/Code Arena connects to Argus by itself, beside Arena's own tools/)).toBeInTheDocument()
+    // code-intel comes through Arena's own tools: no GitLab token to add.
+    expect(within(steps).getByText(/Code Arena connects to Farzan Graph by itself, beside Arena's own tools/)).toBeInTheDocument()
   })
 
   it('does not offer Code Arena to one who may not use it (feature.code_arena)', async () => {
@@ -230,7 +230,7 @@ describe('connect your tools', () => {
 
   it('each tool has its own steps, filled in with the address, the model and its limits', async () => {
     fakeApi(member, {
-      'GET /api/chat/config': () => ({ json: config({ argus: true, gitlabUrl: null }) }),
+      'GET /api/chat/config': () => ({ json: config({ codeIntel: true, gitlabUrl: null }) }),
     })
     renderApp('/setup')
     await screen.findAllByText('Big-Model')
@@ -240,7 +240,7 @@ describe('connect your tools', () => {
       await userEvent.click(await screen.findByRole('option', { name }))
       return screen.getByRole('region', { name: `Setting up ${name}` })
     }
-    // Hermes: its config file, the model with its window, and Argus over MCP, the key from the environment.
+    // Hermes: its config file, the model with its window, and code-intel over MCP, the key from the environment.
     const hermes = await pick('Hermes')
     expect(within(hermes).getAllByText('~/.hermes/config.yaml', { selector: 'p' })).toHaveLength(2)
     expect(within(hermes).getAllByText(/base_url:/)[0]).toHaveTextContent(`provider: custom default: Big-Model base_url: ${base} key_env: LLM_SERVICE_API_KEY context_length: 262144`)
@@ -252,7 +252,7 @@ describe('connect your tools', () => {
     expect(claw.agents.defaults.model.primary).toBe('llm-service/Big-Model')
     expect(claw.models.providers['llm-service']).toMatchObject({ baseUrl: base, apiKey: '${LLM_SERVICE_API_KEY}', api: 'openai-completions' })
     expect(claw.models.providers['llm-service'].models[0]).toMatchObject({ id: 'Big-Model', contextWindow: 262144, maxTokens: 32768 })
-    // DeepSeek Harness: the profile patch, and Argus appended to it.
+    // DeepSeek Harness: the profile patch, and code-intel appended to it.
     const dsh = await pick('DeepSeek Harness')
     expect(within(dsh).getAllByText(/apiKeyEnv: LLM_SERVICE_API_KEY/)[0]).toHaveTextContent(`baseURL: ${base}`)
     expect(within(dsh).getByText(/- insert:/)).toHaveTextContent('process.env.LLM_SERVICE_API_KEY')
@@ -284,7 +284,7 @@ describe('connect your tools', () => {
   })
 
   it('on Windows the commands are PowerShell and the files are in the profile folder', async () => {
-    fakeApi(member, { 'GET /api/chat/config': () => ({ json: config({ argus: true }) }) })
+    fakeApi(member, { 'GET /api/chat/config': () => ({ json: config({ codeIntel: true }) }) })
     renderApp('/setup')
     await userEvent.click(await screen.findByRole('combobox', { name: 'Your system' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Windows (PowerShell)' }))
@@ -302,7 +302,7 @@ describe('connect your tools', () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config() }),
       'GET /api/downloads/certificate': () => ({
-        json: { available: true, trusted: false, subject: 'CN=Argus Arena CA (llm.example.com)', issuer: 'CN=Argus Arena CA (llm.example.com)', expires: '2036-10-05T00:00:00Z', sha256: 'AB:CD:EF' },
+        json: { available: true, trusted: false, subject: 'CN=Farzan Arena CA (llm.example.com)', issuer: 'CN=Farzan Arena CA (llm.example.com)', expires: '2036-10-05T00:00:00Z', sha256: 'AB:CD:EF' },
       }),
     })
     renderApp('/setup')

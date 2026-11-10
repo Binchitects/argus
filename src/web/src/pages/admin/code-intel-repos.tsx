@@ -17,9 +17,9 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago, agoSeconds } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { isWorking, progressPercent, progressWords, type RepoProgress } from './argus-progress'
-import { RepoLogView } from './argus-repo-log'
-import { ScheduleForm } from './argus-repo-schedule'
+import { isWorking, progressPercent, progressWords, type RepoProgress } from './code-intel-progress'
+import { RepoLogView } from './code-intel-repo-log'
+import { ScheduleForm } from './code-intel-repo-schedule'
 
 export interface IndexedBranch {
   branch: string
@@ -37,7 +37,7 @@ export interface IndexedBranch {
   symbols: number
 }
 
-/** A repository's state in one word, as Argus computes it. */
+/** A repository's state in one word, as code-intel computes it. */
 export type RepoState = 'indexing' | 'queued' | 'failed' | 'stale' | 'indexed' | 'never' | 'off'
 
 export interface RepoRow {
@@ -135,18 +135,18 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const repos = useQuery({
-    queryKey: ['admin', 'argus', 'repos'],
-    queryFn: ({ signal }) => api<ReposView>('/api/admin/argus/repos', { signal }),
+    queryKey: ['admin', 'code-intel', 'repos'],
+    queryFn: ({ signal }) => api<ReposView>('/api/admin/code-intel/repos', { signal }),
     refetchInterval: (q) => (running || q.state.data?.running || q.state.data?.pending.length ? 3000 : 60_000),
   })
   // A run just started: every repository it takes shows queued, and then where it is, at once.
   const wasRunning = useRef(running)
   useEffect(() => {
-    if (running && !wasRunning.current) void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'repos'] })
+    if (running && !wasRunning.current) void queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'repos'] })
     wasRunning.current = running
   }, [running, queryClient])
   // When the app's scheduled pass comes next (in this platform the app starts the passes).
-  const pass = useQuery({ queryKey: ['admin', 'argus', 'schedule'], queryFn: ({ signal }) => api<{ nextRuns: string[] }>('/api/admin/argus/schedule', { signal }) })
+  const pass = useQuery({ queryKey: ['admin', 'code-intel', 'schedule'], queryFn: ({ signal }) => api<{ nextRuns: string[] }>('/api/admin/code-intel/schedule', { signal }) })
   const [branchesOf, setBranchesOf] = useState<RepoRow | null>(null)
   const [purposeOf, setPurposeOf] = useState<RepoRow | null>(null)
   const [logOf, setLogOf] = useState<RepoRow | null>(null)
@@ -162,10 +162,10 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   const [enabled, setEnabled] = useState<'all' | 'on' | 'off'>('all')
 
   const changed = () =>
-    Promise.all([queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'repos'] }), queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'status'] })])
+    Promise.all([queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'repos'] }), queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'status'] })])
   const choose = useMutation({
     mutationFn: ({ rows, included }: { rows: RepoRow[]; included: boolean }) =>
-      Promise.all(rows.map((r) => api<{ deferred: boolean }>(`/api/admin/argus/repos/${r.gitlab_id}`, { method: 'PATCH', body: { included } }))),
+      Promise.all(rows.map((r) => api<{ deferred: boolean }>(`/api/admin/code-intel/repos/${r.gitlab_id}`, { method: 'PATCH', body: { included } }))),
     onSuccess: async (res, { rows, included }) => {
       await changed()
       const what = rows.length === 1 ? rows[0]!.repo : noun(rows.length)
@@ -175,7 +175,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
     onError: (e) => toast.error(errorMessage(e)),
   })
   const update = useMutation({
-    mutationFn: (r: RepoRow) => api<{ status: string; queued: number }>('/api/admin/argus/index', { body: { repo: r.repo } }),
+    mutationFn: (r: RepoRow) => api<{ status: string; queued: number }>('/api/admin/code-intel/index', { body: { repo: r.repo } }),
     onSuccess: async (res, r) => {
       await changed()
       if (res.status === 'started') toast.success(`Updating ${r.repo}`, { description: 'From its latest commits: only what changed is read again.' })
@@ -185,7 +185,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
     onError: (e) => toast.error(errorMessage(e)),
   })
   const discover = useMutation({
-    mutationFn: () => api<ReposView & { found?: { new: number; moved: number; set_aside: number } }>('/api/admin/argus/repos/discover', { method: 'POST' }),
+    mutationFn: () => api<ReposView & { found?: { new: number; moved: number; set_aside: number } }>('/api/admin/code-intel/repos/discover', { method: 'POST' }),
     onSuccess: async (v) => {
       await changed()
       const moved = v.found?.moved ? ` ${noun(v.found.moved)} found again under a new id, with their index.` : ''
@@ -194,12 +194,12 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
     onError: (e) => toast.error(errorMessage(e)),
   })
   const policy = useMutation({
-    mutationFn: (body: { newRepos?: string; schedule?: string; timeZone?: string }) => api('/api/admin/argus/repos/settings', { method: 'PUT', body }),
+    mutationFn: (body: { newRepos?: string; schedule?: string; timeZone?: string }) => api('/api/admin/code-intel/repos/settings', { method: 'PUT', body }),
     onSuccess: changed,
     onError: (e) => toast.error(errorMessage(e)),
   })
   const scheduleOne = useMutation({
-    mutationFn: ({ r, schedule }: { r: RepoRow; schedule: string }) => api(`/api/admin/argus/repos/${r.gitlab_id}`, { method: 'PATCH', body: { schedule } }),
+    mutationFn: ({ r, schedule }: { r: RepoRow; schedule: string }) => api(`/api/admin/code-intel/repos/${r.gitlab_id}`, { method: 'PATCH', body: { schedule } }),
     onSuccess: async (_, { r }) => {
       await changed()
       setScheduleOf(null)
@@ -209,7 +209,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   })
   const batch = useMutation({
     mutationFn: ({ rows, action, schedule, branches }: { rows: RepoRow[]; action: BatchAction; schedule?: string; branches?: string[]; title: string }) =>
-      api<BatchResult>('/api/admin/argus/repos/batch', { body: { ids: rows.map((r) => r.gitlab_id), action, schedule, branches } }),
+      api<BatchResult>('/api/admin/code-intel/repos/batch', { body: { ids: rows.map((r) => r.gitlab_id), action, schedule, branches } }),
     onSuccess: async (result, { title }) => {
       await changed()
       setScheduleOf(null)
@@ -224,8 +224,8 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   // Its index removed now: kept in (built anew, at once) or left out.
   const removeIndex = useMutation({
     mutationFn: async ({ r, leaveOut }: { r: RepoRow; leaveOut: boolean }) => {
-      const res = await api<{ removed: number }>(`/api/admin/argus/repos/${r.gitlab_id}/index/remove`, { body: { leaveOut } })
-      if (!leaveOut) await api('/api/admin/argus/index', { body: { repo: r.repo } })
+      const res = await api<{ removed: number }>(`/api/admin/code-intel/repos/${r.gitlab_id}/index/remove`, { body: { leaveOut } })
+      if (!leaveOut) await api('/api/admin/code-intel/index', { body: { repo: r.repo } })
       return res
     },
     onSuccess: async (_, { r, leaveOut }) => {
@@ -425,7 +425,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
         {view?.schedule.zone_problem && <Alert variant="warning">{view.schedule.zone_problem}</Alert>}
         {view && view.global_branches.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Every repository also has these branches indexed (ARGUS_INDEX_BRANCHES): <span className="font-mono">{view.global_branches.join(' ')}</span>
+            Every repository also has these branches indexed (CODE_INTEL_INDEX_BRANCHES): <span className="font-mono">{view.global_branches.join(' ')}</span>
           </p>
         )}
         {view && view.repos.length > 0 && (
@@ -967,7 +967,7 @@ function PurposeForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () =>
   const [text, setText] = useState(repo.purpose_source === 'owner' ? (repo.purpose ?? '') : '')
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (purpose: string) => api(`/api/admin/argus/repos/${repo.gitlab_id}`, { method: 'PATCH', body: { purpose } }),
+    mutationFn: (purpose: string) => api(`/api/admin/code-intel/repos/${repo.gitlab_id}`, { method: 'PATCH', body: { purpose } }),
     onSuccess: async () => {
       await onSaved()
       onClose()
@@ -1010,7 +1010,7 @@ function PurposeForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () =>
 }
 
 function BranchesForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () => void; onSaved: () => Promise<unknown> }) {
-  const remote = useQuery({ queryKey: ['admin', 'argus', 'branches', repo.gitlab_id], queryFn: ({ signal }) => api<RemoteBranch[]>(`/api/admin/argus/repos/${repo.gitlab_id}/branches`, { signal }) })
+  const remote = useQuery({ queryKey: ['admin', 'code-intel', 'branches', repo.gitlab_id], queryFn: ({ signal }) => api<RemoteBranch[]>(`/api/admin/code-intel/repos/${repo.gitlab_id}/branches`, { signal }) })
   const names = new Set(remote.data?.map((b) => b.name) ?? [])
   const [picked, setPicked] = useState<string[] | null>(null)
   const [patterns, setPatterns] = useState<string | null>(null)
@@ -1022,7 +1022,7 @@ function BranchesForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () =
   const save = useMutation({
     mutationFn: () => {
       const branches = [...chosen, ...globs.split(/[\s,]+/).filter(Boolean)]
-      return api(`/api/admin/argus/repos/${repo.gitlab_id}`, { method: 'PATCH', body: { branches } })
+      return api(`/api/admin/code-intel/repos/${repo.gitlab_id}`, { method: 'PATCH', body: { branches } })
     },
     onSuccess: async () => {
       await onSaved()

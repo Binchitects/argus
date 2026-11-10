@@ -44,11 +44,11 @@ class CodeArenaImagesTests(unittest.TestCase):
 class CodeIntelImageTests(unittest.TestCase):
     def test_CodeIntel_s_image_copies_the_files_its_project_links_from_Code_Arena(self):
         """code-intel links Code Arena's scanners and code graph (its symbol graph): its build stage must copy each one."""
-        project = (REPO / "src" / "code-intel" / "CodeIntel.csproj").read_text()
+        project = (REPO / "src" / "CodeIntel" / "CodeIntel.csproj").read_text()
         files = [f"src/{path}" for path in re.findall(r'<Compile Include="\.\./([^"]+)"', project)]
         self.assertTrue(files, "CodeIntel.csproj links nothing from elsewhere: the check reads it wrong")
         stages: list[set[str]] = [set()]
-        for line in (REPO / "src" / "code-intel" / "Dockerfile").read_text().splitlines():
+        for line in (REPO / "src" / "CodeIntel" / "Dockerfile").read_text().splitlines():
             if line.startswith("FROM "):
                 stages.append(set())
             elif line.startswith("COPY ") and "--from=" not in line:

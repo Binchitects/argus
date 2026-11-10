@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage, meQuery } from '@/lib/api'
 import { askCode, businessQuery, businessSystemQuery, mapAgain, mapProject, removeMap, sourceLabel, sourceUrl, type BusinessSource, type BusinessSystem } from './api'
+import { codeIntelName } from '@/lib/brand'
 
 const when = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -33,8 +34,8 @@ function MapState({ s }: { s: BusinessSystem }) {
 
 /**
  * Code Studio's business map: each project mapped into what its software does for the business (its domain, what it
- * lets the business do, the rules it enforces, its processes, the words people use), read by a model with Argus's
- * read-only tools from the code, the documents, the issues and the wiki. Argus answers about the business from it.
+ * lets the business do, the rules it enforces, its processes, the words people use), read by a model with code-intel's
+ * read-only tools from the code, the documents, the issues and the wiki. code-intel answers about the business from it.
  */
 export function BusinessMapSection() {
   const queryClient = useQueryClient()
@@ -52,14 +53,14 @@ export function BusinessMapSection() {
   })
   if (list.isPending) return <Skeleton className="h-40 rounded-xl" />
   if (list.error) return <QueryError error={list.error} retry={() => list.refetch()} />
-  if (!list.data.argus) return null
+  if (!list.data.codeIntel) return null
   const systems = list.data.systems
   return (
     <section className="grid gap-4" aria-label="Business map">
       <div>
         <h2 className="text-lg font-semibold">Business map</h2>
         <p className="text-sm text-muted-foreground">
-          What each system does for the business, read from its code, documents, issues and wiki: Argus explains the business from it, not only the code.
+          What each system does for the business, read from its code, documents, issues and wiki: {codeIntelName} explains the business from it, not only the code.
         </p>
       </div>
       <form
@@ -197,7 +198,7 @@ export function BusinessPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => ask.mutate(`Explain what ${s.name} does for the business: its main processes and the rules that matter most, with the code that does them.`)} loading={ask.isPending}>
-              <MessageSquareText /> Ask Argus
+              <MessageSquareText /> Ask {codeIntelName}
             </Button>
             <Button variant="outline" onClick={() => again.mutate()} disabled={s.status === 'building'} loading={again.isPending}>
               <RefreshCw /> Map again
@@ -207,7 +208,7 @@ export function BusinessPage() {
                 variant="outline"
                 aria-label="Remove the map"
                 onClick={async () => {
-                  if (await confirm({ title: `Remove the map of ${s.project}?`, description: 'Argus no longer explains it from the map until someone maps it again.', confirm: 'Remove', destructive: true }))
+                  if (await confirm({ title: `Remove the map of ${s.project}?`, description: `${codeIntelName} no longer explains it from the map until someone maps it again.`, confirm: 'Remove', destructive: true }))
                     remove.mutate()
                 }}
               >

@@ -12,18 +12,18 @@ LlmService.slnx         every .NET project; Directory.Build.props and global.jso
 src/
   Llm.Api/              the platform's API: sign-in, OIDC, chat, tools, admin, dashboards (Dockerfile)
   Llm.Core/             its domain and data (EF Core, Postgres)
-  Argus/                the code index service: indexer, knowledge packs, MCP, CLI (Dockerfile)
+  Farzan Graph/                the code index service: indexer, knowledge packs, MCP, CLI (Dockerfile)
   CodeArena/            Code Arena, the coding agent people download: one self-contained file per system
   web/                  the platform's web: React, its own image (nginx)
-  argus-web/            Argus's own web, for Argus alone; built into the Argus image
+  code-intel-web/            Farzan Graph's own web, for Farzan Graph alone; built into the Farzan Graph image
 tests/
   Llm.Tests/            xUnit; real Postgres, OpenLDAP and LiteLLM's schema via Testcontainers
-  Argus.Tests/          xUnit
+  CodeIntel.Tests/          xUnit
   CodeArena.Tests/      xUnit; a fake gateway and fake MCP servers on real sockets
-  fixtures/argus/       a ctags corpus and documentation fixtures for Argus's tests
+  fixtures/code-intel/       a ctags corpus and documentation fixtures for Farzan Graph's tests
 deploy/                 the platform: docker-compose (and podman.yml), .env.example, config, scripts
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
-  argus-standalone/     Argus alone: its own compose, config and scripts
+  code-intel-standalone/     Farzan Graph alone: its own compose, config and scripts
 tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-code-arena.sh, offline-nuget/, the test GitLab, Hermes add-ons
 arenactl                the one command: doctor, build, code-arena, bundle, install and the rest (docs/scripts.md)
 clients/                editor and agent configurations (MCP); the arena CLI and its GitLab CI template
@@ -33,14 +33,14 @@ docs/                   this documentation; docs/plan.md is the plan and its pha
 
 ## .NET
 
-The API, Argus and Code Arena are one solution, `LlmService.slnx`, on .NET 10. Without the
+The API, Farzan Graph and Code Arena are one solution, `LlmService.slnx`, on .NET 10. Without the
 SDK installed, `tools/dn` runs it in Docker with the repository mounted, and
 Testcontainers can reach the databases it starts:
 
 ```bash
 tools/dn build LlmService.slnx -c Release
 tools/dn test tests/Llm.Tests -c Release       # needs Docker (Testcontainers)
-tools/dn test tests/Argus.Tests -c Release
+tools/dn test tests/CodeIntel.Tests -c Release
 tools/dn test tests/CodeArena.Tests -c Release
 ```
 
@@ -83,15 +83,15 @@ the chat's components, Monaco and xterm.js around Code Arena's API
 (`npx vitest run src/code-arena`). The terminals' tests start a real `/bin/sh`
 on a pseudo-terminal, so run Code Arena's tests on Linux or macOS.
 
-Argus's tests need Universal Ctags (it decides which symbols exist) and the
+Farzan Graph's tests need Universal Ctags (it decides which symbols exist) and the
 pinned sqlite-vec, fetched once and checked against its SHA-256:
 
 ```bash
-tools/fetch-sqlite-vec.sh linux-x64            # into native/, which the Argus project copies
+tools/fetch-sqlite-vec.sh linux-x64            # into native/, which the Farzan Graph project copies
 ```
 
 Warnings are errors everywhere. The platform's projects add the recommended
-analyzers (`AnalysisLevel`); Argus runs with invariant globalization.
+analyzers (`AnalysisLevel`); Farzan Graph runs with invariant globalization.
 
 A new migration for the platform:
 
@@ -100,13 +100,13 @@ tools/dn tool restore
 tools/dn tool run dotnet-ef migrations add <Name> -p src/Llm.Core -s src/Llm.Api -o Data/Migrations
 ```
 
-Argus against a local config:
+Farzan Graph against a local config:
 
 ```bash
-ARGUS_ADMIN_EMAIL=you@example.com ARGUS_ADMIN_PASSWORD=a-long-password \
-ARGUS_GATEWAY_URL=http://localhost:4000 GATEWAY_KEY=sk-... \
-ARGUS_EMBED_URL=http://localhost:8081 \
-  dotnet run --project src/Argus -c Release -- serve --config config.yaml --port 7700
+CODE_INTEL_ADMIN_EMAIL=you@example.com CODE_INTEL_ADMIN_PASSWORD=a-long-password \
+CODE_INTEL_GATEWAY_URL=http://localhost:4000 GATEWAY_KEY=sk-... \
+CODE_INTEL_EMBED_URL=http://localhost:8081 \
+  dotnet run --project src/CodeIntel -c Release -- serve --config config.yaml --port 7700
 ```
 
 ## The web apps
@@ -120,12 +120,12 @@ npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 Local UI work on the platform's web is described in
-[src/web/README.md](../src/web/README.md). Argus's web proxies `/api`, `/admin`
+[src/web/README.md](../src/web/README.md). Farzan Graph's web proxies `/api`, `/admin`
 and `/mcp` to a backend on `:7700`:
 
 ```bash
-cd src/argus-web && npm ci && npm run dev      # http://localhost:5173
-cd src/argus-web && npm test && npm run build  # every route has its help (src/help.ts); typecheck and build
+cd src/code-intel-web && npm ci && npm run dev      # http://localhost:5173
+cd src/code-intel-web && npm test && npm run build  # every route has its help (src/help.ts); typecheck and build
 ```
 
 ## Browser tests
@@ -144,17 +144,17 @@ blocked, `E2E_CHANNEL=chrome` uses the installed Google Chrome. The chat tests
 run one after another: every browser signs in as the same admin, and fair use
 gives one person one answer at a time.
 
-**Argus** (`src/argus-web/e2e`): the real backend with fake GitLab (REST and git
+**Farzan Graph** (`src/code-intel-web/e2e`): the real backend with fake GitLab (REST and git
 over HTTP), LiteLLM and embeddings on real sockets, driving the built app in
 Chromium:
 
 ```bash
-dotnet build src/Argus -c Release
-cd src/argus-web && npm run build && npx playwright test
+dotnet build src/CodeIntel -c Release
+cd src/code-intel-web && npm run build && npx playwright test
 ```
 
-`ARGUS_BIN` and `ARGUS_WEB_ROOT` point it at another build; screenshots land in
-`src/argus-web/e2e/.work/screens/`.
+`CODE_INTEL_BIN` and `CODE_INTEL_WEB_ROOT` point it at another build; screenshots land in
+`src/code-intel-web/e2e/.work/screens/`.
 
 ## The arena CLI
 
@@ -174,7 +174,7 @@ Against the running platform, from the repository's root (each described in
 ```bash
 ./arenactl check upgrade --zero --stop-live   # this checkout from zero
 ./arenactl check functional      # what a person does, as two people
-./arenactl check clients         # the API, Argus over MCP, Qwen Code, DeepSeek Harness
+./arenactl check clients         # the API, Farzan Graph over MCP, Qwen Code, DeepSeek Harness
 ./arenactl check scale           # many people at once
 ./arenactl check sandbox         # the sandbox's isolation
 ./arenactl check dashboards 6h   # every dashboard panel's queries
@@ -187,12 +187,12 @@ its manual):
 
 ```bash
 docker build -f src/Llm.Api/Dockerfile -t llmservice-app .
-docker build -f src/Argus/Dockerfile --target server -t argus .
+docker build -f src/CodeIntel/Dockerfile --target server -t code-intel .
 docker build -f src/web/Dockerfile -t llmservice-web .
 ```
 
-The Argus image runs its xUnit suite during the build and fails with it; the
-runtime image carries the receipt at `/usr/share/argus/build-verified`.
+The Farzan Graph image runs its xUnit suite during the build and fails with it; the
+runtime image carries the receipt at `/usr/share/code-intel/build-verified`.
 `docker compose build` in `deploy/` builds everything the platform runs.
 
 ### What a change is in
@@ -240,15 +240,15 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
 7. The offline installer: `./arenactl bundle --no-build` (the images of step 5;
    `--with-deps` for the host's dependencies, `--models` and `--packs` for a
    bundle that carries them) writes
-   `dist/argus-arena-VERSION-offline.run` and its `.sha256`. It needs the tags
+   `dist/arena-VERSION-offline.run` and its `.sha256`. It needs the tags
    of the releases since 5.2.0 (`git fetch --tags`) and the embedding model in
    `MODELS_DIR` (it says so when either is missing). Check it:
-   `sh dist/argus-arena-VERSION-offline.run verify`, and
-   `sh dist/argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` against
+   `sh dist/arena-VERSION-offline.run verify`, and
+   `sh dist/arena-VERSION-offline.run upgrade --dir DIR --dry-run` against
    an installation of the oldest release it upgrades.
-8. Tag the commit and push the tag (`release.yml` publishes the Argus image),
+8. Tag the commit and push the tag (`release.yml` publishes the Farzan Graph image),
    make the GitHub release (`gh release create`), and attach the `.run`, its
-   `.sha256`, the SBOM (`dist/argus-arena-VERSION.cdx.json`) and Code Arena's
+   `.sha256`, the SBOM (`dist/arena-VERSION.cdx.json`) and Code Arena's
    packages to it.
 
 When a release can no longer upgrade from 5.2.0 (a migration or a file that
@@ -258,10 +258,10 @@ and says which release to upgrade to first.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push: the API, Argus and Code Arena tests (and Code Arena's Linux package), both web
+`.github/workflows/ci.yml` runs on every push: the API, Farzan Graph and Code Arena tests (and Code Arena's Linux package), both web
 apps, each in a browser (the platform's images behind Traefik with no model,
-Argus with its fakes), the deployment tooling's tests, and every env sample
-resolving into a complete compose file. `release.yml` publishes the Argus image
+Farzan Graph with its fakes), the deployment tooling's tests, and every env sample
+resolving into a complete compose file. `release.yml` publishes the Farzan Graph image
 on a `v*` tag.
 
 ## Conventions
@@ -271,9 +271,9 @@ on a `v*` tag.
   only says how to make each one (`openssl rand -hex 32`). Nothing prints them.
 - **No Docker socket in a web container.** The app changes what runs through
   the engines' own APIs and control files the servers read, never Docker.
-- **Argus's tool names, descriptions and schemas** (`src/Argus/Server/ToolCatalog.cs`)
+- **Farzan Graph's tool names, descriptions and schemas** (`src/CodeIntel/Server/ToolCatalog.cs`)
   are text a model reads on every request; change them deliberately.
-- **Argus's tool results** are written byte for byte in a fixed shape
+- **Farzan Graph's tool results** are written byte for byte in a fixed shape
   (`Util/PyJson.cs`, `Util/PyStr.cs`): a model reads them, and a changed byte is
   a changed prompt.
 - **Changing what ctags extracts** means bumping `Ctags.SymbolContractVersion`,

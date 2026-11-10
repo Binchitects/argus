@@ -49,7 +49,7 @@ that never needed checking.
 has been an MCP tool all along, and that was the problem -- every client can run
 a SHELL COMMAND when the model finishes and block on its exit code, and almost
 none can be made to call a *tool* at that moment. So verify-after could not be
-forced in any client, however good the tool was. `argus verify` is that same
+forced in any client, however good the tool was. `code-intel verify` is that same
 check with an exit code, and `clients/claude-code/verify-after.sh` wires it into
 Claude Code's `Stop` hook, which blocks the turn and feeds the contradictions
 back to the model.
@@ -140,7 +140,7 @@ thing distinguishing them is the sentence above each one saying what it does.
 That sentence was already in the index. `files.content` holds the entire file
 and `symbols.line` locates the symbol inside it, so the comment immediately
 above a definition had been sitting in the database, unread, since the first
-version. `argus.parse.docs` reads it; `symbols.doc` stores it; the embedded text
+version. `code-intel.parse.docs` reads it; `symbols.doc` stores it; the embedded text
 leads with it; and every symbol-level result returns it.
 
 **Measured, on a fixture built to be falsifiable** — two functions with equally
@@ -198,9 +198,9 @@ over MCP, and now part of `tools/test-gitlab/verify_tools.py`:
 |---|---|---|
 | Incremental pack rebuild — **DONE** | was 44 min to reproduce a byte-identical file | `content_sha` per document; automatic when a usable pack sits at the destination. Measured: wdk 205,848 chunks in **26 s**, win32 478,762 in **74 s** |
 | `pack update` for archive sources — **DONE** | assumed a git remote | the registry index path (`pack update --index-url`) works for both source kinds, and it is now tested end to end: install v1, index says v2, assert v2 — including that a FAILED update leaves the working pack working |
-| Metrics endpoint — **DONE** | audit rows existed with no operational view | `/admin/metrics` on Argus, scraped by Prometheus, with four alert rules; the admin console's Overview reads the same snapshot |
+| Metrics endpoint — **DONE** | audit rows existed with no operational view | `/admin/metrics` on Farzan Graph, scraped by Prometheus, with four alert rules; the admin console's Overview reads the same snapshot |
 | Index explorer — **DONE** | a tool returning nothing gave no way to tell "not in the code" from "not indexed" | the console's Explore page searches symbols by fragment and files by path across the estate, reading `/admin/explore`. The unfiltered queries live in `store/explore.py`, and a test asserts no tool module imports them |
-| Webhook-driven indexing — **DONE** | freshness was interval-polled, so a push sat unindexed for up to 15 minutes | `POST /hook/gitlab`, gated by its own `ARGUS_WEBHOOK_TOKEN`; a push during a pass is queued rather than dropped, and all that waited run together as one run when the pass ends. The poll stays as the floor |
+| Webhook-driven indexing — **DONE** | freshness was interval-polled, so a push sat unindexed for up to 15 minutes | `POST /hook/gitlab`, gated by its own `CODE_INTEL_WEBHOOK_TOKEN`; a push during a pass is queued rather than dropped, and all that waited run together as one run when the pass ends. The poll stays as the floor |
 
 **Incremental rebuild landed, and carries one trap worth knowing.**
 `content_sha` covers the DOCUMENT, so an adapter that derives symbols
@@ -249,7 +249,7 @@ text the server no longer served. Clearing it is a required step after any
 description change. Nothing warns; the tool simply behaves as it did before
 the change, which reads as the change not working.
 
-**~~GPU embedding.~~ DONE, then superseded.** The .NET Argus embeds with
+**~~GPU embedding.~~ DONE, then superseded.** The .NET Farzan Graph embeds with
 `llamacpp-embed` (llama.cpp on the CPU, OpenAI protocol) at **15 ms median** per
 query on 4 cores, so the engine keeps the whole GPU and Ollama is gone. The record
 of the Ollama step, kept as measured:

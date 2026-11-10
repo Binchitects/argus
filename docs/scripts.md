@@ -1,6 +1,6 @@
 # Scripts and `arenactl`
 
-Everything you run on Argus Arena from outside the app goes through one
+Everything you run on Farzan Arena from outside the app goes through one
 command at the top of the repository, **`arenactl`**. It checks what a machine
 has, builds the images and Code Arena, makes the offline installer, installs,
 upgrades and repairs a stack, and runs the operator's scripts and the checks.
@@ -17,8 +17,8 @@ offline installer is made on Linux (or WSL2).
 | I want to | Run |
 |---|---|
 | know what this machine is missing, with what to do about each | `./arenactl doctor` (or `--for build`, `code-arena`, `bundle`, `install`) |
-| install Argus Arena on this Linux host, from this checkout | `./arenactl install --domain chat.example.com --admin-email me@example.com` |
-| make one file that installs it on another host, even with no network | `./arenactl bundle --with-deps`, then on that host `sh argus-arena-VERSION-offline.run install` |
+| install Farzan Arena on this Linux host, from this checkout | `./arenactl install --domain chat.example.com --admin-email me@example.com` |
+| make one file that installs it on another host, even with no network | `./arenactl bundle --with-deps`, then on that host `sh arena-VERSION-offline.run install` |
 | give people Code Arena for their machines | `./arenactl code-arena` (packages for five systems in `dist/`) |
 | upgrade an installation to this checkout's release | `./arenactl upgrade` |
 | put an installation right | `./arenactl repair` |
@@ -37,7 +37,7 @@ them).
 ### From a checkout, on a host with the network
 
 ```bash
-git clone https://github.com/Binchitects/argus && cd argus
+git clone https://github.com/Binchitects/argus && cd code-intel
 ./arenactl doctor --for install          # what is missing, and how to get it
 ./arenactl install --domain chat.example.com --admin-email me@example.com
 ```
@@ -61,7 +61,7 @@ built then.
 On a Linux machine with the network and this checkout:
 
 ```bash
-./arenactl bundle --with-deps             # dist/argus-arena-VERSION-offline.run and its .sha256
+./arenactl bundle --with-deps             # dist/arena-VERSION-offline.run and its .sha256
 ./arenactl bundle --with-deps --proxy http://HOST:PORT   # the same, downloading through an HTTP proxy
 ```
 
@@ -82,11 +82,11 @@ that is fine: it is everything the host needs. Copy it and its `.sha256` to
 the host, then:
 
 ```bash
-sha256sum -c argus-arena-VERSION-offline.run.sha256
-sh argus-arena-VERSION-offline.run install --dir /srv/arena
+sha256sum -c arena-VERSION-offline.run.sha256
+sh arena-VERSION-offline.run install --dir /srv/arena
 ```
 
-`sh argus-arena-VERSION-offline.run help` lists the installer's commands;
+`sh arena-VERSION-offline.run help` lists the installer's commands;
 [deployment.md](deployment.md#the-offline-installer) says what each does.
 
 ### Afterwards
@@ -100,7 +100,7 @@ sh argus-arena-VERSION-offline.run install --dir /srv/arena
 | `./arenactl verify` | the installation's files against their checksums |
 | `./arenactl remove` | the stack's containers and images; the data stays unless `--purge` |
 
-With a bundle, the same commands run from the file: `sh argus-arena-VERSION-offline.run upgrade --dir /srv/arena`.
+With a bundle, the same commands run from the file: `sh arena-VERSION-offline.run upgrade --dir /srv/arena`.
 
 ### The certificate and Code Arena's signature
 
@@ -190,7 +190,7 @@ its own options with `--help`):
 | `clients` | `clients-check.py` | Code Arena, the CLI and MCP clients against the stack |
 | `gpu` | `gpu-check.sh` | a GPU server's driver, toolkit and engines ([multi-gpu-server.md](multi-gpu-server.md)) |
 | `dashboards` | `audit-dashboards.py` | every dashboard panel's queries answer, with data |
-| `argus` | `tools/smoke_test.py` | Argus's MCP serves agents: sign-in refused without a key, tools, packs, the index |
+| `code-intel` | `tools/smoke_test.py` | Farzan Graph's MCP serves agents: sign-in refused without a key, tools, packs, the index |
 | `upgrade` | `upgrade-test.py` | an upgrade from the previous release, in a throwaway stack |
 | `rollback` | `rollback-test.sh` | an upgrade's rollback, in a throwaway stack |
 | `restore` | `restore-test.sh` | a backup restored into a throwaway stack, checked through the API |
@@ -210,7 +210,7 @@ apart.
 ## Tests
 
 ```bash
-./arenactl test                     # app, code-arena, argus, web, deploy
+./arenactl test                     # app, code-arena, code-intel, web, deploy
 ./arenactl test web deploy
 ./arenactl test app --filter PromptLogTests
 ```
@@ -246,14 +246,14 @@ the web's need `npm ci` in `src/web` once. [testing.md](testing.md) says more.
 | `fetch-code-arena-packs.sh` | the .NET packs for `--offline` builds, into `tools/offline-nuget/` |
 | `dn` | the .NET SDK in its container (`tools/dn build`, `tools/dn test`) |
 | `images-for.py` | the stack's images a change is in: what to build and start again ([development.md](development.md#what-a-change-is-in)) |
-| `build-packs.sh` | Argus's knowledge packs, one at a time |
+| `build-packs.sh` | Farzan Graph's knowledge packs, one at a time |
 | `fetch-security-sources.sh`, `security-texts.py` | the security pack's sources and pages |
-| `fetch-sqlite-vec.sh` | the vector extension Argus loads into SQLite |
+| `fetch-sqlite-vec.sh` | the vector extension Farzan Graph loads into SQLite |
 | `compliance-docs.py` | the compliance documents from `docs/compliance/controls.yaml` |
 | `grc-catalogs.py` | the frameworks' catalogs |
 | `release-scan.py` | a release's software bill of materials and known vulnerabilities: the release gate |
-| `smoke_test.py` | Argus's MCP acceptance check (`arenactl check argus`) |
-| `agent_client_example.py` | an example agent loop against Argus's MCP ([argus/clients.md](argus/clients.md)) |
+| `smoke_test.py` | Farzan Graph's MCP acceptance check (`arenactl check code-intel`) |
+| `agent_client_example.py` | an example agent loop against Farzan Graph's MCP ([code-intel/clients.md](code-intel/clients.md)) |
 
 ## When something fails
 

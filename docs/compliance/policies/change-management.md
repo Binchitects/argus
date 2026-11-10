@@ -20,7 +20,7 @@
 2. Upgrades: read the release's changelog, including any **Weakened controls**;
    take a backup; try the upgrade first on [a test installation] with a copy of
    the data (`./arenactl upgrade --dry-run` in a checkout, or
-   `sh argus-arena-VERSION-offline.run upgrade --dry-run` with the offline
+   `sh arena-VERSION-offline.run upgrade --dry-run` with the offline
    installer); apply it in [the maintenance window]; run
    `./arenactl check compliance` after.
 3. Rollback is a restore of the backup taken before (`./arenactl restore
@@ -35,7 +35,7 @@
 ## Vulnerabilities
 
 1. Each Arena release lists what it ships (its SBOM,
-   `argus-arena-VERSION.cdx.json`, attached to the release) and has passed a
+   `arena-VERSION.cdx.json`, attached to the release) and has passed a
    scan of its packages against OSV; [IT] keeps the SBOM of the installed
    release.
 2. [IT] follows advisories for the hosts, Docker, the drivers and Arena, and

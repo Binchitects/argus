@@ -21,6 +21,7 @@ import { askCode, mergeRequestsQuery, reviewBatchesQuery, reviewsQuery, startRev
 import { BusinessMapSection } from './business'
 import { repositoriesOf } from './severity'
 import { Workspaces } from './studio'
+import { codeIntelName } from '@/lib/brand'
 
 /** A review's state in a word or two, with its verdict once done. */
 export function ReviewState({ r }: { r: Pick<ReviewBrief, 'status' | 'step' | 'verdict'> }) {
@@ -34,7 +35,7 @@ type Tab = 'workspaces' | 'review' | 'ask'
 /**
  * Code Studio, in three parts each its permission's (Admin → Access): Workspaces (code.studio), Review (review.run starts
  * them: a merge request, a branch, a whole repository or several; code.read lists merge requests) and Ask and explore
- * (code.read: questions, Argus's tools across repositories, business maps). Fix it and Security review are a button away.
+ * (code.read: questions, code-intel's tools across repositories, business maps). Fix it and Security review are a button away.
  */
 export function CodePage() {
   const me = useQuery(meQuery)
@@ -53,7 +54,7 @@ export function CodePage() {
     <>
       <PageHeader
         title="Code Studio"
-        description="Code in an IDE like VS Code, on the server or your own machine; review a change, a whole repository or several with the model; and ask Argus about your code across repositories. Reviews read with your own access and write nothing; workspaces and Fix it push and open merge requests as you, with your own token."
+        description={`Code in an IDE like VS Code, on the server or your own machine; review a change, a whole repository or several with the model; and ask ${codeIntelName} about your code across repositories. Reviews read with your own access and write nothing; workspaces and Fix it push and open merge requests as you, with your own token.`}
         actions={
           <>
             <Button variant="outline" asChild>
@@ -259,7 +260,7 @@ function ReviewTab({ mayRun, mayRead, mayAuto }: { mayRun: boolean; mayRead: boo
             {mayRun && what === 'several' && (
               <div className="grid gap-3">
                 <p className="text-sm text-muted-foreground">
-                  Each repository reviewed whole, one after the other; then looked at across: how they depend on each other (as Argus resolved it), problems at their boundaries, what they do alike
+                  Each repository reviewed whole, one after the other; then looked at across: how they depend on each other (as {codeIntelName} resolved it), problems at their boundaries, what they do alike
                   and differently, and what to fix first.
                 </p>
                 <Field label="Repositories" hint={`One a line, 2 to 10. ${repositories.length} named.`}>
@@ -373,7 +374,7 @@ function ReviewTab({ mayRun, mayRead, mayAuto }: { mayRun: boolean; mayRead: boo
   )
 }
 
-/** Ask about code, and Argus's tools across repositories, each asked in a chat with Argus. */
+/** Ask about code, and code-intel's tools across repositories, each asked in a chat with code-intel. */
 function AskTab() {
   const navigate = useNavigate()
   const [question, setQuestion] = useState('')
@@ -398,7 +399,7 @@ function AskTab() {
       <Card>
         <CardHeader>
           <CardTitle>Ask about code</CardTitle>
-          <CardDescription>Explain, find, or suggest a change: answered in a chat with Argus, about {project.trim() || 'any project you can read'}.</CardDescription>
+          <CardDescription>Explain, find, or suggest a change: answered in a chat with {codeIntelName}, about {project.trim() || 'any project you can read'}.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           <Textarea rows={4} value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Where do we retry failed uploads, and is it safe?" aria-label="Question about code" />
@@ -417,7 +418,7 @@ function AskTab() {
           <h2 id="explore-title" className="text-lg font-semibold">
             Explore across repositories
           </h2>
-          <p className="text-sm text-muted-foreground">Argus&apos;s graph of what depends on what, through packages, imports, headers, submodules, CI and images, each asked in a chat.</p>
+          <p className="text-sm text-muted-foreground">{codeIntelName}&apos;s graph of what depends on what, through packages, imports, headers, submodules, CI and images, each asked in a chat.</p>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <Explore

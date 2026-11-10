@@ -23,6 +23,7 @@ import { useAppIcon } from '@/lib/app-icon'
 import { findNavItem, mayOpen, spaceOf, spaces, spaceTitle, visibleNavigation, type NavItem, type NavSection, type Space } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
+import { codeIntelName, productName } from '@/lib/brand'
 
 function readCollapsed(): boolean {
   try {
@@ -67,7 +68,7 @@ function SignedIn({ me }: { me: Me }) {
   // The newest release's tour: once by itself after a deploy, again from the account menu or the palette.
   const [whatsNew, setWhatsNew] = useState(false)
   const sections = visibleNavigation(me)
-  const name = info.data?.name ?? 'Argus Arena'
+  const name = info.data?.name ?? `${productName}`
   const icon = useAppIcon(info.data?.icon)
   // The old cheat code, anywhere but a text box.
   useKonami(useCallback(() => {
@@ -191,7 +192,7 @@ function NotInstalled({ item, admin }: { item: NavItem; admin: boolean }) {
     <EmptyState icon={item.icon} title={`${item.title} is not installed here`} className="mx-auto mt-16 max-w-lg">
       {admin ? (
         <>
-          Its feature, <code>{item.feature}</code>, is off. The installer turns it on: <code>./arenactl repair --with {item.feature}</code> from the checkout, or <code>sh argus-arena-VERSION-offline.run repair --with {item.feature}</code> with the offline installer.
+          Its feature, <code>{item.feature}</code>, is off. The installer turns it on: <code>./arenactl repair --with {item.feature}</code> from the checkout, or <code>sh arena-VERSION-offline.run repair --with {item.feature}</code> with the offline installer.
         </>
       ) : (
         'This feature is off on this server. Ask an admin if you need it.'
@@ -270,9 +271,9 @@ function ManualLink({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
 
 /** What the eye says when its logo is clicked seven times quickly. */
 const eyeSays = [
-  'Argus Panoptes had a hundred eyes. This one has one, and it has read your code.',
-  'The eye never sleeps. The GPU sometimes naps.',
-  'Seven clicks. The eye blinks back.',
+  'The owl sees in the dark. This one has also read your code.',
+  'Wise, not sleepy. The GPU sometimes naps.',
+  'Seven clicks. The owl blinks back.',
 ]
 
 function Brand({ name, icon, collapsed }: { name: string; icon: string; collapsed: boolean }) {

@@ -696,7 +696,7 @@ A project is seen only by its maker, the people and groups in it (each as owner,
 
 ### NET-01: Encrypted in transit, one way in
 
-Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused; the API host goes by the app alone, which passes on only the model API's own paths, so the model gateway's management and pages are not reachable from outside. Outbound, GitLab's certificate is checked against the public CAs and the company CA the stack is given (at install or in Settings), by the app, Argus and the workspaces alike: never turned off to reach a GitLab on a company CA.
+Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused; the API host goes by the app alone, which passes on only the model API's own paths, so the model gateway's management and pages are not reachable from outside. Outbound, GitLab's certificate is checked against the public CAs and the company CA the stack is given (at install or in Settings), by the app, Farzan Graph and the workspaces alike: never turned off to reach a GitLab on a company CA.
 
 **Serves**
 
@@ -721,7 +721,7 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/FileSealingTests.With_HSTS_set_the_app_sends_it_as_Traefik_does_and_without_it_clears_any_kept_before`
 - `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
 - `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
-- `Llm.Tests/CompanyCaTests.A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_Argus_gets_it_too`
+- `Llm.Tests/CompanyCaTests.A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_CodeIntel_gets_it_too`
 
 **Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -729,7 +729,7 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 
 ### NET-02: Only the company's addresses come in
 
-Settings → Network access holds an allow list and a block list of addresses and ranges (IPv4 and IPv6) for the web, the API, the gateway and Argus; Traefik asks the app before every request and refuses what the lists refuse, and refuses everything while it cannot ask. A list that would shut out the admin saving it is refused, and each change is audited. IP_ALLOW is Traefik's own list in front of it all, even while the app is down.
+Settings → Network access holds an allow list and a block list of addresses and ranges (IPv4 and IPv6) for the web, the API, the gateway and Farzan Graph; Traefik asks the app before every request and refuses what the lists refuse, and refuses everything while it cannot ask. A list that would shut out the admin saving it is refused, and each change is audited. IP_ALLOW is Traefik's own list in front of it all, even while the app is down.
 
 **Serves**
 
@@ -1026,7 +1026,7 @@ The audit programme (Admin → Compliance → Audits): each audit, internal or a
 
 ### GOV-08: Suppliers are registered, agreed with and reviewed
 
-The supplier register (Admin → Compliance → Suppliers): each model provider, cloud, connector or other service, with what it provides, the kinds of data it receives (personal, health, confidential, code, payment), where, its certifications and reports, the agreements signed, its risk and a review its risk sets (six months high, a year medium, two years low). The services Arena connects to (cloud model servers, tool servers, knowledge connectors, the GitLab Argus reads, Hugging Face) are offered for the register until they are in it. Every change and review is audited, and the register is in the evidence.
+The supplier register (Admin → Compliance → Suppliers): each model provider, cloud, connector or other service, with what it provides, the kinds of data it receives (personal, health, confidential, code, payment), where, its certifications and reports, the agreements signed, its risk and a review its risk sets (six months high, a year medium, two years low). The services Arena connects to (cloud model servers, tool servers, knowledge connectors, the GitLab Farzan Graph reads, Hugging Face) are offered for the register until they are in it. Every change and review is audited, and the register is in the evidence.
 
 **Serves**
 

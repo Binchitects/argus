@@ -638,7 +638,7 @@ describe('models on disk', () => {
       { path: 'big/Big-Q4.gguf', kind: 'gguf', size: 18e9, parts: 1, usedBy: ['Big-Model'], keptBy: null, downloading: false, whyNot: 'Big-Model uses it: remove that model first (with its files, if you like).' },
       { path: 'old/Old-00001-of-00002.gguf', kind: 'gguf', size: 9e9, parts: 2, usedBy: [], keptBy: null, downloading: false, whyNot: null },
       { path: 'hf/org/Snap@abc', kind: 'snapshot', size: 3e9, parts: 1, usedBy: [], keptBy: null, downloading: false, whyNot: null },
-      { path: 'embed/nomic.gguf', kind: 'gguf', size: 2.7e8, parts: 1, usedBy: [], keptBy: 'the embedder (knowledge and Argus)', downloading: false, whyNot: 'It stays.' },
+      { path: 'embed/nomic.gguf', kind: 'gguf', size: 2.7e8, parts: 1, usedBy: [], keptBy: 'the embedder (knowledge and Farzan Graph)', downloading: false, whyNot: 'It stays.' },
     ],
     used: 30.27e9, free: 100e9, total: 500e9,
   }
@@ -664,7 +664,7 @@ describe('models on disk', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Show the servers’ own files too \(1\)/ }))
     expect(within(table).getByText('embed/nomic.gguf')).toBeInTheDocument()
-    expect(within(table).getByText('the embedder (knowledge and Argus)')).toBeInTheDocument()
+    expect(within(table).getByText('the embedder (knowledge and Farzan Graph)')).toBeInTheDocument()
   })
 
   it('a model removed with its files says what was freed', async () => {

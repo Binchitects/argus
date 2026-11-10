@@ -1,4 +1,4 @@
-# Deploying Argus Arena
+# Deploying Farzan Arena
 
 `deploy/` is the whole platform: one `docker-compose.yml`, a short `.env`, and a
 few configuration files. The core always runs; **everything else is a
@@ -16,8 +16,8 @@ and no setup scripts.
 | `postgres` | the app's and the gateway's databases |
 | `litellm` | the gateway: a key and a credit per person, every request's cost |
 | `llamacpp` | the chat models (Admin → Models), loaded and unloaded live, on the GPUs |
-| `embed` | embeddings for Argus, on the CPU |
-| `argus` | the code index (GitLab, a read-only token) and knowledge packs, over MCP |
+| `embed` | embeddings for Farzan Graph, on the CPU |
+| `code-intel` | the code index (GitLab, a read-only token) and knowledge packs, over MCP |
 | `imagegen`, `videogen` | pictures (FLUX.2 klein) and video (Wan2.2 TI2V 5B), on the GPU |
 | `audio` | speech to text (Whisper) and text to speech (Kokoro, a Persian voice) |
 | `sandbox` | the chat's Python: no network, a read-only root, each run its own user |
@@ -78,9 +78,9 @@ loaded. **Admin → Models** shows the downloads as they go. `MODELS_DIR` must b
 writable by uid 1000 (the app's user): create it yourself before the first `up`.
 A folder that holds models already is used as it is: nothing is moved.
 
-The stack's data (the database, Argus's indexes, the speech server's models,
+The stack's data (the database, Farzan Graph's indexes, the speech server's models,
 metrics and logs, the engine's presets) lives in folders of **`DATA_DIR`** on the
-host, one per volume (`DATA_DIR/postgres`, `DATA_DIR/argus`, ...), not in the
+host, one per volume (`DATA_DIR/postgres`, `DATA_DIR/code-intel`, ...), not in the
 engine's own storage: `DATA_DIR` in `.env` is an absolute folder, and each
 folder must be there before `up` (the installer asks where, and makes them with
 their services' owners). Compose still names them as volumes, so
@@ -98,7 +98,7 @@ The addresses, all on port 443:
 |---|---|
 | `https://DOMAIN` | the app |
 | `https://gateway.DOMAIN/v1` | the API (OpenAI and Anthropic protocols), with a person's key |
-| `https://argus.DOMAIN/mcp` | Argus for coding agents, with a person's API key (not a GitLab token) |
+| `https://code-intel.DOMAIN/mcp` | Farzan Graph for coding agents, with a person's API key (not a GitLab token) |
 | `https://ws-<workspace>-<port>.DOMAIN` | with Code Studio's workspaces: a dev server in a workspace, for its owner ([chat.md](chat.md#forwarded-ports)) |
 
 `*.localhost` resolves to this machine in browsers; for other tools,
@@ -123,7 +123,7 @@ Traefik does TLS and nothing else does.
 - **A certificate of your own** (what the installer makes by default):
   `./arenactl cert` (`scripts/make-cert.sh`) makes one with openssl,
   signed by a CA of the deployment's own, for `DOMAIN`, `gateway.DOMAIN`,
-  `argus.DOMAIN` and `*.DOMAIN`, or installs a company's (`--cert FILE --key FILE
+  `code-intel.DOMAIN` and `*.DOMAIN`, or installs a company's (`--cert FILE --key FILE
   [--chain FILE]`). The files go to `certs/` (mounted into Traefik at `/certs`)
   and the script writes `config/traefik/certificate.yml` naming them; Traefik
   serves them at once. Then trust `certs/ca.crt` on the machines and in the
@@ -131,7 +131,7 @@ Traefik does TLS and nothing else does.
 
   ```bash
   ./arenactl cert
-  sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt && sudo update-ca-certificates
+  sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/arena.crt && sudo update-ca-certificates
   curl --cacert deploy/certs/ca.crt https://DOMAIN/
   ```
 
@@ -188,7 +188,7 @@ away by `remove --purge`:
 | command | what |
 |---|---|
 | `arenactl status`, `verify`, `features`, `config`, `repair`, `remove`, `requirements` | the installer's own commands on this installation |
-| `arenactl upgrade argus-arena-VERSION-offline.run` | an upgrade from a new release's offline installer (`repair FILE.run` repairs from one) |
+| `arenactl upgrade arena-VERSION-offline.run` | an upgrade from a new release's offline installer (`repair FILE.run` repairs from one) |
 | `arenactl ps`, `logs [SERVICE...] [-f]`, `restart [SERVICE...]` | the containers, their logs, starting them again |
 | `arenactl backup`, `restore BACKUP`, `cert`, `sign`, `hosts` | the operator's scripts |
 | `arenactl check NAME` | a live check: `sandboxes` (every sandbox for real), `blender`, `sandbox`, `lean`, `functional`, `dashboards`, `gpu`, `compliance`, `recovery`, `clients` |
@@ -216,7 +216,7 @@ on; its API answers 404; and its background work does not run.
 | `lmdeploy` | no | `lmdeploy` (arena-lmdeploy, built by `lmdeploy-build.yml`) | an NVIDIA GPU |
 | `strata` | no | `strata` (with `STRATA_IMAGE`) | an NVIDIA GPU, RAM for the experts that do not fit it |
 | `knowledge` | yes | `embed` | |
-| `argus` | yes | `argus` | a GitLab |
+| `code-intel` | yes | `code-intel` | a GitLab |
 | `pictures` | yes | `imagegen` | a GPU |
 | `video` | yes | `videogen` | a GPU |
 | `speech` | yes | `audio` | |
@@ -228,7 +228,7 @@ on; its API answers 404; and its background work does not run.
 | `studio` | no | `studio` | a GPU; the media studio |
 | `workspaces` | no | `workspaces` | Code Studio |
 | `laya` | no | `laya` | |
-| `scanners` | no | `scanners` (an image of about 700 MB) | Argus |
+| `scanners` | no | `scanners` (an image of about 700 MB) | Farzan Graph |
 | `monitoring` | yes | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `cpu-temp-exporter` | |
 | `gpu-monitoring` | yes | `gpu-exporter` | a GPU; monitoring |
 | `dcgm` | no | `dcgm-exporter` | a GPU; monitoring |
@@ -245,7 +245,7 @@ to change, each with the disk its images take. A feature turned on brings those
 it requires; one that others on need is not turned off without them. `repair
 --with` loads a feature's images from the bundle and starts it; `repair
 --without` removes its containers and its images (`--keep-images` keeps them),
-and its data stays until `remove --purge`. `./arenactl features` (with a bundle, `sh argus-arena-VERSION-offline.run features`) lists them,
+and its data stays until `remove --purge`. `./arenactl features` (with a bundle, `sh arena-VERSION-offline.run features`) lists them,
 on or off, with their sizes.
 
 By hand, in `deploy/`: change `COMPOSE_PROFILES` in `.env`, then `docker compose
@@ -264,7 +264,7 @@ It is off by default. To turn it on, with the installer:
 
 ```bash
 ./arenactl repair --with laya                                            # from a checkout
-sh argus-arena-VERSION-offline.run repair --with laya --dir /srv/arena   # with the offline installer
+sh arena-VERSION-offline.run repair --with laya --dir /srv/arena   # with the offline installer
 ```
 
 or by hand: add `laya` to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d --build laya`.
@@ -394,9 +394,9 @@ copy's **At once**.
 
 ## Helm
 
-`deploy/helm/argus-arena` runs the same services on Kubernetes: the app with
+`deploy/helm/arena` runs the same services on Kubernetes: the app with
 several replicas, web, the gateway, Postgres (or an external one), llama.cpp
-and the media servers on GPUs, embed, Argus, the sandbox (no network: a
+and the media servers on GPUs, embed, Farzan Graph, the sandbox (no network: a
 NetworkPolicy), SearXNG, Prometheus, Alertmanager, Loki, and Laya (off unless
 `laya.enabled`). Each module is turned on or off in `values.yaml`. One release
 per namespace: the services keep the names the app reaches them by.
@@ -404,7 +404,7 @@ per namespace: the services keep the names the app reaches them by.
 ### With the installer
 
 `./arenactl kube COMMAND` from a checkout, or the offline installer's
-`COMMAND --kubernetes` (`sh argus-arena-VERSION-offline.run install
+`COMMAND --kubernetes` (`sh arena-VERSION-offline.run install
 --kubernetes`), installs the chart for you. `requirements` checks the cluster before anything is changed and says
 what each lack needs: kubectl 1.27 and helm 3.14 or newer, the cluster
 answering and your rights in the namespace, a default storage class (or
@@ -448,18 +448,18 @@ the power limits run with compose only.
 
 ### By hand
 
-1. Build the app, web, Argus and sandbox images, and Laya's if you turn it on
+1. Build the app, web, Farzan Graph and sandbox images, and Laya's if you turn it on
    (`docker compose build`, with `laya` in `COMPOSE_PROFILES` for Laya), and push
    them to a registry the cluster pulls from; name them under `images` (the tag
    defaults to the app's version).
-2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
+2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `code-intel.DOMAIN` (a
    wildcard, or the files `./arenactl cert` makes; with `workspaces.enabled`,
    `*.DOMAIN` too, for Code Studio's forwarded ports): `kubectl create secret tls
    arena-tls --cert=... --key=...`.
 3. Install:
 
    ```bash
-   helm install arena deploy/helm/argus-arena -n arena --create-namespace \
+   helm install arena deploy/helm/arena -n arena --create-namespace \
      --set domain=arena.example.com --set gitlab.url=https://gitlab.example.com
    ```
 
@@ -485,9 +485,9 @@ Security level refuses it. Turned off there (`monitoring.hostExporters.enabled=f
 `TargetDown` fires for the `node` and `cpu-temp` jobs and the host's disks,
 memory and temperature go unwatched by the stack. On several
 nodes, give it a `nodeSelector` for the GPU node. GPU telemetry and power caps
-are the cluster's. Argus checks coding agents' API keys with the app, as in
+are the cluster's. Farzan Graph checks coding agents' API keys with the app, as in
 compose; built knowledge packs (**Admin → Packs**) come from a claim of yours
-(`argus.packLibraryClaim`), mounted read only.
+(`code-intel.packLibraryClaim`), mounted read only.
 
 Availability: the app, the web and the gateway roll one new pod at a time and
 take none away before it is ready (`maxUnavailable: 0`), spread their replicas
@@ -536,7 +536,7 @@ how). **no**: missing, with the reason.
 | `lmdeploy` | off (the `lmdeploy` feature, `LMDEPLOY_IMAGE`), every GPU; `fake-gpu.yml`: the fake LMDeploy, no GPU | the same, CDI; no locked-memory limit | off (`lmdeploy.enabled`); a Deployment per `lmdeploy.instances` entry; `lmdeploy.fake` |
 | `strata` | off (the `strata` feature, `STRATA_IMAGE`), every GPU, its packs in `strata-data`; `fake-gpu.yml`: the fake Strata, no GPU | the same, CDI; no locked-memory limit | off (`strata.enabled`); a Deployment per `strata.instances` entry, its packs in `arena-strata-data`; `strata.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
-| `argus` | yes | yes | yes |
+| `code-intel` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
 | `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
 | `laya` | off (the `laya` feature) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
@@ -552,24 +552,24 @@ how). **no**: missing, with the reason.
 | model library | `MODELS_DIR` | the same | the `arena-models` claim (ReadWriteMany across nodes) or `persistence.models.existingClaim` |
 | `engine`, `directory`, `sandbox` | volumes | the same | claims, ReadWriteMany across nodes |
 | `media-status`, `vllm-status` | in memory (tmpfs) | the same | differs: small claims, kept on disk |
-| `argus`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
+| `code-intel`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
 | `code-arena-signature` (the Code Arena builds' signature) | a folder of `DATA_DIR`, written by `scripts/sign-code-arena.sh` on the host | the same | no: there is no host with the CA's key; the builds are served unsigned, checked by their SHA-256 |
 | `acme`, the certificates | Traefik's | the same | differs: the TLS Secret (`ingress.tlsSecret`) |
-| the pack library | `packs/` or `ARGUS_PACK_LIBRARY_DIR` | the same | `argus.packLibraryClaim` (empty: none) |
+| the pack library | `packs/` or `CODE_INTEL_PACK_LIBRARY_DIR` | the same | `code-intel.packLibraryClaim` (empty: none) |
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
-| `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
+| `litellm.yaml` (its 960 s timeouts), `code-intel.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
 | `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/sglang/serve.py` (the key by `SGLANG_API_KEY`, handed to SGLang inside its process), `services/lmdeploy/serve.py` and `services/strata/serve.py` (the key by `VLLM_API_KEY`, handed over inside the process or by Strata's `--api-key-env`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
-| **Health checks** | the images' (app, web, Argus, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, LiteLLM, Laya, Argus |
+| **Health checks** | the images' (app, web, Farzan Graph, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, LiteLLM, Laya, Farzan Graph |
 | **Backup and restore** | `./arenactl backup`, `./arenactl restore` | `./arenactl backup --podman`, `./arenactl restore --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
-| **Install and upgrade** | `./arenactl install` and `upgrade`, `./arenactl check upgrade` | `./arenactl install --podman` | `./arenactl kube install` / `upgrade`, or `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
+| **Install and upgrade** | `./arenactl install` and `upgrade`, `./arenactl check upgrade` | `./arenactl install --podman` | `./arenactl kube install` / `upgrade`, or `helm install` / `helm upgrade`; the app and Farzan Graph migrate as they start; no upgrade test |
 | **Features** | | | |
 | media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing (a vLLM model put to sleep frees its memory only for pods that share its GPU) |
 | AMD GPUs (ROCm) | `rocm.yml`: `/dev/kfd` and `/dev/dri`, ROCm images | `rocm.yml` after `podman.yml` | `gpuResource: amd.com/gpu`, ROCm images, `engines.backend: rocm` |
-| Argus checks agents' API keys with the app | yes | yes | yes |
+| Farzan Graph checks agents' API keys with the app | yes | yes | yes |
 | answer cache for API keys, speech and pictures by the app | yes, with fallback to LiteLLM while the app is down | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
 | TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
 | app replicas | `scale.yml`, `APP_REPLICAS` | the same | `app.replicas` |
@@ -783,29 +783,29 @@ All of them are under **Admin → Models**, with the same controls:
 Who may use each model is set on its card; a person's API key carries the
 models they may use.
 
-## GitLab and Argus
+## GitLab and the code index
 
-Argus reads GitLab with a **read-only** token (`read_api`, `read_repository`, an
+Farzan Graph reads GitLab with a **read-only** token (`read_api`, `read_repository`, an
 account that is at least Reporter where it should index): `GITLAB_URL` and
 `GITLAB_TOKEN` in `.env`. It answers each person within their own GitLab
 membership; it never needs admin. Indexing starts from **Admin → Indexing**.
 
-Coding agents connect to Argus with the person's own API key (**Connect your
-tools** has the setups); nobody hands out a GitLab token. Argus asks the app
-whose a key is (`ARGUS_KEY_CHECK_URL` in `docker-compose.yml`, with `ARGUS_KEY`),
+Coding agents connect to Farzan Graph with the person's own API key (**Connect your
+tools** has the setups); nobody hands out a GitLab token. Farzan Graph asks the app
+whose a key is (`CODE_INTEL_KEY_CHECK_URL` in `docker-compose.yml`, with `CODE_INTEL_KEY`),
 and the person's username must be their GitLab username.
 
 To index a push or a merge at once, not at the next scheduled pass: **Admin →
 Indexing → Push and merge webhook → Turn on**, then add the webhook in GitLab
 (group or project → Settings → Webhooks) with the address and secret the page
 shows, for push and merge request events. Adding it is a one-time step for a
-GitLab Maintainer or Owner; Argus's token stays read-only. Details:
-[Indexing on push and merge](argus/README.md#indexing-on-push-and-merge).
+GitLab Maintainer or Owner; Farzan Graph's token stays read-only. Details:
+[Indexing on push and merge](code-intel/README.md#indexing-on-push-and-merge).
 
 No token can be made for the account (a locked-down GitLab)? Set
-`GITLAB_USERNAME` and `GITLAB_PASSWORD` instead: Argus signs in once and makes
-its own read-only token ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)).
-An account GitLab checks against LDAP works too: Argus uses GitLab's LDAP
+`GITLAB_USERNAME` and `GITLAB_PASSWORD` instead: Farzan Graph signs in once and makes
+its own read-only token ([details](code-intel/README.md#when-no-token-can-be-issued-for-the-account)).
+An account GitLab checks against LDAP works too: Farzan Graph uses GitLab's LDAP
 sign-in when its own refuses the account (`GITLAB_LDAP` names one server, or
 `off`).
 
@@ -819,7 +819,7 @@ ways, both kept:
   GitLab, `./arenactl config` changes it): a PEM file with the CA's
   certificate, or the issuing CA with its root. It is mounted read only into
   the app. On Kubernetes, `gitlab.caCert` in the chart's values (the PEM).
-- **In Settings:** **Settings → Argus (GitLab) → GitLab's CA**, pasted. It
+- **In Settings:** **Settings → Farzan Graph (GitLab) → GitLab's CA**, pasted. It
   applies at once, without a restart; something that is not a certificate,
   or holds a private key, is refused.
 
@@ -827,9 +827,9 @@ Everything that reaches GitLab then trusts it besides the public CAs: a
 person signing in with GitLab or the company's provider, linking their
 GitLab token and apps (Fix it, Code Studio, scheduled tasks, knowledge
 sources), every other HTTP client the app makes without a check of its own,
-Argus's API client and its git clones (the app writes the CA to
-`company-ca.pem` beside the directory file, which Argus reads again whenever
-it changes: `ARGUS_GITLAB_CA_EXTRA`), and Code Studio's workspaces (their
+Farzan Graph's API client and its git clones (the app writes the CA to
+`company-ca.pem` beside the directory file, which Farzan Graph reads again whenever
+it changes: `CODE_INTEL_GITLAB_CA_EXTRA`), and Code Studio's workspaces (their
 clone, `git push` in their terminals, curl, Python, pip, .NET and Node.js).
 A certificate must still be for GitLab's name and within its dates; one of
 another CA is still refused. Before the CA is given, linking a token says
@@ -837,7 +837,7 @@ that GitLab's certificate is not trusted and where to add the CA, instead of
 a closed connection.
 
 `GITLAB_VERIFY_TLS=false` (accept any certificate) stays for testing only.
-Argus's own `ARGUS_GITLAB_CA_CERT` (a file mounted into Argus in
+Farzan Graph's own `CODE_INTEL_GITLAB_CA_CERT` (a file mounted into Farzan Graph in
 `docker-compose.override.yml`) still works and is trusted too.
 
 ## Code Arena
@@ -865,12 +865,12 @@ v4 is a new layout: the project is `arena`, the volumes are named for it, and
 
 1. Write the new `.env` from the old one: `DOMAIN` (was `LLM_DOMAIN`),
    `MODELS_DIR` (the model library), `DB_PASSWORD` (`LLM_PG_PASSWORD`),
-   `APP_KEY` (`APP_DATA_KEY`), `ENGINE_KEY` (`LLAMACPP_API_KEY`), `ARGUS_KEY`
-   (`ARGUS_ADMIN_TOKEN`), `GATEWAY_KEY` (`LITELLM_MASTER_KEY`), `GITLAB_URL` and
+   `APP_KEY` (`APP_DATA_KEY`), `ENGINE_KEY` (`LLAMACPP_API_KEY`), `CODE_INTEL_KEY`
+   (`CODE_INTEL_ADMIN_TOKEN`), `GATEWAY_KEY` (`LITELLM_MASTER_KEY`), `GITLAB_URL` and
    `GITLAB_TOKEN`. Keep the values: the app's key ring and the gateway's keys
    depend on them.
 2. Stop the old stack and copy each volume into its new name (`llmservice_postgres-data`
-   to `arena_postgres`, likewise `argus`, `prometheus`, `alertmanager`, `loki`,
+   to `arena_postgres`, likewise `code-intel`, `prometheus`, `alertmanager`, `loki`,
    `power-limits`), and the old `config/engine` and `config/directory` files into
    the `arena_engine` and `arena_directory` volumes.
 3. In Postgres, add the `arena` role (superuser, with `DB_PASSWORD`).
@@ -887,9 +887,9 @@ became fixed, or went away:
 
 | v3 | v4 |
 |---|---|
-| `LLM_DOMAIN`, `LLM_MODELS_DIR`, `LLM_PG_PASSWORD`, `APP_DATA_KEY`, `LLAMACPP_API_KEY`, `ARGUS_ADMIN_TOKEN` and `ARGUS_CHAT_CLIENT_TOKEN`, `LITELLM_MASTER_KEY`, `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | renamed: `DOMAIN`, `MODELS_DIR`, `DB_PASSWORD`, `APP_KEY`, `ENGINE_KEY`, `ARGUS_KEY` (one), `GATEWAY_KEY`, `HTTP_PORT`, `HTTPS_PORT` |
-| `ARGUS_GITLAB_URL`, `ARGUS_GITLAB_TOKEN`, `ARGUS_GITLAB_USERNAME`, `ARGUS_GITLAB_PASSWORD`, `ARGUS_GITLAB_LDAP`, `ARGUS_GITLAB_VERIFY` | `GITLAB_URL`, `GITLAB_TOKEN`, `GITLAB_USERNAME`, `GITLAB_PASSWORD`, `GITLAB_LDAP`, `GITLAB_VERIFY_TLS` (`ARGUS_GITLAB_AUTH` is inferred: a username means password mode) |
-| `ARGUS_GITLAB_CA_CERT` | `docker-compose.override.yml` ([above](#gitlab-and-argus)) |
+| `LLM_DOMAIN`, `LLM_MODELS_DIR`, `LLM_PG_PASSWORD`, `APP_DATA_KEY`, `LLAMACPP_API_KEY`, `CODE_INTEL_ADMIN_TOKEN` and `CODE_INTEL_CHAT_CLIENT_TOKEN`, `LITELLM_MASTER_KEY`, `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT` | renamed: `DOMAIN`, `MODELS_DIR`, `DB_PASSWORD`, `APP_KEY`, `ENGINE_KEY`, `CODE_INTEL_KEY` (one), `GATEWAY_KEY`, `HTTP_PORT`, `HTTPS_PORT` |
+| `CODE_INTEL_GITLAB_URL`, `CODE_INTEL_GITLAB_TOKEN`, `CODE_INTEL_GITLAB_USERNAME`, `CODE_INTEL_GITLAB_PASSWORD`, `CODE_INTEL_GITLAB_LDAP`, `CODE_INTEL_GITLAB_VERIFY` | `GITLAB_URL`, `GITLAB_TOKEN`, `GITLAB_USERNAME`, `GITLAB_PASSWORD`, `GITLAB_LDAP`, `GITLAB_VERIFY_TLS` (`CODE_INTEL_GITLAB_AUTH` is inferred: a username means password mode) |
+| `CODE_INTEL_GITLAB_CA_CERT` | `docker-compose.override.yml` ([above](#gitlab-and-the-code-index)) |
 | `LDAP_*` (server, bind account and password, bases, admin and required groups, StartTLS, sync interval) | Admin → Settings → Company directory (LDAP); the password is stored encrypted |
 | `LLAMACPP_HF_REPO`, `LLAMACPP_HF_FILES`, `LLAMACPP_MODEL_FILE` | `MODEL` (the first model), then Admin → Models → Add, or Hugging Face search |
 | `MODEL_NAME`, `MODEL_CONTEXT`, `MODEL_MAX_OUTPUT`, `LLAMACPP_PARALLEL`, `LLAMACPP_KV_TYPE`, `LLAMACPP_N_GPU_LAYERS`, `LLAMACPP_N_CPU_MOE`, `LLAMACPP_THREADS`, `LLAMACPP_MTP_*`, `LLAMACPP_EXTRA_ARGS`, `LLAMACPP_MLOCK`, `PRICE_*_PER_MTOK` | each model's own form in Admin → Models (any other llama.cpp option in its extra lines) |
@@ -900,7 +900,7 @@ became fixed, or went away:
 | `COMPOSE_PROFILES` | the list of the features that are on ([Features](#features)) |
 | `IMAGEGEN_*` | the picture model is fixed (FLUX.2 klein 4B), fetched by the app; turned on or off, loaded or kept in Admin → Models |
 | `PROMETHEUS_RETENTION_TIME`, `_SIZE`, `*_CPUS`, `*_MEM_LIMIT`, `SANDBOX_*`, `LITELLM_WORKERS`, `EMBED_CPUS` | fixed in `docker-compose.yml` (30 days or 20 GB of metrics; the sandbox's limits); change one in `docker-compose.override.yml`. The longest Python run is Settings → Python and web |
-| `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `ARGUS_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
+| `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `CODE_INTEL_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
 
 ## Backups and restore
 
@@ -1051,12 +1051,12 @@ Neither pulls or builds anything there.
 
 ### The offline installer
 
-`argus-arena-VERSION-offline.run` is a shell script with the release after it:
+`arena-VERSION-offline.run` is a shell script with the release after it:
 every image (gzipped), `deploy/` without secrets, the docs, the licences, Code
 Arena's packages, the embedding model, and when asked the other models and the
 knowledge packs. The host needs bash, tar, gzip and sha256sum, and Docker or
 rootless Podman with Docker's compose plugin; nothing is ever pulled, the helper
-containers included. Without curl, the installer asks the app and Argus their
+containers included. Without curl, the installer asks the app and Farzan Graph their
 version from a helper container on the stack's network instead of through
 Traefik.
 
@@ -1066,7 +1066,7 @@ On a Linux machine with this checkout. It builds every feature's images first
 (`--no-build` takes them as this host has them):
 
 ```bash
-./arenactl bundle --with-deps        # dist/argus-arena-VERSION-offline.run and .sha256
+./arenactl bundle --with-deps        # dist/arena-VERSION-offline.run and .sha256
 ./arenactl bundle --models --packs   # with the models and the knowledge packs
 ./arenactl bundle --dry-run          # what it would hold
 ```
@@ -1121,7 +1121,7 @@ policy start again; `--off` takes it away):
 
 Before it changes anything it checks that the proxy reaches Docker Hub's
 registry (a proxy that does not answer changes nothing), then says what the
-restart stops: every running container (those with a restart policy, Argus
+restart stops: every running container (those with a restart policy, Farzan Graph
 Arena's, start again by themselves; those without are named, and stay stopped),
 builds, pulls and bundles in progress, and that every pull needs the proxy from
 then on. It goes on only when `restart` is typed (`--yes` at no terminal), and
@@ -1153,8 +1153,8 @@ bundle maker says so loudly.
 Copy the `.run` and its `.sha256` to the host, then:
 
 ```bash
-sha256sum -c argus-arena-5.6.1-offline.run.sha256
-sudo sh argus-arena-5.6.1-offline.run install --dir /srv/arena
+sha256sum -c arena-5.6.1-offline.run.sha256
+sudo sh arena-5.6.1-offline.run install --dir /srv/arena
 ```
 
 It asks its questions, then checks everything before it does anything: the
@@ -1180,7 +1180,7 @@ anything written, loaded or started; what is not met is said together, and
 nothing has been changed (`--skip-requirements` goes on anyway, for install and
 upgrade). The disk is for the images it loads: those the host has already, as
 the bundle carries them, are not counted (an upgrade loads only what
-changed). `sh argus-arena-VERSION-offline.run requirements`
+changed). `sh arena-VERSION-offline.run requirements`
 checks a host on its own (`--fix` puts it right; `./arenactl requirements` is
 the same from a checkout).
 
@@ -1197,10 +1197,10 @@ The questions: the domain, the admin's e-mail, where models live, the
 **default models** (download them from Hugging Face once, at the first start;
 copy them from a folder, the model library's layout, with `audio.tar.gz` for the
 speech server's; or skip, and an admin downloads them later under Admin →
-Models), the first model, the ports and the GitLab Argus indexes; loads the images; writes
+Models), the first model, the ports and the GitLab Farzan Graph indexes; loads the images; writes
 `/srv/arena/deploy` and its `.env`, with every secret generated; starts the
 stack, waits until each service is healthy, checks the version the app and
-Argus report, and prints the address. The admin's first password is shown once,
+Farzan Graph report, and prints the address. The admin's first password is shown once,
 on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
 
 - Unattended, every answer is an option: `--yes --domain llm.example.com
@@ -1208,8 +1208,8 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   (`--models-dir`, `--default-models download|skip|DIR`, `--model`, `--http-port`,
   `--https-port`, `--acme-email`).
   The token is read from the file, never from the command line.
-- Without a GitLab, the `argus` feature is off until `GITLAB_URL` and
-  `GITLAB_TOKEN` are in `.env` and `repair --with argus` turns it on.
+- Without a GitLab, the `code-intel` feature is off until `GITLAB_URL` and
+  `GITLAB_TOKEN` are in `.env` and `repair --with code-intel` turns it on.
 - The [features](#features): the release's defaults, and on a terminal the list to
   change; `--with A,B` and `--without A,B` unattended. `--cpu-only` turns off those
   that need a GPU (unless `--with` names one). They go in `.env`
@@ -1241,8 +1241,8 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
 #### Upgrade from 5.2.0
 
 ```bash
-sh argus-arena-5.6.1-offline.run upgrade --dir /srv/arena --dry-run   # the plan: each file, each new .env key
-sh argus-arena-5.6.1-offline.run upgrade --dir /srv/arena
+sh arena-5.6.1-offline.run upgrade --dir /srv/arena --dry-run   # the plan: each file, each new .env key
+sh arena-5.6.1-offline.run upgrade --dir /srv/arena
 ```
 
 It upgrades an installation of 5.2.0 or newer, whether this installer made it
@@ -1282,10 +1282,10 @@ back the list there was.
    change is listed. `.env` gets each new key with its default (a new secret is
    generated), listed; nothing is removed, and the keys the release no longer
    reads are named.
-5. **The new release starts.** The app and Argus migrate their data as they
+5. **The new release starts.** The app and Farzan Graph migrate their data as they
    start. Every service must be up and healthy (one that was down before the
    upgrade is named and not waited for, and the embedding server without its
-   model is waiting for models), and the app, Argus and every container must
+   model is waiting for models), and the app, Farzan Graph and every container must
    run the new release.
 6. **On a failure it rolls back by itself**: the old images, the files the
    upgrade changed, and, once the new release had started, the data from the
@@ -1446,8 +1446,8 @@ server from looking. Then `docker compose up -d --pull never`.
 | `./arenactl check rollback FROM_TAG TO_TAG` | a release rolls back by restoring the backup taken before the upgrade, in a throwaway project |
 | `./arenactl airgap pack --dry-run X.tar` | what an offline bundle would hold, and that every image is on this host |
 | `./arenactl bundle --dry-run` | what the release's offline installer would hold, and that its images are built |
-| `sh argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` | what an upgrade would change on that host: the files, the `.env` keys, the images |
-| `./arenactl check clients` | the API (OpenAI and Anthropic, streaming, tools), Argus over MCP, Qwen Code and DeepSeek Harness |
+| `sh arena-VERSION-offline.run upgrade --dir DIR --dry-run` | what an upgrade would change on that host: the files, the `.env` keys, the images |
+| `./arenactl check clients` | the API (OpenAI and Anthropic, streaming, tools), Farzan Graph over MCP, Qwen Code and DeepSeek Harness |
 | `./arenactl check scale` | many people at once: the chat's queue, every key, a burst of sandbox jobs |
 | `./arenactl check sandbox` | the Python sandbox's limits and escapes |
 | `./arenactl check functional` | everything a person does, done for real, as two people |

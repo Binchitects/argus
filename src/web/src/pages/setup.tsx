@@ -13,14 +13,15 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { api, errorMessage, mayUse } from '@/lib/api'
+import { api, errorMessage, infoQuery, mayUse } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
 import { arenaMcp, CA_FILE, caShell, KEY, tools, type Context, type Step, type System, type Tool } from './setup-tools'
+import { codeIntelName } from '@/lib/brand'
 
 interface ChatConfig {
   model: string | null
   models: { name: string; context: number | null; maxOutput: number | null; vision: boolean; tools: boolean; thinking: boolean; loaded: boolean }[]
-  argus: boolean
+  codeIntel: boolean
   /** The feature permissions the person does not hold (feature.code_arena…). */
   denied?: string[]
 }
@@ -52,7 +53,7 @@ const tokens = (n: number | null) => (n ? n.toLocaleString('en-US') : '—')
 /**
  * Connect your own tools: an API key, the gateway's address and your models,
  * setups to paste for the common coding agents and SDKs, Arena MCP (every chat tool of
- * yours, with the same key) and Argus over MCP.
+ * yours, with the same key) and code-intel over MCP.
  */
 export function ConnectPage() {
   const config = useQuery({ queryKey: ['chat', 'config'], queryFn: ({ signal }) => api<ChatConfig>('/api/chat/config', { signal }) })
@@ -69,19 +70,21 @@ export function ConnectPage() {
   const [chosen, setChosen] = useState<string | null>(null)
   const [toolId, setToolId] = useState(() => remembered(TOOL_KEY, 'claude'))
   const [os, setOs] = useState<System>(() => (remembered(OS_KEY, guessSystem()) === 'windows' ? 'windows' : 'unix'))
-  // A key made on this page, filled into the Argus setups only when the person asks (it is hidden elsewhere).
+  // A key made on this page, filled into the code-intel setups only when the person asks (it is hidden elsewhere).
   const [newKey, setNewKey] = useState<string | null>(null)
   const [fill, setFill] = useState(false)
+  const info = useQuery(infoQuery)
   const root = serviceUrl('gateway').replace(/\/$/, '')
   const models = config.data?.models ?? []
   const model = chosen ?? config.data?.model ?? models[0]?.name ?? 'your-model'
   const current = models.find((m) => m.name === model)
-  const argusUrl = `${serviceUrl('argus')}mcp`
+  // As the Arena announces it (its name under the domain is the Arena's choice: argus on one from before 8.0).
+  const codeIntelUrl = info.data?.codeIntelUrl ?? `${serviceUrl('code-intel')}mcp`
   // Code Arena is feature.code_arena's (Admin → Access): not offered to one who may not use it.
   const offered = tools.filter((t) => t.id !== 'code-arena' || mayUse(config.data, 'feature.code_arena'))
   const tool = offered.find((t) => t.id === toolId) ?? offered.find((t) => t.id === 'claude') ?? offered[0]!
   const context: Context = {
-    root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl,
+    root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, codeIntelUrl,
     apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, codeArena: codeArena.data ?? null,
     os, ca: !!certificate.data?.available && !certificate.data.trusted,
   }
@@ -196,29 +199,29 @@ export function ConnectPage() {
                 </Field>
               )}
             </div>
-            <Tutorial tool={tool} context={context} argus={config.data?.argus === true} fill={newKey ? { on: fill, set: setFill } : null} />
+            <Tutorial tool={tool} context={context} codeIntel={config.data?.codeIntel === true} fill={newKey ? { on: fill, set: setFill } : null} />
           </CardContent>
         </Card>
 
         {mcp.data?.enabled && <ArenaMcp info={mcp.data} os={os} />}
 
-        {config.data?.argus && (
+        {config.data?.codeIntel && (
           <Card>
             <CardHeader>
-              <CardTitle>Argus, the code index</CardTitle>
+              <CardTitle>{codeIntelName}, the code index</CardTitle>
               <CardDescription>
                 For coding agents over MCP. It signs in with <strong>your API key</strong>, the same as the gateway, and answers as your GitLab account: only from the code you may read.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
-              <CodeBlock code={argusUrl} label="Argus's address" />
+              <CodeBlock code={codeIntelUrl} label={`${codeIntelName}'s address`} />
               <p className="text-sm text-muted-foreground">
-                Your tool's steps above include Argus. For another MCP client, the address and this header are all it needs; keep the key in{' '}
+                Your tool's steps above include {codeIntelName}. For another MCP client, the address and this header are all it needs; keep the key in{' '}
                 <code className="font-mono">{KEY}</code>, not in a file you share. A GitLab token is not accepted.
               </p>
               <CodeBlock
-                code={JSON.stringify({ mcpServers: { argus: { url: argusUrl, headers: { Authorization: `Bearer ${context.apiKey ?? '<your API key>'}` } } } }, null, 2)}
-                label="the Argus setup for other MCP clients"
+                code={JSON.stringify({ mcpServers: { 'code-intel': { url: codeIntelUrl, headers: { Authorization: `Bearer ${context.apiKey ?? '<your API key>'}` } } } }, null, 2)}
+                label={`the ${codeIntelName} setup for other MCP clients`}
               />
             </CardContent>
           </Card>
@@ -320,7 +323,7 @@ function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
       <CardHeader>
         <CardTitle>Arena MCP (all your tools)</CardTitle>
         <CardDescription>
-          The tools you have in the chat, listed below, for your coding agent over MCP (Argus through it needs no GitLab token). It signs in with{' '}
+          The tools you have in the chat, listed below, for your coding agent over MCP ({codeIntelName} through it needs no GitLab token). It signs in with{' '}
           <strong>your API key</strong>, runs as you, and each call is in the audit log.
         </CardDescription>
       </CardHeader>
@@ -373,12 +376,12 @@ function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
   )
 }
 
-/** One tool's steps, numbered: its settings with this deployment filled in, and Argus where it speaks MCP. */
-function Tutorial({ tool, context, argus, fill }: { tool: Tool; context: Context; argus: boolean; fill: { on: boolean; set: (on: boolean) => void } | null }) {
+/** One tool's steps, numbered: its settings with this deployment filled in, and code-intel where it speaks MCP. */
+function Tutorial({ tool, context, codeIntel, fill }: { tool: Tool; context: Context; codeIntel: boolean; fill: { on: boolean; set: (on: boolean) => void } | null }) {
   const steps: Step[] = [...tool.steps(context)]
   const trust = context.ca ? tool.trust(context) : []
   const check = tool.check(context)
-  const argusSteps = argus && typeof tool.argus === 'function' ? tool.argus(context) : []
+  const codeIntelSteps = codeIntel && typeof tool.codeIntel === 'function' ? tool.codeIntel(context) : []
   return (
     <section aria-label={`Setting up ${tool.title}`} className="grid gap-4">
       <p className="text-sm text-muted-foreground">{tool.about}</p>
@@ -393,18 +396,18 @@ function Tutorial({ tool, context, argus, fill }: { tool: Tool; context: Context
         <h3 className="text-sm font-medium">Check it works</h3>
         <StepList steps={[check]} tool={tool.title} start={steps.length + trust.length + 1} />
       </div>
-      {argus && (
+      {codeIntel && (
         <div className="grid gap-3 border-t pt-4">
-          <h3 className="text-sm font-medium">Argus, with your API key in {KEY}</h3>
+          <h3 className="text-sm font-medium">{codeIntelName}, with your API key in {KEY}</h3>
           {fill && (
             <Label className="flex items-center gap-3 font-normal">
               <Switch checked={fill.on} onCheckedChange={fill.set} /> Fill in my new key where a setup cannot read it from {KEY}
             </Label>
           )}
-          {argusSteps.length > 0 ? (
-            <StepList steps={argusSteps} tool={tool.title} start={steps.length + trust.length + 2} />
+          {codeIntelSteps.length > 0 ? (
+            <StepList steps={codeIntelSteps} tool={tool.title} start={steps.length + trust.length + 2} />
           ) : (
-            <p className="text-sm text-muted-foreground">{tool.argus as string}</p>
+            <p className="text-sm text-muted-foreground">{tool.codeIntel as string}</p>
           )}
         </div>
       )}

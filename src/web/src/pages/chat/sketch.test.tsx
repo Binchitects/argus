@@ -16,7 +16,7 @@ const config: ChatConfig = {
   models: [{ name: 'Eyes-Model', context: 32768, maxOutput: 4096, vision: true, tools: true, thinking: false, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } }],
   presets: [{ level: 'off', label: 'No thinking' }],
   defaultThinking: 'off',
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -27,7 +27,7 @@ const page = '<!doctype html><html><body><h1>Sign up</h1><button>Join</button></
 const answer = `Here it is:\n\n\`\`\`html\n${page}\n\`\`\`\n`
 
 let saved: Conversation = {
-  id: 'c1', title: 'New chat', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'New chat', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
 }
 

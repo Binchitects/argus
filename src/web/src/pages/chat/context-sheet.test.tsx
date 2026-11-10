@@ -11,7 +11,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [
     { id: 'calculator', title: 'Calculator', description: 'Exact arithmetic.', icon: 'calculator', onByDefault: true, askFirst: false },
     { id: 'time', title: 'Time', description: 'The date and time.', icon: 'clock', onByDefault: true, askFirst: false },
@@ -29,7 +29,7 @@ const messages = [
 ] as unknown as Message[]
 
 const conversation: Conversation = {
-  id: 'c1', title: 'Notes', thinking: null, tools: ['calculator', 'time'], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Notes', thinking: null, tools: ['calculator', 'time'], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages,
 }
 

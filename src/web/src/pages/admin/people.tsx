@@ -27,6 +27,7 @@ import { ago, money } from '@/lib/format'
 import { DirectoryMoveDialog } from './directory-move'
 import { PersonBadges } from './person-badges'
 import { creditKinds, parseCredit, peopleQuery, signInQuery, type Created, type CreditKind, type Person } from './people-api'
+import { codeIntelName } from '@/lib/brand'
 
 const columns: ColumnDef<Person>[] = [
   selectColumn<Person>(),
@@ -384,7 +385,7 @@ function AddPersonDialog({ open, onOpenChange, mayOwner }: { open: boolean; onOp
             </DialogHeader>
             <form onSubmit={submit} noValidate className="grid gap-4">
               {error && <Alert variant="destructive">{error}</Alert>}
-              <Field label="Username" hint="Use their GitLab username, so Argus knows what they may read." error={errors.userName?.message}>
+              <Field label="Username" hint={`Use their GitLab username, so ${codeIntelName} knows what they may read.`} error={errors.userName?.message}>
                 <Input autoComplete="off" autoFocus {...form.register('userName')} />
               </Field>
               <Field label="Email" error={errors.email?.message}>

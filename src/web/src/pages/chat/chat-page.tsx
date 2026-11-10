@@ -71,6 +71,7 @@ import { isOffline, useOnline, useOutbox } from './outbox'
 import { useRoomCall } from './room-call'
 import { CallBar, CallButton } from './call-bar'
 import { CodeGoalLine } from './code-goal'
+import { codeIntelName } from '@/lib/brand'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -1275,7 +1276,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   <>
                     <h1 className="mb-2 text-center text-2xl font-semibold tracking-tight">What can I help with?</h1>
                     <p className="mb-6 text-center text-muted-foreground">
-                      {toolsOnHere.includes('argus') ? 'Ask anything. Argus searches the code you have access to in GitLab.' : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
+                      {toolsOnHere.includes('code-intel') ? `Ask anything. ${codeIntelName} searches the code you have access to in GitLab.` : 'Ask anything, or attach documents, spreadsheets, slides, PDFs, code and images to ask about them.'}
                     </p>
                   </>
                 )}
@@ -1314,7 +1315,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 />
                 <p className="mt-1 text-center text-[11px] text-muted-foreground">Answers are made by AI and can be wrong: check what matters.</p>
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
-                  {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
+                  {(starters ?? (config.codeIntel ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
                       key={s.text}
                       type="button"

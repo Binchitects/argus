@@ -11,7 +11,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [{ id: 'memory', title: 'Memory', description: 'Remembers what you ask it to.', icon: 'brain', onByDefault: true, askFirst: false }],
   gitlabUrl: null,
   maxUploadBytes: 1024 * 1024,
@@ -22,7 +22,7 @@ const msg = (id: string, parentId: string | null, role: Message['role'], over: P
 
 /** A chat where the model called remember: offered (it waits for the person) or kept (asked for). */
 const chat = (state: 'offered' | 'kept'): Conversation => ({
-  id: 'c1', title: 'Podman', thinking: null, tools: ['memory'], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Podman', thinking: null, tools: ['memory'], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [
     msg('q1', null, 'user', { content: 'I deploy with Podman. How do I restart a pod?' }),

@@ -9,7 +9,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: true, tools: true, thinking: false, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
   presets: [{ level: 'off', label: 'No thinking' }],
   defaultThinking: 'off',
-  argus: false,
+  codeIntel: false,
   tools: [{ id: 'browser', title: 'Browser', description: 'Uses a real browser.', icon: 'globe', onByDefault: false, askFirst: false }],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -17,7 +17,7 @@ const config: ChatConfig = {
 }
 
 const conversation: Conversation = {
-  id: 'c1', title: 'Shopping', thinking: null, tools: ['browser'], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Shopping', thinking: null, tools: ['browser'], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
 }
 

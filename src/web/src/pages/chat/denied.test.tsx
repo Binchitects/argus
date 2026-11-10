@@ -9,7 +9,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: true, tools: true, thinking: true, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 1024 * 1024,
@@ -17,7 +17,7 @@ const config: ChatConfig = {
 }
 
 const conversation: Conversation = {
-  id: 'c1', title: 'Sorting', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Sorting', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [
     { id: 'q1', parentId: null, role: 'user', content: 'Which sort is stable?', attachments: [], createdAt: '' },

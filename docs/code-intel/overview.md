@@ -1,13 +1,13 @@
-# Argus: what it does
+# Farzan Graph: what it does
 
-> Argus is the code index and documentation server behind the chat's code
+> Farzan Graph is the code index and documentation server behind the chat's code
 > tools and behind MCP clients. This page was written for its first, Python
-> implementation; the .NET port in `src/Argus` answers identically (a
+> implementation; the .NET port in `src/CodeIntel` answers identically (a
 > conformance run compared every index table, tool call and pack build). File
 > names in the examples (`store/queries.py` and the like) are the Python
 > originals.
 
-Argus is the code index and documentation server. It mirrors your GitLab, extracts
+Farzan Graph is the code index and documentation server. It mirrors your GitLab, extracts
 a symbol and dependency graph, serves knowledge packs, and enforces each
 developer's real GitLab permissions in SQL. It is under the AGPL-3.0-only, or
 a commercial license ([LICENSING.md](../../LICENSING.md) says which you need),
@@ -45,7 +45,7 @@ the stack.
 | `docs_verify` | Check a draft you already wrote; reports only contradictions |
 
 **Merge requests and code at any commit**, for reviews, read from GitLab with
-Argus's read-only credential and checked per person, indexed or not — 10 tools
+Farzan Graph's read-only credential and checked per person, indexed or not — 10 tools
 ([README](README.md#merge-requests-and-code-at-any-commit)):
 
 | Tool | Answers |
@@ -118,7 +118,7 @@ the name, and the candidates when it is unsure. The model is in
 [graph.md](graph.md). Measured on a generated estate of 200 repositories in seven
 groups and six languages (C#, Go, Java, TypeScript, Python, C++, plus CI,
 image and submodule links), the 469 links between them were found exactly,
-none missing and none wrong, in 28 ms (`tests/Argus.Tests/GraphTests.cs`).
+none missing and none wrong, in 28 ms (`tests/CodeIntel.Tests/GraphTests.cs`).
 
 The index is read again in full once after an upgrade to v5.5 (the reader's
 contract changed: every file's declarations are read anew), as it was after
@@ -142,29 +142,29 @@ index. Code is never changed.
 Four things keep the index fresh, and the first two are independent:
 
 - **A poll.** The serve process runs a periodic pass, and the engine exports
-  `argus_index_age_seconds` per repository. An `ArgusIndexStale` alert fires when
+  `code_intel_index_age_seconds` per repository. An `CodeIntelIndexStale` alert fires when
   a repository goes stale, and **Admin → Overview** shows the same
   numbers, so "the agent cannot find it" and "it is not in the index" stop
   looking alike.
 - **A push and merge webhook.** `POST /hook/gitlab` takes a GitLab push or a
   merged merge request and indexes the repository that changed, gated by its own
-  secret (made on Admin → Indexing, kept as a hash; or `ARGUS_WEBHOOK_TOKEN`;
+  secret (made on Admin → Indexing, kept as a hash; or `CODE_INTEL_WEBHOOK_TOKEN`;
   none = the route answers 404). A push during a run is queued rather than dropped,
   and all that waited run together when the run ends. Events it has no use for
   are acknowledged rather than refused, because GitLab disables a webhook that
   keeps failing. The poll stays on as the floor.
 - **Each repository's own schedule.** Every N hours, daily or weekly at a time,
-  or off, run by Argus's own scheduler; the rest follow the schedule for all.
-- **`argus index`** by hand, from the CLI or **Admin → Indexing**.
+  or off, run by Farzan Graph's own scheduler; the rest follow the schedule for all.
+- **`code-intel index`** by hand, from the CLI or **Admin → Indexing**.
 
-**Indexing is embedding now.** `argus index` embeds as it goes, so the poller and
+**Indexing is embedding now.** `code-intel index` embeds as it goes, so the poller and
 the webhook produce code that `semantic_search` can actually see. Before that they
 did not, and nothing said so.
 
 ### More than one branch
 
 A repository often has long-lived release branches alongside the trunk — `main`
-plus `v1`, `v2`, `v3`. Argus indexes the refs you name, and a developer who asks
+plus `v1`, `v2`, `v3`. Farzan Graph indexes the refs you name, and a developer who asks
 without naming one gets trunk; naming a branch gets that branch. An unindexed
 branch is refused **by name, listing the branches that are indexed**, rather than
 answered from the wrong ref.
@@ -177,7 +177,7 @@ reporting a problem. Resolution now prefers the branch the include came from, as
 preference and not a filter. The cold fixture lifecycle indexes trunk *and* a
 release branch and asserts the graph survived.
 
-Configuration and behaviour: [docs/argus/branches.md](branches.md).
+Configuration and behaviour: [docs/code-intel/branches.md](branches.md).
 
 ### Reading what the code does
 
@@ -197,7 +197,7 @@ the comment doing the work rather than a shifted baseline.
 
 `docs_verify` was an MCP tool, and that was the problem: every client can run a
 shell command when the model finishes and block on its exit code; almost none can
-be made to call a *tool* at that moment. `argus verify` is the same check with an
+be made to call a *tool* at that moment. `code-intel verify` is the same check with an
 exit code:
 
 | exit | meaning |
@@ -223,7 +223,7 @@ xychart-beta
 
 | pack | Documents | Chunks | Symbols | Size | Licence |
 |---|---|---|---|---|---|
-| [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
+| [`win32`](https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/win32.kpack) — Windows SDK API reference | 65,906 | 478,788 | 118,242 | 726.1 MB | CC-BY-4.0 |
 | `wdk` — driver DDI reference | 25,903 | 205,848 | 37,938 | 292.5 MB | CC-BY-4.0 |
 | `dotnet` — .NET BCL + MS NuGet packages | 11,015 | 140,763 | **215,423** | 236.1 MB | CC-BY-4.0 |
 | `qt` — Qt 4.8, 5.15 and 6.10, C++ and QML | 12,595 | 190,970 | 150,648 | 340.4 MB | GFDL-1.3 |
@@ -240,22 +240,22 @@ xychart-beta
 ### Downloading a pack
 
 The Windows packs are published to a public Hugging Face bucket —
-**[`Binchitects/argus-packs`](https://huggingface.co/buckets/Binchitects/argus-packs)**.
+**[`Binchitects/code-intel-packs`](https://huggingface.co/buckets/Binchitects/code-intel-packs)**.
 Install one straight from it, with the digest so a truncated download is
 refused rather than installed:
 
 ```bash
-argus pack install \
-  https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack \
+code-intel pack install \
+  https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/win32.kpack \
   --sha256 9d81767392f46b4239efd18aaed41de8043167b68a2150743a023d6bb25988d8
 ```
 
 | pack | published | size | sha256 |
 |---|---|---|---|
-| [`win32`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32.arguspack) | ✅ | 761,376,768 B | `9d81767392f46b4239efd18aaed41de8043167b68a2150743a023d6bb25988d8` |
-| [`wdk`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk.arguspack) | ✅ | 306,757,632 B | `691c20c8df242fe4b06f2683afe84456c66e3dd2537ec0c8ffdf336f9ebdbf4d` |
-| [`win32-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/win32-samples.arguspack) | ✅ | 142,811,136 B | `e7a80a83d0d918fefdea1725707ce1076afbc39cd06130a766274b8741ba0b17` |
-| [`wdk-samples`](https://huggingface.co/buckets/Binchitects/argus-packs/resolve/wdk-samples.arguspack) | ✅ | 80,523,264 B | `786c4a8b38091715cb1c4ec22c87ab1f7784d6c01fe60c7a9cfeca6d3ef063c1` |
+| [`win32`](https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/win32.kpack) | ✅ | 761,376,768 B | `9d81767392f46b4239efd18aaed41de8043167b68a2150743a023d6bb25988d8` |
+| [`wdk`](https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/wdk.kpack) | ✅ | 306,757,632 B | `691c20c8df242fe4b06f2683afe84456c66e3dd2537ec0c8ffdf336f9ebdbf4d` |
+| [`win32-samples`](https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/win32-samples.kpack) | ✅ | 142,811,136 B | `e7a80a83d0d918fefdea1725707ce1076afbc39cd06130a766274b8741ba0b17` |
+| [`wdk-samples`](https://huggingface.co/buckets/Binchitects/code-intel-packs/resolve/wdk-samples.kpack) | ✅ | 80,523,264 B | `786c4a8b38091715cb1c4ec22c87ab1f7784d6c01fe60c7a9cfeca6d3ef063c1` |
 
 The other eight were built on 2026-10-05 and are **not published yet**: the
 maintainer uploads them. Their digests, from the built files, so the upload or
@@ -273,7 +273,7 @@ a mirror can be checked against them:
 | `sqlite` | built, to upload | 19,255,296 B | `8a4e24d429582e646b2f9aafb83b956bf0d8149d46d349e8153e84c75f74f905` |
 
 The published set is the first table: there is no link for these until they
-are uploaded, at the same addresses (`…/resolve/<pack>.arguspack`). A bucket is not versioned, so re-uploading a pack
+are uploaded, at the same addresses (`…/resolve/<pack>.kpack`). A bucket is not versioned, so re-uploading a pack
 replaces it in place with no history to roll back to.
 
 The same digest list, generated from the built files rather than typed, is in
@@ -386,7 +386,7 @@ A pack is **one SQLite file** — prose, API symbols and embeddings. Build once,
 publish, install everywhere:
 
 ```bash
-argus pack install https://your-host/wdk.arguspack --sha256 <digest>
+code-intel pack install https://your-host/wdk.kpack --sha256 <digest>
 ```
 
 A digest mismatch is refused and leaves **zero files behind**. All of them answer
@@ -404,7 +404,7 @@ The obvious approach — chunk every file, embed it all, throw it in a vector DB
 
 Headers are enormous, repetitive, and semantically near-identical. Embedding them floods the space with near-duplicates that crowd out real answers. Meanwhile the questions developers actually ask — *where is `Parse` defined*, *who calls this*, *what breaks if I change this struct* — are **exact lookups**, which a symbol table answers better than any embedding. Ask a pure-RAG system about `Init()` in a codebase with forty of them and it will confidently return the wrong one.
 
-Argus inverts the priority:
+Farzan Graph inverts the priority:
 
 | Layer | Answers | Cost |
 |---|---|---|
@@ -464,7 +464,7 @@ a test asserting no MCP tool module imports them.
 
 ## Measured
 
-Everything here is measured on real corpora, not estimated. Full detail in [docs/argus/pack-measurements.md](../measurements/pack-measurements.md), [docs/argus/index-measurements.md](../measurements/index-measurements.md), [docs/argus/kpis.md](../measurements/kpis.md).
+Everything here is measured on real corpora, not estimated. Full detail in [docs/code-intel/pack-measurements.md](../measurements/pack-measurements.md), [docs/code-intel/index-measurements.md](../measurements/index-measurements.md), [docs/code-intel/kpis.md](../measurements/kpis.md).
 
 ### Latency
 
@@ -476,7 +476,7 @@ Everything here is measured on real corpora, not estimated. Full detail in [docs
 | `docs_search`, 364.8k chunks | **460 ms** |
 | **query embedding (`llamacpp-embed`, 4 CPU cores)** | **15 ms** median |
 
-5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index**: it was 2,254 ms cold on the Python Argus's CPU Ollama, and is 15 ms on llama.cpp's CPU server.
+5.2× cost for 20.4× the corpus — sublinear. **The embedder sets the latency users feel, not the index**: it was 2,254 ms cold on the Python Farzan Graph's CPU Ollama, and is 15 ms on llama.cpp's CPU server.
 
 ### Scale
 
@@ -518,7 +518,7 @@ Two checks need a live server, and both are worth more than the unit suite for
 the failures they catch:
 
 ```bash
-./arenactl check argus --url https://argus.llm.localhost/mcp --token <PAT>
+./arenactl check code-intel --url https://code-intel.llm.localhost/mcp --token <PAT>
 ```
 
 ```bash

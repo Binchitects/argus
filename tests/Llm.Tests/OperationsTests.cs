@@ -190,7 +190,7 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_gitlab_webhook_secret_is_shown_once_and_argus_keeps_only_its_hash()
+    public async Task The_gitlab_webhook_secret_is_shown_once_and_code_intel_keeps_only_its_hash()
     {
         var admin = await Admin();
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/code-intel/webhook", new { }));
@@ -314,7 +314,7 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
-    public async Task A_run_already_in_progress_is_a_409_with_argus_reason()
+    public async Task A_run_already_in_progress_is_a_409_with_code_intel_reason()
     {
         var admin = await Admin();
         app.CodeIntel.IndexRunning = true;
@@ -368,9 +368,9 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Without_an_argus_token_the_pages_say_not_configured()
+    public async Task Without_a_code_intel_token_the_pages_say_not_configured()
     {
-        await using var bare = app.Create(app.ConnectionStringFor("noargus_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+        await using var bare = app.Create(app.ConnectionStringFor("nocodeintel_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
             new Dictionary<string, string?> { ["CodeIntel:AdminToken"] = "" });
         var admin = await new TestBrowser(bare).SignedInAsync("admin", AppFixture.AdminPassword);
         var s = await admin.JsonAsync(await admin.GetAsync("/api/admin/code-intel/status"));

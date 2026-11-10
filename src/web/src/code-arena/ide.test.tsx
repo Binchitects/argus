@@ -633,7 +633,7 @@ const state: CodeState = {
 const config: ChatConfig = {
   model: 'model-a',
   models: [{ name: 'model-a', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
-  auto: null, presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
+  auto: null, presets: [], defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
 }
 
 /** code-arena web with a small folder: src/app.ts (changed by the agent), src/lib/, README.md; the page's preferences as an earlier run left them, and the person's settings.json and keybindings.json. */
@@ -1715,7 +1715,7 @@ describe('Code Arena, the IDE', () => {
   it("shows the window's use and sets when the session compacts, and the MCP servers with Try again, in the status bar", async () => {
     const servers: CodeState['servers'] = [
       { name: 'arena', title: 'Arena', url: 'https://llm.test/mcp', state: 'connected', tools: 14, status: 'Arena: 14 tools', error: null, nextTry: null },
-      { name: 'argus', title: 'Argus', url: 'https://argus.llm.test/mcp', state: 'failed', tools: 0, status: 'Argus: not connected, tried again at 10:41:07 (answered 503)', error: 'answered 503', nextTry: '2026-10-09T10:41:07Z' },
+      { name: 'code-intel', title: 'Farzan Graph', url: 'https://code-intel.llm.test/mcp', state: 'failed', tools: 0, status: 'Farzan Graph: not connected, tried again at 10:41:07 (answered 503)', error: 'answered 503', nextTry: '2026-10-09T10:41:07Z' },
     ]
     // What fills the next request, in characters (15,000 of them): the page shares the 4,200 tokens in use out by them.
     const measured = { system: 6000, instructions: 1200, memory: 600, tools: 5000, summary: 0, files: 0, you: 400, answers: 400, toolResults: 1400 }
@@ -1729,7 +1729,7 @@ describe('Code Arena, the IDE', () => {
         return { json: now }
       },
       'POST /api/servers/retry': () => {
-        now = { ...now, servers: [servers[0]!, { ...servers[1]!, state: 'connected', tools: 17, status: 'Argus: 17 tools', error: null, nextTry: null }] }
+        now = { ...now, servers: [servers[0]!, { ...servers[1]!, state: 'connected', tools: 17, status: 'Farzan Graph: 17 tools', error: null, nextTry: null }] }
         return { json: now }
       },
     })
@@ -1737,16 +1737,16 @@ describe('Code Arena, the IDE', () => {
     const status = await screen.findByRole('contentinfo', { name: 'Status bar' })
 
     // The servers: one of two connected, the other said with why.
-    await userEvent.click(within(status).getByRole('button', { name: 'MCP servers: Arena connected, Argus not connected' }))
+    await userEvent.click(within(status).getByRole('button', { name: 'MCP servers: Arena connected, Farzan Graph not connected' }))
     let dialog = await screen.findByRole('dialog', { name: 'MCP servers' })
     expect(within(dialog).getByText('Arena: 14 tools')).toBeInTheDocument()
-    expect(within(dialog).getByText('Argus: not connected, tried again at 10:41:07 (answered 503)')).toBeInTheDocument()
-    expect(within(dialog).getByText('https://argus.llm.test/mcp')).toBeInTheDocument()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Try Argus again' }))
-    expect(calls.find((c) => c.path === '/api/servers/retry')?.body).toEqual({ name: 'argus' })
-    expect(await within(dialog).findByText('Argus: 17 tools')).toBeInTheDocument()
+    expect(within(dialog).getByText('Farzan Graph: not connected, tried again at 10:41:07 (answered 503)')).toBeInTheDocument()
+    expect(within(dialog).getByText('https://code-intel.llm.test/mcp')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Try Farzan Graph again' }))
+    expect(calls.find((c) => c.path === '/api/servers/retry')?.body).toEqual({ name: 'code-intel' })
+    expect(await within(dialog).findByText('Farzan Graph: 17 tools')).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
-    expect(await within(status).findByRole('button', { name: 'MCP servers: Arena connected, Argus connected' })).toHaveTextContent('2/2')
+    expect(await within(status).findByRole('button', { name: 'MCP servers: Arena connected, Farzan Graph connected' })).toHaveTextContent('2/2')
 
     // The window: tokens used of the model's, and when it compacts.
     const context = within(status).getByRole('button', { name: 'Context: 4.2 K of 32.77 K tokens (13%), compacts at 80%' })

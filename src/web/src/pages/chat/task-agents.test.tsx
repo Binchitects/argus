@@ -10,7 +10,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 1024 * 1024,
@@ -32,7 +32,7 @@ const work: AgentWork = {
 }
 
 const task = (details: Message['details']): Conversation => ({
-  id: 'c1', title: 'Where is the parser', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Where is the parser', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [
     msg('q1', null, 'user', { content: 'where is the parser?' }),

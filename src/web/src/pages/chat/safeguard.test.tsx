@@ -8,11 +8,11 @@ import type { ChatConfig, Conversation } from './types'
 const config: ChatConfig = {
   model: 'Main-Model',
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
-  presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 1024 * 1024, imageTypes: [],
+  presets: [], defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 1024 * 1024, imageTypes: [],
 }
 
 const conversation: Conversation = {
-  id: 'c1', title: 'Pricing', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Pricing', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [{ ...blank('q1', 'user', null), content: 'Hello' }, { ...blank('a1', 'assistant', 'q1'), content: 'Hi.' }],
 }

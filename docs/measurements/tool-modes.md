@@ -3,17 +3,17 @@
 Two of our own models, the same ten tasks, tools given each way through Arena's
 own chat (2026-10-26, v7.2):
 
-- **direct**: every tool's definition, one call at a time. With Argus's 34
+- **direct**: every tool's definition, one call at a time. With Farzan Graph's 34
   functions past the chat's budget, the tools go on demand: the system prompt
   lists them, and `load_tools` loads those the answer needs.
 - **code**: `run_code`, and the functions a program may call named in the
-  system prompt as Python (`arena.argus.docs_lookup(name)`): the model writes
-  a short program, its calls go to Argus as the person, only what it prints
+  system prompt as Python (`arena.code-intel.docs_lookup(name)`): the model writes
+  a short program, its calls go to Farzan Graph as the person, only what it prints
   comes back.
 - **both**: the tools as direct gives them, and `run_code` beside them.
 
 Produced by `evals/run_tool_modes.py` (results in
-`evals/tool-modes-results.json`), as a throwaway person with Argus's
+`evals/tool-modes-results.json`), as a throwaway person with Farzan Graph's
 documentation tools and Tools as code, each task in a new chat.
 
 ## The tasks
@@ -76,4 +76,4 @@ One run of each arm (a second for the 27B's direct arm), on one machine, both
 models at 4-bit on llama.cpp; the 27B model's direct arm varies between runs
 because it may or may not load tools. The tasks are documentation lookups; code
 over the code graph (callers across repositories) needs a person whose GitLab
-rights Argus can check, which a throwaway person has not.
+rights Farzan Graph can check, which a throwaway person has not.

@@ -28,13 +28,13 @@ describe('nav', () => {
   it('leaves out the pages of the features that are off, and names only features deploy/features lists', () => {
     const titles = (off: string[]) => visibleNavigation({ isAdmin: true, featuresOff: off }).flatMap((s) => s.items.map((i) => i.title))
     expect(titles([])).toContain('Science lab')
-    const without = titles(['lab', 'argus', 'monitoring'])
+    const without = titles(['lab', 'code-intel', 'monitoring'])
     expect(without).not.toContain('Science lab')
     expect(without).not.toContain('Indexing')
     expect(without).not.toContain('Logs')
     expect(without).toContain('Chat')
-    // The Argus section has nothing left, so it is gone.
-    expect(visibleNavigation({ isAdmin: true, featuresOff: ['argus'] }).map((s) => s.title)).not.toContain('Argus')
+    // The code-intel section has nothing left, so it is gone.
+    expect(visibleNavigation({ isAdmin: true, featuresOff: ['code-intel'] }).map((s) => s.title)).not.toContain('Farzan Graph')
     for (const item of navigation.flatMap((s) => s.items)) if (item.feature) expect(features, item.title).toContain(item.feature)
   })
 

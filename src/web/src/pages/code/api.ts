@@ -253,7 +253,7 @@ export interface BusinessSystem {
 
 export const businessQuery = {
   queryKey: ['code', 'business'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ argus: boolean; systems: BusinessSystem[] }>('/api/code/business', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ codeIntel: boolean; systems: BusinessSystem[] }>('/api/code/business', { signal }),
   // While one is mapped: read again for its step and its end.
   refetchInterval: (q: { state: { data?: { systems: BusinessSystem[] } } }) => (q.state.data?.systems.some((s) => s.status === 'building') ? 2000 : false),
 }
@@ -303,7 +303,7 @@ export interface ScanBrief {
   /** When its packages were last checked again, against advisories renewed since. */
   recheckedAt: string | null
   sbom: boolean
-  /** The commit read, once Argus has said which. */
+  /** The commit read, once code-intel has said which. */
   commit: string | null
   /** The security scanners' run: each tool, and why none ran; null when none are installed. */
   scanners: {

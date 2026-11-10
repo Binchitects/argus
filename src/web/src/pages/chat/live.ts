@@ -9,7 +9,7 @@ export interface ToolRunning {
   message?: string | null
 }
 
-/** Notices that came with the answer (Argus unavailable, a model that cannot see...). */
+/** Notices that came with the answer (code-intel unavailable, a model that cannot see...). */
 export interface Notice {
   kind: string
   text: string

@@ -1,6 +1,6 @@
-/** How far an Argus index run is: the whole run, and each repository in it. */
+/** How far an code-intel index run is: the whole run, and each repository in it. */
 
-/** Where one repository is in the run going now, as Argus's index process reports it. */
+/** Where one repository is in the run going now, as code-intel's index process reports it. */
 export interface RepoProgress {
   state: 'queued' | 'fetching' | 'files' | 'symbols' | 'embedding' | 'done' | 'failed'
   branch?: string | null
@@ -15,7 +15,7 @@ export interface RepoProgress {
   message?: string | null
 }
 
-/** How far a running pass is, as Argus's index process reports it. */
+/** How far a running pass is, as code-intel's index process reports it. */
 export interface IndexProgress {
   repos: number
   position: number

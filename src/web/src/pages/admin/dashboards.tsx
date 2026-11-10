@@ -7,6 +7,7 @@ import { DashboardView } from '@/components/dashboards/dashboard-view'
 import type { DashboardDef } from '@/components/dashboards/types'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { codeIntelName } from '@/lib/brand'
 
 interface Listed {
   uid: string
@@ -37,8 +38,8 @@ const about: Record<string, { icon: typeof LineChart; text: string }> = {
   'gpu-hardware': { icon: Server, text: 'The GPU: utilisation, memory, temperature, power and clocks.' },
   'host-containers': { icon: HardDrive, text: 'The host and each container: CPU, memory, disk and network.' },
   'stack-logs': { icon: ScrollText, text: 'Every service’s logs, by container, searchable, and their volume.' },
-  argus: { icon: SearchCode, text: 'Who asked Argus what: tool calls, people, refusals and timings.' },
-  'stack-indexing': { icon: FileSearch, text: 'Argus’s index runs: repositories, files, symbols and failures.' },
+  'code-intel': { icon: SearchCode, text: `Who asked ${codeIntelName} what: tool calls, people, refusals and timings.` },
+  'stack-indexing': { icon: FileSearch, text: `${codeIntelName}’s index runs: repositories, files, symbols and failures.` },
 }
 
 export function DashboardsPage() {

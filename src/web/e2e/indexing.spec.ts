@@ -1,26 +1,26 @@
 import { expect, test, type Page } from '@playwright/test'
 import { expectAccessible, screenshot, watchConsole } from './helpers.ts'
 
-// Against the deployed Argus and its GitLab (the test GitLab's root/eal-core, which has a v2 branch).
-/** Why these tests cannot run here, or null when Argus is deployed and reaches the test GitLab. */
-async function argusMissing(page: Page): Promise<string | null> {
-  const status = await page.request.get('/api/admin/argus/status')
-  if (!status.ok() || (await status.json()).configured === false) return 'needs the deployed Argus with the test GitLab'
-  // Argus lists GitLab's repositories again (an admin's "look again"): its last listing is kept while GitLab is down.
-  const listed = await page.request.post('/api/admin/argus/repos/discover', { data: {}, headers: { 'X-Requested-With': 'e2e' } })
-  if (!listed.ok()) return `needs Argus's GitLab, which it cannot reach: ${(await listed.json().catch(() => ({}))).error ?? `HTTP ${listed.status()}`}`
-  const repos = await (await page.request.get('/api/admin/argus/repos')).json()
+// Against the deployed code-intel and its GitLab (the test GitLab's root/eal-core, which has a v2 branch).
+/** Why these tests cannot run here, or null when code-intel is deployed and reaches the test GitLab. */
+async function codeIntelMissing(page: Page): Promise<string | null> {
+  const status = await page.request.get('/api/admin/code-intel/status')
+  if (!status.ok() || (await status.json()).configured === false) return 'needs the deployed Farzan Graph with the test GitLab'
+  // code-intel lists GitLab's repositories again (an admin's "look again"): its last listing is kept while GitLab is down.
+  const listed = await page.request.post('/api/admin/code-intel/repos/discover', { data: {}, headers: { 'X-Requested-With': 'e2e' } })
+  if (!listed.ok()) return `needs Farzan Graph's GitLab, which it cannot reach: ${(await listed.json().catch(() => ({}))).error ?? `HTTP ${listed.status()}`}`
+  const repos = await (await page.request.get('/api/admin/code-intel/repos')).json()
   return repos.repos?.some((r: { repo: string }) => r.repo === 'root/eal-core') ? null : 'needs the test GitLab (root/eal-core)'
 }
 
 async function waitIdle(page: Page) {
-  await expect.poll(async () => (await (await page.request.get('/api/admin/argus/status')).json()).job.state, { timeout: 120_000 }).toBe('idle')
+  await expect.poll(async () => (await (await page.request.get('/api/admin/code-intel/status')).json()).job.state, { timeout: 120_000 }).toBe('idle')
 }
 
 test('a repository gets a branch from GitLab, is updated, and shows each branch at its commit', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'one browser changes the index at a time')
   test.setTimeout(300_000)
-  const missing = await argusMissing(page)
+  const missing = await codeIntelMissing(page)
   test.skip(!!missing, missing ?? '')
   const errors = watchConsole(page)
   await waitIdle(page)
@@ -62,7 +62,7 @@ test('a repository gets a branch from GitLab, is updated, and shows each branch 
 
 test('the index schedule is set in words and shows the next passes', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'one browser changes the schedule at a time')
-  test.skip((await (await page.request.get('/api/admin/argus/status')).json()).configured === false, 'needs Argus')
+  test.skip((await (await page.request.get('/api/admin/code-intel/status')).json()).configured === false, 'needs Farzan Graph')
   await page.goto('/admin/indexing')
   const card = page.getByRole('region', { name: 'Schedule' })
   await expect(card.getByRole('switch', { name: 'Reindex on a schedule' })).toBeChecked()
@@ -79,14 +79,14 @@ test('the index schedule is set in words and shows the next passes', async ({ pa
     await expect(card).toContainText('(Europe/Berlin)')
     await expectAccessible(page, info, 'indexing-schedule')
   } finally {
-    expect((await page.request.put('/api/admin/argus/schedule', { data: { schedule: '*/15 * * * *', timeZone: 'UTC' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
+    expect((await page.request.put('/api/admin/code-intel/schedule', { data: { schedule: '*/15 * * * *', timeZone: 'UTC' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
   }
 })
 
 test("a repository's index is removed and built anew", async ({ page, isMobile }) => {
   test.skip(isMobile, 'one browser changes the index at a time')
   test.setTimeout(300_000)
-  const missing = await argusMissing(page)
+  const missing = await codeIntelMissing(page)
   test.skip(!!missing, missing ?? '')
   await waitIdle(page)
   await page.goto('/admin/indexing')
@@ -106,10 +106,10 @@ test("a repository's index is removed and built anew", async ({ page, isMobile }
 
 test('a repository is given a schedule of its own in a batch, with an outcome, and its log says so', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'one browser changes the index at a time')
-  const missing = await argusMissing(page)
+  const missing = await codeIntelMissing(page)
   test.skip(!!missing, missing ?? '')
-  // An Argus from before repository schedules has none to show.
-  test.skip(!(await (await page.request.get('/api/admin/argus/repos')).json()).schedule, 'needs an Argus with repository schedules')
+  // An code-intel from before repository schedules has none to show.
+  test.skip(!(await (await page.request.get('/api/admin/code-intel/repos')).json()).schedule, 'needs an Farzan Graph with repository schedules')
   const errors = watchConsole(page)
   await page.goto('/admin/indexing')
   const repos = page.getByRole('region', { name: 'Repositories' })
@@ -140,9 +140,9 @@ test('a repository is given a schedule of its own in a batch, with an outcome, a
     await screenshot(page, info, 'repository-log')
     await page.keyboard.press('Escape')
   } finally {
-    const listed = await (await page.request.get('/api/admin/argus/repos')).json()
+    const listed = await (await page.request.get('/api/admin/code-intel/repos')).json()
     const id = listed.repos.find((r: { repo: string }) => r.repo === 'root/eal-core').gitlab_id
-    expect((await page.request.patch(`/api/admin/argus/repos/${id}`, { data: { schedule: '' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(200)
+    expect((await page.request.patch(`/api/admin/code-intel/repos/${id}`, { data: { schedule: '' }, headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(200)
   }
   expect(errors).toEqual([])
 })

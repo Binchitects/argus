@@ -16,7 +16,7 @@ gains. You will get an answer, and credit if you want it, once a fix is out.
   it, and the rest are behind forward authentication. Machine clients use
   short-lived tokens or a person's own API key.
 - **Access is decided on the server.** Groups decide who may use each model and
-  tool; the API refuses what a person may not use. Argus answers each developer
+  tool; the API refuses what a person may not use. Farzan Graph answers each developer
   with exactly the repositories their GitLab account can read, enforced in SQL,
   with a read-only service token.
 - **Code the model writes runs in a sandbox** with no network, a separate user

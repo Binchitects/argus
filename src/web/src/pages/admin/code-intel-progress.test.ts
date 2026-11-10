@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isWorking, passPercent, progressPercent, progressWords, type IndexProgress } from './argus-progress'
+import { isWorking, passPercent, progressPercent, progressWords, type IndexProgress } from './code-intel-progress'
 
 const p = (over: Partial<IndexProgress>): IndexProgress => ({ repos: 4, position: 1, stage: 'branch', outcomes: {}, ...over })
 

@@ -1,34 +1,34 @@
-# Argus's code graphs: symbols, types, contracts, tests and owners across every repository a person can read
+# Farzan Graph's code graphs: symbols, types, contracts, tests and owners across every repository a person can read
 
-This design answers the request of 2026-10-30: "I want to make argus (code indexer) stronger … more complex graphs … consider huge improvement on argus for next version". Paths are relative to the repository's root. Line numbers are as of commit 05dd8f7d.
+This design answers the request of 2026-10-30: "I want to make code-intel (code indexer) stronger … more complex graphs … consider huge improvement on code-intel for next version". Paths are relative to the repository's root. Line numbers are as of commit 05dd8f7d.
 
 This is a design only. Nothing was changed, built or run, and deploy/.env was not read.
 
 **Summary**
-- **What it is:** a graph of symbols built into Argus's existing index. It covers definitions with stable keys, calls and references, the type hierarchy, imports between files, and uses across repositories. On top of it sit service contracts (HTTP routes, gRPC methods, topics, tables), tests, owners, history and deployments.
-- **How it is built:** from the files Argus already mirrors. There is no build, no `dotnet restore` and no `npm install`. For C#, TS/JS and Python, Code Arena's scanners move into a shared source folder. For the other languages, the universal-ctags already in the image is used with two more fields.
+- **What it is:** a graph of symbols built into Farzan Graph's existing index. It covers definitions with stable keys, calls and references, the type hierarchy, imports between files, and uses across repositories. On top of it sit service contracts (HTTP routes, gRPC methods, topics, tables), tests, owners, history and deployments.
+- **How it is built:** from the files Farzan Graph already mirrors. There is no build, no `dotnet restore` and no `npm install`. For C#, TS/JS and Python, Code Arena's scanners move into a shared source folder. For the other languages, the universal-ctags already in the image is used with two more fields.
 - **Where it lives:** in the same SQLite file as today. There is no graph database and no second store.
 - **Who sees what:** each person sees only nodes and edges whose repositories their own GitLab account can read. This is enforced in the SQL that reads the edges and proved by a differential test.
 - **What agents get:** three new MCP tools (`symbol_graph`, `mr_impact`, `service_contracts`). Five existing tools also change: `find_symbol`, `find_references`, `change_impact`, `impact_of` and `index_status`. The catalog goes from 37 tools to 40.
 - **What people get:** a Code map page in the web app, cross-repository call and type hierarchy in Code Arena's IDE, and an Impact card on every automatic merge request review.
 - **Downloads:** none on the default path (§8).
-- **When it turns on:** the model-facing tools ship off (`ARGUS_SYMBOL_GRAPH=0`). Each one becomes the default only after it passes the gates in §7, measured with a model and without one. The pages, IDE panels and review card do not change what a model sees, so they ship on.
+- **When it turns on:** the model-facing tools ship off (`CODE_INTEL_SYMBOL_GRAPH=0`). Each one becomes the default only after it passes the gates in §7, measured with a model and without one. The pages, IDE panels and review card do not change what a model sees, so they ship on.
 
 ---
 
 ## 0. What this is, and why
 
-**Headline.** Ask Argus who calls a method, what implements an interface, or what a merge request will break in every repository you can read. It answers with the exact lines, each marked with how it was resolved and how sure it is, plus the tests to run, the owners to ask, and the endpoints, topics and tables at the other end.
+**Headline.** Ask Farzan Graph who calls a method, what implements an interface, or what a merge request will break in every repository you can read. It answers with the exact lines, each marked with how it was resolved and how sure it is, plus the tests to run, the owners to ask, and the endpoints, topics and tables at the other end.
 
 **Why now.**
-- **Argus cannot answer symbol questions today.** It is a text and name index with a repository-level graph (§1). It cannot say who really calls a function, what implements an interface, or what a signature change breaks beyond the first ring of dependent repositories. `find_references` is a full-text search plus a word regex (Queries.cs:223-275).
+- **Farzan Graph cannot answer symbol questions today.** It is a text and name index with a repository-level graph (§1). It cannot say who really calls a function, what implements an interface, or what a signature change breaks beyond the first ring of dependent repositories. `find_references` is a full-text search plus a word regex (Queries.cs:223-275).
 - **Exact lookup plus one hop is what helps small local models.**
   - In a depth-stratified SWE-bench Verified study (arXiv 2610.33958), adding `find_entity` and `graph_neighbors` raised function Acc@10 from 26.8 to 37.1 for Qwen3-4B and from 16.7 to 27.4 for Qwen3-8B. For Qwen3-32B it went from 32.0 to 34.0, which is not significant (p = 0.27).
   - Tasks that needed 3 or more hops failed in every setup.
   - Weaker models fail when they must write a graph query language. CodexGraph with Qwen2-72B scored 1.95%, against 9.34% for typed tools.
   - The tools are therefore typed, shallow by default, and have no query language.
 - **Graph-only answering is cheaper but less accurate.** codebase-memory-mcp scored 83% against 92% for a file-exploring agent, using about a tenth of the tokens. So grep, read and `search_code` stay as they are, and the graph sits beside them.
-- **Argus's own edge is what grep cannot see.**
+- **Farzan Graph's own edge is what grep cannot see.**
   - Edges across repositories and at run time.
   - A read-only GitLab token on any tier.
   - Offline use.
@@ -46,7 +46,7 @@ This document takes the first as its base. It grafts in the second's measurement
 
 ---
 
-## 1. What Argus has today, and where it falls short
+## 1. What Farzan Graph has today, and where it falls short
 
 ### 1.1 What is stored per file
 
@@ -95,7 +95,7 @@ This document takes the first as its base. It grafts in the second's measurement
 | `repo_map`, `system_map`, `dependency_path` | Load all of `repos`, `repo_edges` and `repo_links` on every call | GraphQueries.cs:82-146 |
 | `semantic_search` | A global coarse pass of 600 by Hamming distance, then the allowlist. People who can read few repositories get fewer answers. | Queries.cs:739-785 |
 
-The catalog defines 37 tools. Its own comment, overview.md and tool-modes.md still say 34 (ToolCatalog.cs:1; docs/argus/overview.md:65; docs/measurements/tool-modes.md:6).
+The catalog defines 37 tools. Its own comment, overview.md and tool-modes.md still say 34 (ToolCatalog.cs:1; docs/code-intel/overview.md:65; docs/measurements/tool-modes.md:6).
 
 Code Arena grounds each plan step by calling `change_impact(repo, symbol, depth 2)` for up to 12 symbols. It guesses tests from paths (src/CodeArena/Runtime.cs:1469-1537; WorkPlan.cs:21-24).
 
@@ -108,15 +108,15 @@ Code Arena grounds each plan step by calling `change_impact(repo, symbol, depth 
   - It stores `repo_ids_json` for 600 s, or up to 3,600 s while GitLab is down, and serves them from the cache (Acl.cs:101-149).
   - `repos.id` has no AUTOINCREMENT (011_repo_branch.sql:171-187), and Acl.cs itself warns that a deleted row's id is given to the next repository indexed (Acl.cs:430-436).
   - Branch pruning and `DeleteRepos` do not clear `acl_cache` (Commands.cs:163-171; Choices.cs:161, 237-263).
-  - The platform path already guards against this and has a test (Acl.cs:241-269; tests/Argus.Tests/SlowGitLabTests.cs:212-236). The token path has neither. This gap is inferred from the code and has not been reproduced.
-- **`.env` files are stored in full.** `.env` and `.env.example` are indexed as `dotenv`, and their full content goes into `files.content` and FTS (Parsers.cs:23, 33; Writes.cs:103-126). Indexing never calls `SecretMask` (src/Argus/Util/SecretMask.cs:6-11).
+  - The platform path already guards against this and has a test (Acl.cs:241-269; tests/CodeIntel.Tests/SlowGitLabTests.cs:212-236). The token path has neither. This gap is inferred from the code and has not been reproduced.
+- **`.env` files are stored in full.** `.env` and `.env.example` are indexed as `dotenv`, and their full content goes into `files.content` and FTS (Parsers.cs:23, 33; Writes.cs:103-126). Indexing never calls `SecretMask` (src/CodeIntel/Util/SecretMask.cs:6-11).
 
 ### 1.5 Branches, freshness and scale
 
-- **Branches.** Each selected branch is its own `repos` row, read in full with no dedup (docs/argus/branches.md:77-85). Links are made between default branches only (GraphLinks.cs:165-167; GraphQueries.cs:178-182).
+- **Branches.** Each selected branch is its own `repos` row, read in full with no dedup (docs/code-intel/branches.md:77-85). Links are made between default branches only (GraphLinks.cs:165-167; GraphQueries.cs:178-182).
 - **Re-reading files.** Files are re-read from `git diff --name-status` and skipped when the per-file stamp matches (Mirror.cs:202-227; Worker.cs:221-243; Ctags.cs:35-40).
 - **Rebuilding the graph.** After every pass, `ResolveIncludes`, `RebuildRepoDeps` and `RebuildLinks` rebuild the whole estate's graph (Commands.cs:425-440).
-- **Measured scale:** 47 repositories, 55,603 files and 1,491,167 symbols in 37.8 min, at 21.9 MB per 1,000 files, which is about 1.2 GB (docs/argus/overview.md:468-479).
+- **Measured scale:** 47 repositories, 55,603 files and 1,491,167 symbols in 37.8 min, at 21.9 MB per 1,000 files, which is about 1.2 GB (docs/code-intel/overview.md:468-479).
 
 ### 1.6 Measured so far
 
@@ -184,7 +184,7 @@ A later precise tier (compiler or SCIP) would add a letter P (§11). This releas
   - If two definitions collide (both `#if` branches, TS declaration merging), the later one in path order gets the path's hash appended.
 - **Edge:** `contains`, by `parent_key`.
 - **How built:**
-  - **C#, TS/JS and Python:** the shared scanners (§6) give the qualified name, signature, range, parent, the doc's first line and the body hash. The body hash is the first 8 bytes of SHA-256 of the blanked text with whitespace collapsed (CodeScan.cs:121-174). The full doc comment is still read the way Argus reads it today.
+  - **C#, TS/JS and Python:** the shared scanners (§6) give the qualified name, signature, range, parent, the doc's first line and the body hash. The body hash is the first 8 bytes of SHA-256 of the blanked text with whitespace collapsed (CodeScan.cs:121-174). The full doc comment is still read the way Farzan Graph reads it today.
   - **C/C++, Go, Java, Kotlin and Rust:** ctags with `--fields=+nKSseflia`. `i` gives inheritance and `a` gives access. Scope is joined into a qualified name.
   - **Markdown and text** get no ctags symbols. This removes noise from `find_symbol`.
 - **Visibility** comes from modifiers, not from the file-restricted guess:
@@ -200,7 +200,7 @@ A later precise tier (compiler or SCIP) would add a letter P (§11). This releas
   - `npm:pkg/path#name`
   - `pypi:dist/module.qualified`
   - `include:header/path.h#name`
-- **Scan facts are kept per blob.** One scanner run per (blob sha, scanner versions) is stored as zstd JSON (ZstdSharp.Port is already referenced, Argus.csproj:12). It holds the file's symbols, imports, uses and contract claims. A branch row whose file has the same blob reuses it, and so does a vendored copy.
+- **Scan facts are kept per blob.** One scanner run per (blob sha, scanner versions) is stored as zstd JSON (ZstdSharp.Port is already referenced, CodeIntel.csproj:12). It holds the file's symbols, imports, uses and contract claims. A branch row whose file has the same blob reuses it, and so does a vendored copy.
 - **How sure:** a scanner replaces ctags for a language only if its definition recall against ctags is 97% or more. C# is at 98% today (tests/CodeArena.Tests/CodeScanCSharpTests.cs:170-201). TS and Python still need the check.
 - **Cost (estimate):**
   - About today's 1.49M rows. The new columns add about 15% to the symbol table.
@@ -293,7 +293,7 @@ A later precise tier (compiler or SCIP) would add a letter P (§11). This releas
 
 ### 2.7 Service contracts
 
-The plan.md backlog item "Argus at run time" (docs/plan.md:1171-1177) is done here at the level of the operation, not just the repository.
+The plan.md backlog item "Farzan Graph at run time" (docs/plan.md:1171-1177) is done here at the level of the operation, not just the repository.
 
 - **Nodes:**
   - **Component:** a deployable unit inside a repository, anchored at a directory. It is found from:
@@ -302,13 +302,13 @@ The plan.md backlog item "Argus at run time" (docs/plan.md:1171-1177) is done he
     - Kubernetes workloads;
     - Helm `Chart.yaml`;
     - a `.csproj` with `Sdk=Microsoft.NET.Sdk.Web`;
-    - Backstage `catalog-info.yaml`, now read as YAML with the YamlDotNet already referenced (Argus.csproj:13) instead of a regex.
+    - Backstage `catalog-info.yaml`, now read as YAML with the YamlDotNet already referenced (CodeIntel.csproj:13) instead of a regex.
   - **HTTP operation:** the method plus a normalized template, for example `GET /v1/orders/{}`.
   - **RPC:** `package.Service/Method`.
   - **Topic or queue.**
   - **Table:** `schema.table`.
 - **Claims are kept per repository.** `contract_claims(repo_id, file_id, line, end_line, component_id, sym_key, kind, role, norm_name, scope, detail, confidence, extractor)` holds each repository's claims. They are joined by `norm_name` at query time, only among readable repositories. No topic, table or host exists as a global row.
-- **How built:** per-framework rules over blanked text with literals kept, in one more pass of the existing extractor. The rules are a YAML list shipped with Argus.
+- **How built:** per-framework rules over blanked text with literals kept, in one more pass of the existing extractor. The rules are a YAML list shipped with Farzan Graph.
 
   | Family | Servers and declarations | Clients and uses | Matching |
   |---|---|---|---|
@@ -350,7 +350,7 @@ The plan.md backlog item "Argus at run time" (docs/plan.md:1171-1177) is done he
   - A CODEOWNERS parser with GitLab's rules. It reads the first of the root, `.gitlab/` and `docs/` copies, in GitLab's order (checked against GitLab's documentation in the commit's test). It handles sections, `^optional` sections, `[n]` approvals, default owners on a section line, and the last matching pattern winning within a section.
   - Backstage `spec.owner`, read as YAML.
   - Nothing parses CODEOWNERS today.
-- **How sure:** CODEOWNERS is a declaration and is shown exactly as written. An owner who is not an active member of the project is flagged as stale. Membership comes from the read Argus already makes with its read-only credential (Acl.cs:241-269).
+- **How sure:** CODEOWNERS is a declaration and is shown exactly as written. An owner who is not an active member of the project is flagged as stale. Membership comes from the read Farzan Graph already makes with its read-only credential (Acl.cs:241-269).
 - **Personal data:** usernames only. An email entry in CODEOWNERS is shown as "(an email entry)", never as the address.
 - **Cost:** one parse per CODEOWNERS file.
 
@@ -428,15 +428,15 @@ next: change_impact target=9f3c1e…
 - **Unchanged:** `search_code`, `semantic_search`, `get_file`, `grep_at`, `file_at` and the review tools. The graph narrows where to look; grep still finds every occurrence.
 - **Agent profile.** The tool definitions are already past the chat's 6,000-character budget and load on demand (OnDemandTools.cs:6-37).
   - A compact profile for models of 30B or smaller holds `find_symbol`, `symbol_graph`, `change_impact`, `mr_impact`, `service_contracts`, `get_file` and `grep_at` in 2,500 characters of definitions or less. It fits without `load_tools`.
-  - It comes with a short Argus skill: find the exact entity, take one hop, read the cited lines, then edit.
-  - The chat, code mode (`arena.argus.*`, CodeTool.cs:11, 83) and Code Arena choose the profile by model size.
+  - It comes with a short Farzan Graph skill: find the exact entity, take one hop, read the cited lines, then edit.
+  - The chat, code mode (`arena.code-intel.*`, CodeTool.cs:11, 83) and Code Arena choose the profile by model size.
 - **Code Arena's plan grounding** (Runtime.cs:1469-1537) reads the new `change_impact` bands behind its own setting. It names tests from §2.6 instead of guessing them from paths (WorkPlan.cs:21-24).
 
 ### 3.3 The web app's views
 
 **Where they run.**
 - The pages live in src/web.
-- Llm.Api calls Argus as the signed-in person, with the chat token plus `x-llm-user-email` as the chat already does (src/Llm.Api/Chat/ArgusMcp.cs:488-517). It never uses the admin token.
+- Llm.Api calls Farzan Graph as the signed-in person, with the chat token plus `x-llm-user-email` as the chat already does (src/Llm.Api/Chat/CodeIntelMcp.cs:488-517). It never uses the admin token.
 - No answer is cached across people.
 
 **How they are drawn.**
@@ -457,13 +457,13 @@ next: change_impact target=9f3c1e…
    - Paste an MR link or a diff (`mr_impact`).
    - Changed symbols on the left; dependents in columns by hop (elkjs layered), grouped into the three bands.
    - Side panels list the tests to run and the owners to ask.
-   - "Copy as Markdown" makes text a person can post. Argus never writes to GitLab.
+   - "Copy as Markdown" makes text a person can post. Farzan Graph never writes to GitLab.
 3. **Service map.**
    - Components grouped by GitLab group.
    - Edges labelled with their route, RPC, topic or table, filtered by layer and confidence.
    - Contract-copy and deploy drift findings.
-4. **Confirm.** A person who can read both ends of an edge marks it right or wrong. Verdicts are stored in Argus's sidecar database, because the index is opened read-only (Db.cs:85-99). They are audited and exported as `graph-eval` truth. Only aggregate numbers go into docs.
-5. **Admin → Argus → Graph health** (admin token only):
+4. **Confirm.** A person who can read both ends of an edge marks it right or wrong. Verdicts are stored in Farzan Graph's sidecar database, because the index is opened read-only (Db.cs:85-99). They are audited and exported as `graph-eval` truth. Only aggregate numbers go into docs.
+5. **Admin → Farzan Graph → Graph health** (admin token only):
    - coverage per repo and language;
    - edges by evidence letter and unresolved rates;
    - scanner versions and index time;
@@ -504,7 +504,7 @@ A person's readable repositories stay as they are: the GitLab projects where the
 6. **Hidden things are never counted or named.**
    - "Resolved into a repository you cannot read" and "unresolved" fall into one bucket.
    - Graph tools give no access notices.
-   - The existing notice stays only for lookups with no readable answer (Tools.cs:134-186), and `ARGUS_ACCESS_NOTICES=0` still turns it off.
+   - The existing notice stays only for lookups with no readable answer (Tools.cs:134-186), and `CODE_INTEL_ACCESS_NOTICES=0` still turns it off.
 7. **Owners and history come only from readable repositories.** Emails are never shown, and the compliance data inventory gets an entry for usernames in owner data.
 8. **Secrets are masked before storing.**
    - `.env`, `.properties` and `appsettings` values of secret shape are masked before `files.content` and FTS store them, after the runtime declarations have been read from them.
@@ -533,7 +533,7 @@ A person's readable repositories stay as they are: the GitLab projects where the
 
 ## 5. Storage and scale
 
-**Today.** The index is one SQLite file in WAL mode, which the server opens with `query_only`. Postgres appears only in the optional pgvector backend for vectors (docs/argus/pgvector-backend.md).
+**Today.** The index is one SQLite file in WAL mode, which the server opens with `query_only`. Postgres appears only in the optional pgvector backend for vectors (docs/code-intel/pgvector-backend.md).
 
 **No graph database.**
 - Every question is a bounded walk of 1–3 hops, which is a few indexed lookups.
@@ -592,33 +592,33 @@ If the size gate fails, the `references` kind goes first, then N edges for the c
 
 **Branches.** In-repository edges are stored per branch row. Because scan facts are shared by blob, a branch costs mostly its diff. Cross-repository edges stay between default branches, as links do today.
 
-**Past one box.** The SQL is plain and portable: `json_each` becomes `= ANY(@ids)` on Postgres, through the Npgsql already referenced (Argus.csproj:14). The graph tables move to Postgres only if the measured gates fail at the company's estate of about 200 repositories (docs/plan.md:1184-1186). They do not move this release.
+**Past one box.** The SQL is plain and portable: `json_each` becomes `= ANY(@ids)` on Postgres, through the Npgsql already referenced (CodeIntel.csproj:14). The graph tables move to Postgres only if the measured gates fail at the company's estate of about 200 repositories (docs/plan.md:1184-1186). They do not move this release.
 
 ---
 
 ## 6. Sharing scanners with Code Arena's code index
 
 **What moves** to `src/CodeIndex/`, a folder of source files that both projects link, as `CodeText.cs` is linked today (CodeArena.csproj:27-31). It uses the base class library only:
-- `CodeText`, moved from src/Argus/Util;
+- `CodeText`, moved from src/CodeIntel/Util;
 - all of `CodeScan.cs`: the C#, TS/JS and Python scanners, tokens, body hash, signature and doc line (CodeScan.cs:11-26);
 - `Terms`, the camelCase tokenizer (CodeIndex.cs:12-118);
 - `CodeFiles`' `Sensitive`, `TokenShape` and `LanguageOf` (CodeFiles.cs:33-81);
-- `CodeGraph`'s resolution rules, behind a new `IFileSet` and `ITextProvider`. Today they read disk through `Files.ReadText` and `File.Exists` (CodeGraph.cs:182-208, 873-895). Argus backs them with `files.content`; Code Arena with the working tree.
+- `CodeGraph`'s resolution rules, behind a new `IFileSet` and `ITextProvider`. Today they read disk through `Files.ReadText` and `File.Exists` (CodeGraph.cs:182-208, 873-895). Farzan Graph backs them with `files.content`; Code Arena with the working tree.
 
 **What changes while moving:**
-- **One line rule.** Lines break on `\n`, with `\r\n` counted once, as git and ctags count. Argus today splits lines as Python does, also on `\v`, `\f` and others (src/Argus/Util/PyStr.cs:25-40). Stored line references may shift once; no backward compatibility is needed.
+- **One line rule.** Lines break on `\n`, with `\r\n` counted once, as git and ctags count. Farzan Graph today splits lines as Python does, also on `\v`, `\f` and others (src/CodeIntel/Util/PyStr.cs:25-40). Stored line references may shift once; no backward compatibility is needed.
 - **The receiver fix** from §2.3, with a test.
-- **Scanner versions join Argus's per-file stamp.** `SymbolContractVersion` goes to 6 (Ctags.cs:34-40).
+- **Scanner versions join Farzan Graph's per-file stamp.** `SymbolContractVersion` goes to 6 (Ctags.cs:34-40).
 - **TS and Python definition-recall tests against ctags**, which must reach 97% or more. Only C# has such a test today.
-- **The Dockerfiles copy the new folder:** src/Argus/Dockerfile (today it copies only src/Argus/, :37), src/Llm.Api/Dockerfile:69-70 and deploy/services/workspaces/Dockerfile:14-15. tools/publish-code-arena.sh and CI change with them.
+- **The Dockerfiles copy the new folder:** src/CodeIntel/Dockerfile (today it copies only src/CodeIntel/, :37), src/Llm.Api/Dockerfile:69-70 and deploy/services/workspaces/Dockerfile:14-15. tools/publish-code-arena.sh and CI change with them.
 
-**What is not shared:** Code Arena's on-disk store and sync, its index host, its tools, the git file listing, and `CodeSearch`'s linear scan. Argus's FTS and postings replace the last.
+**What is not shared:** Code Arena's on-disk store and sync, its index host, its tools, the git file listing, and `CodeSearch`'s linear scan. Farzan Graph's FTS and postings replace the last.
 
 **What each side gains:**
-- **Argus gets** symbol uses tied to definitions, inheritance, a sensitive-file filter and body hashes, with no new dependency.
-- **Code Arena gets** answers across repositories from Argus, under the same keys: the IDE panels in §3.3, and plan grounding with real tests.
+- **Farzan Graph gets** symbol uses tied to definitions, inheritance, a sensitive-file filter and body hashes, with no new dependency.
+- **Code Arena gets** answers across repositories from Farzan Graph, under the same keys: the IDE panels in §3.3, and plan grounding with real tests.
 
-**`.env` files.** Code Arena never reads them, while Argus reads them on purpose for runtime links. The shared `Sensitive` rule therefore takes a mode: Argus reads declarations first, then masks values before storing (§4, rule 8).
+**`.env` files.** Code Arena never reads them, while Farzan Graph reads them on purpose for runtime links. The shared `Sensitive` rule therefore takes a mode: Farzan Graph reads declarations first, then masks values before storing (§4, rule 8).
 
 ---
 
@@ -626,7 +626,7 @@ If the size gate fails, the `references` kind goes first, then N edges for the c
 
 ### 7.1 The baseline harness comes first
 
-`evals/run_argus_graph.py` is built before any graph code. Its tasks are mined from history Argus already mirrors: llm-service, plus one company repository per language family chosen by the owner. Nothing is downloaded. The truth is fixed before any model runs.
+`evals/run_code_intel_graph.py` is built before any graph code. Its tasks are mined from history Farzan Graph already mirrors: llm-service, plus one company repository per language family chosen by the owner. Nothing is downloaded. The truth is fixed before any model runs.
 
 **Splits:**
 - development and test by the parity of the commit hash;
@@ -647,13 +647,13 @@ If the size gate fails, the `references` kind goes first, then N edges for the c
 
 **Arms:**
 - grep only;
-- Argus today (37 tools);
-- Argus with the graph, through the agent profile;
-- Argus with the graph but graph signals off (lexical and FTS only). This is the ablation the code-index measurement lacked.
+- Farzan Graph today (37 tools);
+- Farzan Graph with the graph, through the agent profile;
+- Farzan Graph with the graph but graph signals off (lexical and FTS only). This is the ablation the code-index measurement lacked.
 
 ### 7.2 Without a model
 
-- **`argus graph-eval --symbols TRUTH`.**
+- **`code-intel graph-eval --symbols TRUTH`.**
   - Lines read `from-id -> to-id calls|inherits|implements|overrides`, and `!->` for negatives.
   - It reports precision, recall and F1 by evidence letter, language and kind, plus calibration buckets with expected calibration error. `--write-priors` and `--apply` work as in the repository mode (GraphEval.cs:8-165).
   - Truth comes from compilers already on the dev box, through two dev-only tools in tools/:
@@ -687,7 +687,7 @@ Each layer and tool ships behind its switch, and each switch flips in its own co
 | A contract extractor | 0.95 or more at strong and 0.80 or more at likely, on llm-service plus confirmed company edges; otherwise candidate-only |
 | Contract layers in `repo_map`'s defaults | No precision loss in repository `graph-eval` |
 | `change_impact` bands, without a model | recall@10 at least 15 points above today's `change_impact`, with precision@10 no lower. Tests hit@5 0.6 or more. Owners hit@3 above the most-recent-committer baseline. |
-| `ARGUS_SYMBOL_GRAPH`, resolved `find_references`, the agent profile, Code Arena's grounding | For both gate models on both corpora: success lower bound −2 points or better against Argus today, and either 20% fewer prompt tokens or +5 points of success or function Acc@10. Median prompt tokens per task no higher than Argus today (a hard gate: the code-index arm failed by doubling them). No family more than 5 points worse. No regression above 2 points on tool-modes' docs tasks or the code-index locate set. New tools used in 60% or more of graph tasks. Wrong-edit rate no higher. |
+| `CODE_INTEL_SYMBOL_GRAPH`, resolved `find_references`, the agent profile, Code Arena's grounding | For both gate models on both corpora: success lower bound −2 points or better against Farzan Graph today, and either 20% fewer prompt tokens or +5 points of success or function Acc@10. Median prompt tokens per task no higher than Farzan Graph today (a hard gate: the code-index arm failed by doubling them). No family more than 5 points worse. No regression above 2 points on tool-modes' docs tasks or the code-index locate set. New tools used in 60% or more of graph tasks. Wrong-edit rate no higher. |
 | Anything at all | §5's cost gates; the access tests in §4 green; the replay test green |
 
 **What ships on without a model gate:**
@@ -698,7 +698,7 @@ Each layer and tool ships behind its switch, and each switch flips in its own co
 
 **If a gate fails:** that part stays behind its switch, the negative result is published, and the failed condition decides what comes next.
 
-Results go to docs/measurements/argus-graph.md, each with its date, commit and models.
+Results go to docs/measurements/code-intel-graph.md, each with its date, commit and models.
 
 ---
 
@@ -706,8 +706,8 @@ Results go to docs/measurements/argus-graph.md, each with its date, commit and m
 
 **Nothing on the default path is a download:**
 - the shared scanners are base-class-library C#;
-- ctags is already in the image (src/Argus/Dockerfile:29);
-- YamlDotNet, ZstdSharp.Port and Npgsql are already referenced (Argus.csproj:12-14);
+- ctags is already in the image (src/CodeIntel/Dockerfile:29);
+- YamlDotNet, ZstdSharp.Port and Npgsql are already referenced (CodeIntel.csproj:12-14);
 - SQLite's `json_each`, FTS5 and recursive CTEs are built in;
 - cytoscape, fcose and elkjs are already in src/web's lockfile;
 - the truth oracles (TypeScript 6.0.3 and the SDK's Roslyn) are already on the dev box.
@@ -729,16 +729,16 @@ Results go to docs/measurements/argus-graph.md, each with its date, commit and m
 
 ## 9. Commits, in order
 
-Each commit is small, tested and shippable on its own. It passes Argus.Tests, and CodeArena.Tests where shared code moves. It is pushed and redeployed live before the next. Playwright runs each get their own `--output`.
+Each commit is small, tested and shippable on its own. It passes CodeIntel.Tests, and CodeArena.Tests where shared code moves. It is pushed and redeployed live before the next. Playwright runs each get their own `--output`.
 
 | # | Commit | What it changes | How it is verified |
 |---|---|---|---|
-| 0 | Plan Argus's graphs | docs/design/argus-graph.md and a docs/plan.md entry | compliance-docs.py, release-scan.py |
+| 0 | Plan Farzan Graph's graphs | docs/design/code-intel-graph.md and a docs/plan.md entry | compliance-docs.py, release-scan.py |
 | 1 | Access by GitLab project ids | `AllowedProjects`; the token-path cache keeps GitLab ids only; `repos.id` AUTOINCREMENT by table rebuild; `DeleteRepos` and pruning clear `acl_cache` | A test of a reused row id inside the 10-minute cache; an upgrade test on an index with data |
 | 2 | Access in SQL for today's graph | The `@projects` predicate in `GraphQueries.Load`, `impact_of` and `semantic_search`'s coarse pass | Static predicate test; query recorder; the A/B/C differential test on `repo_map`, `system_map`, `dependency_path`, `change_impact` and `impact_of`; semantic recall for a narrow reader |
 | 3 | Settlement by local evidence | Index time: own manifests and submodules only; the rest among readable providers at query time | Differential test; GraphTests' 469 synthetic links unchanged |
 | 4 | Secrets masked before storing | `SecretMask` in Writes after declarations; contract bump | A fixture shows runtime links unchanged and no secret-shaped value in content or FTS (generated fake shapes only) |
-| 5 | Baseline harness | evals/run_argus_graph.py, the families and splits; arms grep and Argus today | `--check` regenerates identical tasks; baselines in docs/measurements/argus-graph.md |
+| 5 | Baseline harness | evals/run_code_intel_graph.py, the families and splits; arms grep and Farzan Graph today | `--check` regenerates identical tasks; baselines in docs/measurements/code-intel-graph.md |
 | 6 | Shared scanners | `src/CodeIndex/`; one line rule; receiver fix; three Dockerfiles, publish script, CI | Both suites green; TS and Python recall ≥ 97% against ctags; receiver test |
 | 7 | Stable symbols | Migration 024 (key, qualified, parent_key, lang, body_hash, visibility, moniker); upsert by key; `symbol_vectors`; ctags `+ia`; no ctags on markdown and text; contract 6 | Keys survive an edit elsewhere in the file and a file move; unchanged symbols are not embedded again; upgrade test with data |
 | 8 | Scan facts by blob | `scan_facts` reused by branch rows and vendored copies | Index size, and a second branch's index time, measured on the 47-repo estate |
@@ -746,7 +746,7 @@ Each commit is small, tested and shippable on its own. It passes Argus.Tests, an
 | 10 | Uses in a repository | `sym_use`, `sym_edges`, S/I/T/N/G, `file_unresolved`, incremental re-resolution | Fixtures per language; the replay test (incremental equals full); rows, size and time in the measurements doc |
 | 11 | Type hierarchy | inherits, implements, overrides, implements_member; callers via interface | Fixtures for C# `override`, TS `implements`, Python bases, Java via ctags |
 | 12 | `graph-eval --symbols` | Truth format, reports, calibration, `--write-priors`, `--sample`; tools/ truth generators (Roslyn, TS API) | First C# and TS precision tables committed; priors calibrated |
-| 13 | Graph tools behind `ARGUS_SYMBOL_GRAPH` | `find_symbol` changed, `symbol_graph`, `find_references` resolved with a truncated flag, `index_status` health | Output shape, budget and folding tests; readable-only counts; differential test extended |
+| 13 | Graph tools behind `CODE_INTEL_SYMBOL_GRAPH` | `find_symbol` changed, `symbol_graph`, `find_references` resolved with a truncated flag, `index_status` health | Output shape, budget and folding tests; readable-only counts; differential test extended |
 | 14 | Tests graph | Markers, covers (≤ 2 hops, ≤ 20), named_for; `relation=tests` | Fixtures per framework; the tests family measured |
 | 15 | Across repositories | Exports with monikers; `sym_xedges`; candidates at query time | Differential test covers them; `graph-eval` on a two-repo C# pair |
 | 16 | Owners | CODEOWNERS with GitLab rules; Backstage as YAML; approvers; stale flag | Section, `^optional`, `[n]` and last-match cases; no email in any answer; the owners family measured |
@@ -762,7 +762,7 @@ Each commit is small, tested and shippable on its own. It passes Argus.Tests, an
 | 26 | Impact view, Service map, Graph health, Confirm | elkjs layered view; drift lists; admin page; verdicts in the sidecar, audited, exported as truth | Playwright; Confirm refused when one end is unreadable |
 | 27 | Review card and IDE panels | Impact card in automatic reviews (setting); Call and Type Hierarchy and cross-repo references in Code Arena's IDE | Review tests; Code Arena web tests |
 | 28 | Repository `graph-eval` on the company estate | From Confirm verdicts; priors calibrated | Only aggregate numbers in docs; closes Groundwork item 2 |
-| 29 | Model measurement | Every family × four arms × two gate models × 3 runs; flips only for gates met, each in its own commit | §7.4, results in docs/measurements/argus-graph.md |
+| 29 | Model measurement | Every family × four arms × two gate models × 3 runs; flips only for gates met, each in its own commit | §7.4, results in docs/measurements/code-intel-graph.md |
 | 30 | Docs and release | graph.md, overview.md, tool-modes.md and ToolCatalog.cs:1 (37 → 40, not 34), clients.md, roadmap.md rewritten (no stale "not multi-tenant/HA"), CHANGELOG with measured numbers; tag, then `gh release create` with title and changelog | compliance-docs.py, release-scan.py |
 
 **The headline is reachable at commit 27.** If time runs short, drop from the end in this order: 23, 22, 21, then 20.
@@ -806,15 +806,15 @@ Each commit is small, tested and shippable on its own. It passes Argus.Tests, an
 
 ## 11. What is deliberately not in it
 
-- **Taint traces from Opengrep.** `Scanners.Known` lists opengrep (src/Argus/Scanning/Scanners.cs:25), but nothing passes `--taint-intrafile`, and the installed binary was not checked for the flag. Data flow is a release of its own.
+- **Taint traces from Opengrep.** `Scanners.Known` lists opengrep (src/CodeIntel/Scanning/Scanners.cs:25), but nothing passes `--taint-intrafile`, and the installed binary was not checked for the flag. Data flow is a release of its own.
 - **A Roslyn semantic tier for C#.** About 27 MB of new packages in the image and 1–2 GB of RAM per large project, with no measured gain. The SDK's Roslyn already serves as the truth oracle.
 - **SCIP ingest and a precise P tier.** Almost no estate CI produces `index.scip`, it would need read_api artifact reads, and the local compilers already serve as the yardstick. It is a later add-on.
 - **Type chains longer than one link, and monikers for Go, Java, Kotlin and Rust.** They widen only if `graph-eval` shows the precision holds.
-- **Merging Argus with Code Arena's local index for unsaved edits.** The panels ship first.
+- **Merging Farzan Graph with Code Arena's local index for unsaved edits.** The panels ship first.
 - **A port of Code Arena's `code_search` ranker.** It duplicates `search_code` and `semantic_search`, and its model gate failed.
 - **Separate `tests_for`, `owners`, `flow` and `code_outline` tools.** They are folded into `symbol_graph`, the impact tools and `service_contracts`.
 - **Cross-repository co-change** by shared issue key or branch name, **personalized PageRank** for the repository maps, and **coverage edges** from JUnit artifacts.
-- **Hand-drawn SVG, and pages in the standalone argus-web.** Adding the graph libraries there would need a yes.
+- **Hand-drawn SVG, and pages in the standalone code-intel-web.** Adding the graph libraries there would need a yes.
 - **A Postgres map store with row-level security as a second store.** The SQLite predicate plus the tests give the same guarantee. It would be reconsidered only if the measured gates fail.
 - **3,000-project targets and valid-from/valid-to dates on every row.** Both are speculative next to the 47 repositories measured.
 - **Column-level lineage, GraphQL, Avro, Terraform, Helm template reading, config-key edges, and gateway routes** (Ingress, nginx, YARP, Ocelot, Traefik).

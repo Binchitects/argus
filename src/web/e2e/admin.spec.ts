@@ -216,7 +216,7 @@ test('a live setting applies at once and is audited; one read at start waits for
   // The name (from /api/info) is in use without a reload: the tab title and the sidebar.
   await expect(page).toHaveTitle(`Settings · ${brand}`)
   await page.getByRole('button', { name: /Back to the default/ }).first().click()
-  await expect(page.getByLabel('Product name')).toHaveValue('Argus Arena')
+  await expect(page.getByLabel('Product name')).toHaveValue('Farzan Arena')
 
   // A setting read when the app starts: one browser only, as whether a restart is due is the whole app's.
   if (!isMobile) {
@@ -339,7 +339,7 @@ test('members cannot open admin pages', async ({ browser, baseURL }) => {
   await expect(tour.or(accept)).toBeVisible()
   if (await accept.isVisible()) await accept.click()
   // A new person is shown "What's new" over their first page, once.
-  await expect(tour).toContainText("What's new in Argus Arena")
+  await expect(tour).toContainText("What's new in Farzan Arena")
   await page.keyboard.press('Escape')
   await expect(tour).toBeHidden()
   await expect(page.getByRole('button', { name: /Account menu/ })).toBeVisible()

@@ -20,6 +20,7 @@ import { growth, origins, plural, size, states, storageQuery, uses, type Disk, t
 import { Cleanups } from './storage-cleanups'
 import { StorageFiles } from './storage-files'
 import { StoragePeople } from './storage-people'
+import { codeIntelName } from '@/lib/brand'
 
 const tabs = [
   { value: 'room', label: 'Where the room goes' },
@@ -32,7 +33,7 @@ type Tab = (typeof tabs)[number]['value']
 
 /**
  * Admin → Storage: the disks and what takes room on them (the databases, the chat's files, the model
- * library, Argus, backups, logs and metrics), how long each is kept and what the app cannot see; the
+ * library, code-intel, backups, logs and metrics), how long each is kept and what the app cannot see; the
  * chat's files to browse, download and delete; the clean-ups; and each person's room for files.
  */
 export function StoragePage() {
@@ -123,7 +124,7 @@ function Room({ r }: { r: StorageReport }) {
       </div>
       <Library r={r} />
       <div className="grid gap-6 xl:grid-cols-2">
-        <ArgusCard r={r} />
+        <CodeIntelCard r={r} />
         <Backups r={r} />
       </div>
       <div className="grid gap-6 xl:grid-cols-2">
@@ -282,15 +283,15 @@ const libraryColumns: ColumnDef<LibraryUse>[] = [
 
 /** Each kind of thing kept, its room, where it lives, and how it grew over 30 days. */
 function WhatTakesRoom({ r }: { r: StorageReport }) {
-  const a = r.argus.report
+  const a = r.codeIntel.report
   const rows: Row[] = [
     ...r.databases.list.map((d) => ({ what: `Database ${d.name}`, where: 'Postgres', bytes: d.bytes, trend: `db:${d.name}`, note: d.what })),
     { what: "The chat's files", where: "Inside the app's database", bytes: r.files.total?.bytes ?? null, trend: 'files', note: 'Uploads, and what the tools made: part of the database above.' },
     { what: 'Model library', where: `MODELS_DIR (${r.library.report?.dir ?? '/library'})`, bytes: r.library.report?.bytes ?? null, trend: 'models', note: r.library.problem },
-    ...(r.argus.configured
+    ...(r.codeIntel.configured
       ? [
-          { what: "Argus's index", where: "Argus's volume", bytes: a ? a.index_bytes + a.mirrors_bytes + a.trees_bytes + a.other_bytes : null, trend: 'argus', note: a ? `Index ${size(a.index_bytes)}, GitLab mirrors ${size(a.mirrors_bytes)}, trees ${size(a.trees_bytes)}` : r.argus.problem },
-          { what: 'Knowledge packs', where: "Argus's volume", bytes: a?.packs_bytes ?? null, trend: 'packs', note: a?.library_dir ? `The pack library (${a.library_dir}) holds ${size(a.library_bytes)} more; a loaded pack is a link to it.` : undefined },
+          { what: `${codeIntelName}'s index`, where: `${codeIntelName}'s volume`, bytes: a ? a.index_bytes + a.mirrors_bytes + a.trees_bytes + a.other_bytes : null, trend: 'code-intel', note: a ? `Index ${size(a.index_bytes)}, GitLab mirrors ${size(a.mirrors_bytes)}, trees ${size(a.trees_bytes)}` : r.codeIntel.problem },
+          { what: 'Knowledge packs', where: `${codeIntelName}'s volume`, bytes: a?.packs_bytes ?? null, trend: 'packs', note: a?.library_dir ? `The pack library (${a.library_dir}) holds ${size(a.library_bytes)} more; a loaded pack is a link to it.` : undefined },
         ]
       : []),
     { what: 'Backups', where: `BACKUP_DIR (${r.backups.dir})`, bytes: r.backups.state === 'ok' ? r.backups.bytes + r.backups.otherBytes : null, trend: 'backups', note: backupNote(r) },
@@ -433,17 +434,17 @@ function Library({ r }: { r: StorageReport }) {
   )
 }
 
-function ArgusCard({ r }: { r: StorageReport }) {
-  const a = r.argus.report
+function CodeIntelCard({ r }: { r: StorageReport }) {
+  const a = r.codeIntel.report
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Argus</CardTitle>
-        <CardDescription>The code index and the knowledge packs, as Argus measures its own disk.</CardDescription>
+        <CardTitle>{codeIntelName}</CardTitle>
+        <CardDescription>The code index and the knowledge packs, as {codeIntelName} measures its own disk.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 text-sm">
-        {!r.argus.configured && <p className="text-muted-foreground">Argus is not set up.</p>}
-        {r.argus.problem && <Alert variant="warning">{r.argus.problem}</Alert>}
+        {!r.codeIntel.configured && <p className="text-muted-foreground">{codeIntelName} is not set up.</p>}
+        {r.codeIntel.problem && <Alert variant="warning">{r.codeIntel.problem}</Alert>}
         {a && (
           <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
             {[
@@ -466,9 +467,9 @@ function ArgusCard({ r }: { r: StorageReport }) {
             )}
           </dl>
         )}
-        {(r.argus.packs?.length ?? 0) > 0 && (
+        {(r.codeIntel.packs?.length ?? 0) > 0 && (
           <ul className="grid gap-1 border-t pt-3">
-            {r.argus.packs!.map((p) => (
+            {r.codeIntel.packs!.map((p) => (
               <li key={p.name} className="flex justify-between gap-3">
                 <span>
                   {p.name} <span className="text-xs text-muted-foreground">{p.version}{p.source === 'library' ? ' · from the library (a link)' : ''}</span>

@@ -11,7 +11,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 1024,
@@ -29,7 +29,7 @@ const assistant = (id: string, name: string): AssistantSummary => ({
   id, name, description: null, icon: 'bot', color: 'blue', reach: 'Private', owner: null, mine: true, canEdit: true, chats: 1, people: 1, myChats: 1, files: 0, updatedAt: daysAgo(1),
 })
 const planChat: Conversation = {
-  ...chats[0], answering: false, thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  ...chats[0], answering: false, thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: daysAgo(0), messages: [],
 }
 

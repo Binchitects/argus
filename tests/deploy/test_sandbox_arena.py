@@ -59,13 +59,13 @@ class ArenaModule(unittest.TestCase):
         r, _ = run("""
 import arena, inspect
 print(arena.tools.search("symbol defined"))
-print(inspect.signature(arena.code-intel.find_symbol))
-print(arena.code-intel.find_symbol.__doc__.splitlines()[0])
+print(inspect.signature(arena.code_intel.find_symbol))
+print(arena.code_intel.find_symbol.__doc__.splitlines()[0])
 print(len(arena.tools.list()))
 """, lambda n, a: {"ok": True, "result": ""})
         self.assertEqual(0, r.returncode, r.stderr)
         lines = r.stdout.splitlines()
-        self.assertEqual("['arena.code-intel.find_symbol: Find where a symbol is defined.']", lines[0])
+        self.assertEqual("['arena.code_intel.find_symbol: Find where a symbol is defined.']", lines[0])
         self.assertEqual("(*, name, repo=None)", lines[1])
         self.assertEqual("Find where a symbol is defined.", lines[2])
         self.assertEqual("2", lines[3])
@@ -77,14 +77,14 @@ print(len(arena.tools.list()))
             return {"ok": True, "result": json.dumps({"defined": [{"path": "src/decode.c", "line": 118}]})}
         r, relay = run("""
 import arena
-hits = arena.code-intel.find_symbol(name="DecodeFrame")
+hits = arena.code_intel.find_symbol(name="DecodeFrame")
 print(hits["defined"][0]["path"])
 try:
     arena.web.web_search(query="secret")
 except arena.ToolError as e:
     print("refused:", e)
 try:
-    arena.code-intel.find_symbol()
+    arena.code_intel.find_symbol()
 except arena.ToolError as e:
     print("needs:", e)
 """, answer)

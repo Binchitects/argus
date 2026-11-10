@@ -10,7 +10,7 @@ import { attachmentUrl, downloadUrl } from './api'
 import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
 import { cn } from '@/lib/utils'
-import { argsOf, parseResult, resultCount } from './argus'
+import { argsOf, parseResult, resultCount } from './code-intel'
 import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
 import { agentParts, argsLead, argsSummary, partsSummary, splitArgs } from './tool-args'
@@ -25,6 +25,7 @@ import type { AgentWork, Message, ToolCall } from './types'
 import { MediaPlayer } from './media'
 import { isMedia } from './sound'
 import { LabFigures } from './drawing'
+import { codeIntelName } from '@/lib/brand'
 
 /** The 3D viewer, loaded when a model is shown. */
 const ModelViewer = lazy(() => import('./model-viewer'))
@@ -393,7 +394,7 @@ export const ToolCard = memo(function ToolCard({
       {result?.noAccess && (
         <Alert variant="warning" title="You do not have access to some of this code." className="mt-2" role="note">
           <pre className="mt-1 font-mono text-xs whitespace-pre-wrap">{result.content.split('\n').filter((l) => l.startsWith('- ')).join('\n')}</pre>
-          <p className="mt-1">Ask a maintainer listed above to add you in GitLab with at least Reporter access. Argus picks the change up within 10 minutes.</p>
+          <p className="mt-1">Ask a maintainer listed above to add you in GitLab with at least Reporter access. {codeIntelName} picks the change up within 10 minutes.</p>
         </Alert>
       )}
     </div>

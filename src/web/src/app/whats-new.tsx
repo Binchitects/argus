@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { api, infoQuery, meQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { findNavItem, mayOpen } from './nav'
+import { codeIntelName, productName } from '@/lib/brand'
 
 /** One page of a release's tour: what changed for people, in a few words, and where to try it. */
 interface Slide {
@@ -32,20 +33,20 @@ interface Tour {
 
 const latestTour: Tour = {
   release: '7.10',
-  title: "What's new in Argus Arena",
+  title: `What's new in ${productName}`,
   slides: [
     {
       icon: Network,
-      title: 'Argus knows who calls what',
-      text: 'Ask the chat for the callers of a method, what implements an interface or what a class extends: Argus walks the code’s symbol graph, in the repositories you can read, and says how sure it is.',
+      title: `${codeIntelName} knows who calls what`,
+      text: `Ask the chat for the callers of a method, what implements an interface or what a class extends: ${codeIntelName} walks the code’s symbol graph, in the repositories you can read, and says how sure it is.`,
       to: '/chat',
       action: 'Ask in a chat',
-      feature: 'argus',
+      feature: 'code-intel',
     },
     {
       icon: Plug,
       title: 'Code Arena on other providers',
-      text: 'Besides Argus Arena’s own models, Code Arena can work with Claude, DeepSeek or any OpenAI-style API you add, and its Tools menu lists every tool its model is given.',
+      text: `Besides ${productName}’s own models, Code Arena can work with Claude, DeepSeek or any OpenAI-style API you add, and its Tools menu lists every tool its model is given.`,
       to: '/help/code-arena',
       action: 'Read about Code Arena',
     },

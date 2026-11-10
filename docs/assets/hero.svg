@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-labelledby="t d">
-  <title id="t">Argus Arena</title>
-  <desc id="d">Your team's private AI, on your hardware, that knows your code: chat, Code Arena, Argus, Studio, meetings and agents.</desc>
+  <title id="t">Farzan Arena</title>
+  <desc id="d">Your team's private AI, on your hardware, that knows your code: chat, Code Arena, Farzan Graph, Studio, meetings and agents.</desc>
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0b1020"/>
@@ -23,31 +23,50 @@
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
       <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
     </pattern>
-  </defs>
+  
+    <linearGradient id="obg" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#12304a"/>
+      <stop offset="1" stop-color="#06131f"/>
+    </linearGradient>
+    <linearGradient id="oa" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="0.55" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d8075"/>
+    </linearGradient>
+    <linearGradient id="owhite" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e3eef0"/>
+    </linearGradient>
+    <radialGradient id="oiris" cx="0.42" cy="0.32" r="0.9">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="0.55" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#b45309"/>
+    </radialGradient>
+    </defs>
 
   <rect width="1200" height="380" rx="24" fill="url(#sky)"/>
   <rect width="1200" height="380" rx="24" fill="url(#grid)"/>
   <rect width="1200" height="380" rx="24" fill="url(#glow)"/>
 
-  <!-- The eye of Argus: rings around a pupil, with the points it watches. -->
-  <g transform="translate(940 190)">
-    <circle r="120" fill="none" stroke="url(#ring)" stroke-opacity="0.25" stroke-width="1.5"/>
-    <circle r="88" fill="none" stroke="url(#ring)" stroke-opacity="0.45" stroke-width="2"/>
-    <circle r="56" fill="none" stroke="url(#ring)" stroke-opacity="0.8" stroke-width="3"/>
-    <circle r="26" fill="url(#ring)"/>
-    <circle r="9" cx="-7" cy="-7" fill="#ffffff" fill-opacity="0.85"/>
-    <g fill="#cfd9ff">
-      <circle cx="0" cy="-120" r="5"/><circle cx="104" cy="-60" r="4"/><circle cx="104" cy="60" r="5"/>
-      <circle cx="0" cy="120" r="4"/><circle cx="-104" cy="60" r="5"/><circle cx="-104" cy="-60" r="4"/>
-      <circle cx="62" cy="-71" r="3"/><circle cx="-62" cy="71" r="3"/>
-    </g>
-    <g stroke="#cfd9ff" stroke-opacity="0.25" stroke-width="1">
-      <path d="M0 -120L0 -56M104 -60L48 -28M104 60L48 28M0 120L0 56M-104 60L-48 28M-104 -60L-48 -28"/>
-    </g>
+  <!-- The wise one: the app's mark, an owl in the A. -->
+  <g transform="translate(1020 190) scale(0.25) translate(-512 -512)">
+<rect x="72" y="72" width="880" height="880" rx="230" fill="url(#obg)"/>
+  <!-- The A: its peak the owl's crown, its legs the wings. -->
+  <path d="M160 790 L428 238 Q446 204 482 204 L542 204 Q578 204 596 238 L864 790 L748 790 Q724 790 710 764 L512 352 L314 764 Q300 790 276 790 Z" fill="url(#oa)"/>
+  <!-- The face: two eyes side by side, the beak between them. -->
+  <circle cx="392" cy="556" r="132" fill="url(#owhite)"/>
+  <circle cx="632" cy="556" r="132" fill="url(#owhite)"/>
+  <circle cx="400" cy="560" r="76" fill="url(#oiris)"/>
+  <circle cx="624" cy="560" r="76" fill="url(#oiris)"/>
+  <circle cx="404" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="620" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="426" cy="534" r="15" fill="#ffffff"/>
+  <circle cx="642" cy="534" r="15" fill="#ffffff"/>
+  <path d="M512 640 L476 600 Q512 584 548 600 Z" fill="#f59e0b"/>
   </g>
 
   <g font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
-    <text x="72" y="150" font-size="76" font-weight="800" letter-spacing="-2" fill="url(#word)">Argus Arena</text>
+    <text x="72" y="150" font-size="76" font-weight="800" letter-spacing="-2" fill="url(#word)">Farzan Arena</text>
     <text x="74" y="200" font-size="27" font-weight="500" fill="#c9d3f5">Your team's private AI. On your hardware. Knows your code.</text>
 
     <g font-size="17" font-weight="600" fill="#e6ebff">
@@ -60,18 +79,18 @@
         <text x="75" y="24" text-anchor="middle">Code Arena</text>
       </g>
       <g transform="translate(340 248)">
-        <rect width="96" height="36" rx="18" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.16"/>
-        <text x="48" y="24" text-anchor="middle">Argus</text>
+        <rect width="150" height="36" rx="18" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.16"/>
+        <text x="75" y="24" text-anchor="middle">Farzan Graph</text>
       </g>
-      <g transform="translate(448 248)">
+      <g transform="translate(502 248)">
         <rect width="98" height="36" rx="18" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.16"/>
         <text x="49" y="24" text-anchor="middle">Studio</text>
       </g>
-      <g transform="translate(558 248)">
+      <g transform="translate(612 248)">
         <rect width="124" height="36" rx="18" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.16"/>
         <text x="62" y="24" text-anchor="middle">Meetings</text>
       </g>
-      <g transform="translate(694 248)">
+      <g transform="translate(748 248)">
         <rect width="100" height="36" rx="18" fill="#a77bff" fill-opacity="0.22" stroke="#b996ff" stroke-opacity="0.6"/>
         <text x="50" y="24" text-anchor="middle">Agents</text>
       </g>

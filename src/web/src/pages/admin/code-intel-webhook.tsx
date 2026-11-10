@@ -11,6 +11,7 @@ import { useConfirm } from '@/components/ui/confirm'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { agoSeconds } from '@/lib/format'
+import { codeIntelName } from '@/lib/brand'
 
 export interface WebhookView {
   enabled: boolean
@@ -22,20 +23,20 @@ export interface WebhookView {
   token?: string
 }
 
-const key = ['admin', 'argus', 'webhook']
+const key = ['admin', 'code-intel', 'webhook']
 
-/** GitLab tells Argus when a branch changes (a push, a merged merge request); that repository is updated at once. */
+/** GitLab tells code-intel when a branch changes (a push, a merged merge request); that repository is updated at once. */
 export function WebhookCard() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
-  const view = useQuery({ queryKey: key, queryFn: ({ signal }) => api<WebhookView>('/api/admin/argus/webhook', { signal }), refetchInterval: 30_000 })
+  const view = useQuery({ queryKey: key, queryFn: ({ signal }) => api<WebhookView>('/api/admin/code-intel/webhook', { signal }), refetchInterval: 30_000 })
   const [secret, setSecret] = useState<string | null>(null)
   const done = (v: WebhookView) => {
     queryClient.setQueryData(key, v)
-    void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'status'] })
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'status'] })
   }
   const rotate = useMutation({
-    mutationFn: () => api<WebhookView>('/api/admin/argus/webhook', { body: {} }),
+    mutationFn: () => api<WebhookView>('/api/admin/code-intel/webhook', { body: {} }),
     onSuccess: (v) => {
       setSecret(v.token ?? null)
       done(v)
@@ -43,7 +44,7 @@ export function WebhookCard() {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const off = useMutation({
-    mutationFn: () => api<WebhookView>('/api/admin/argus/webhook', { method: 'DELETE' }),
+    mutationFn: () => api<WebhookView>('/api/admin/code-intel/webhook', { method: 'DELETE' }),
     onSuccess: (v) => {
       setSecret(null)
       done(v)
@@ -59,7 +60,7 @@ export function WebhookCard() {
         <CardTitle className="flex items-center gap-2">
           Push and merge webhook {d.enabled ? <Badge variant="success">On</Badge> : <Badge variant="secondary">Off</Badge>}
         </CardTitle>
-        <CardDescription>GitLab tells Argus when a branch changes: a push, or a merge request merged. Argus updates that repository at once instead of waiting for the schedule.</CardDescription>
+        <CardDescription>GitLab tells {codeIntelName} when a branch changes: a push, or a merge request merged. {codeIntelName} updates that repository at once instead of waiting for the schedule.</CardDescription>
         {!d.fromEnv && (
           <CardAction className="flex flex-wrap justify-end gap-2">
             {d.enabled && (
@@ -98,13 +99,13 @@ export function WebhookCard() {
         )}
       </CardHeader>
       <CardContent className="grid gap-4">
-        {d.fromEnv && <Alert>The secret comes from ARGUS_WEBHOOK_TOKEN in Argus's environment. Remove it there to manage the webhook here.</Alert>}
+        {d.fromEnv && <Alert>The secret comes from CODE_INTEL_WEBHOOK_TOKEN in {codeIntelName}'s environment. Remove it there to manage the webhook here.</Alert>}
         {d.enabled && (
           <>
             {secret ? (
               <div className="grid gap-2">
                 <Secret label="Secret token" value={secret} />
-                <p className="text-xs text-muted-foreground">Shown this once. Argus keeps only its hash. Lost it? Make a new one.</p>
+                <p className="text-xs text-muted-foreground">Shown this once. {codeIntelName} keeps only its hash. Lost it? Make a new one.</p>
               </div>
             ) : (
               !d.fromEnv && <p className="text-sm text-muted-foreground">The secret was shown when it was made. Lost it? Make a new one and paste it into GitLab.</p>
@@ -126,7 +127,7 @@ export function WebhookCard() {
             <div className="grid gap-1.5">
               <p className="text-sm font-medium">Last deliveries</p>
               {d.deliveries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">None since Argus started.</p>
+                <p className="text-sm text-muted-foreground">None since {codeIntelName} started.</p>
               ) : (
                 <ul className="grid gap-1 text-sm">
                   {d.deliveries.slice(0, 10).map((x) => (

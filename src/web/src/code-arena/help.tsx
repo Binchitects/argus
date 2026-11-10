@@ -8,6 +8,7 @@ import { Inline } from '@/help/inline'
 import { cn } from '@/lib/utils'
 import { OpenHelp, useOpenHelp } from './help-context'
 import { about, keys, parts, tasks, type Part } from './help-text'
+import { productName } from '@/lib/brand'
 
 /** Around the workbench: the help, which Help in the activity bar and the ? in each panel's header open. */
 export function HelpProvider({ manual, children }: { manual: string | null; children: ReactNode }) {
@@ -138,7 +139,7 @@ function HelpSheet({ open, part, manual, onOpenChange }: { open: boolean; part?:
               Code Arena in the manual
             </ManualLink>
           ) : (
-            <p className="text-muted-foreground">The whole story is in your Argus Arena&apos;s manual: Manual, then Code Arena.</p>
+            <p className="text-muted-foreground">The whole story is in your {productName}&apos;s manual: Manual, then Code Arena.</p>
           )}
         </div>
       </SheetContent>

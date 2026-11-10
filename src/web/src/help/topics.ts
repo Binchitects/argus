@@ -1,3 +1,4 @@
+import { codeIntelName, productName } from '@/lib/brand'
 /**
  * The help for each page: what it is for, what each part does, and the common tasks step by
  * step. The ? at the top of every page shows its topic (help/route-help.ts says which); the
@@ -47,7 +48,7 @@ export const topics = {
     title: 'Around every page',
     about: 'What stays the same on every page: the sidebar, the bar at the top, and your account menu.',
     parts: [
-      { name: 'Sidebar', text: 'Every page you may open, in groups: **Workspace** for everyone, and **Administration**, **Argus** and **Observe** for admins. **Collapse** at its foot keeps only the icons. On a phone it opens from the menu button.' },
+      { name: 'Sidebar', text: `Every page you may open, in groups: **Workspace** for everyone, and **Administration**, **${codeIntelName}** and **Observe** for admins. **Collapse** at its foot keeps only the icons. On a phone it opens from the menu button.` },
       { name: 'Manual', text: 'At the foot of the sidebar and in your account menu: this manual, with search.' },
       { name: 'Version and Source', text: 'Under the sidebar: the version you use, and a link to its source.' },
       { name: 'Search (Ctrl K)', text: 'Goes to any page or runs a command (a theme, a colour theme such as "Sakura theme", sign out). Type part of a name.' },
@@ -83,7 +84,7 @@ export const topics = {
       { name: 'Model and Thinking', text: 'At the top: the model this chat uses, and how hard it thinks. **Auto** lets a small model pick, when your admins set one up. A chat keeps its model.' },
       { name: 'Memory', text: 'The brain at the top: what the chat remembers about you, for every chat. Only you see it.' },
       { name: 'Chat settings', text: 'The sliders at the top: your own instructions for this chat, and its temperature, top-p and longest answer.' },
-      { name: 'Canvas and Files', text: '**Canvas** opens documents and code that you and the model both edit. **Files** lists every file of the chat: what you attached, what Argus read, what the model wrote.' },
+      { name: 'Canvas and Files', text: `**Canvas** opens documents and code that you and the model both edit. **Files** lists every file of the chat: what you attached, what ${codeIntelName} read, what the model wrote.` },
       { name: '⋯ (chat actions)', text: 'Fork, compact, share, move to an assistant, export, archive or delete this chat.' },
       { name: 'The answers', text: 'Under each answer: the model, time, tokens and cost; thumbs up or down; **Answer again** (also with another model, shorter or longer); **Fork from here**; read aloud. Arrows like 2 / 3 switch between versions of a question or an answer.' },
       { name: 'The message box', text: 'The paperclip attaches files (or paste or drop them). **Tools** chooses what the model may use in this chat, **Deep research** among them when an admin gave it to you: the model starts it when you ask, after your **Allow**. **Compare** applies to the next message (it is there while two models can answer). Persian, Arabic and Hebrew read right to left, each line, item and cell by its own words; code stays left to right. A message a safeguard refuses says which rule, what it found and where. What an admin did not give you is not shown. The microphone records a voice message; **Talk** is a voice conversation; the screen button shares your screen, and each question then takes a picture of it; **Sketch** (the pen) is a whiteboard whose drawing the model builds into a page, a component, a diagram, a 3D scene or a table. With **Browser** on in Tools, the model uses a real browser while you watch it above the box, and **Take over** lets you do a part yourself.' },
@@ -99,7 +100,7 @@ export const topics = {
     ],
     tasks: [
       { title: 'Ask about a file', steps: ['Press the paperclip, or drop the file on the page.', 'Wait until it shows as attached.', 'Type your question and press Enter.'] },
-      { title: 'Let the model use a tool', steps: ['Press **Tools** in the message box.', 'Turn on the tool (Argus, Python, Web, image generation…).', 'Ask your question: the model calls the tool when it needs it. A tool marked as asking first waits for your **Allow**.'] },
+      { title: 'Let the model use a tool', steps: ['Press **Tools** in the message box.', `Turn on the tool (${codeIntelName}, Python, Web, image generation…).`, 'Ask your question: the model calls the tool when it needs it. A tool marked as asking first waits for your **Allow**.'] },
       { title: 'Try another model on the same question', steps: ['Open **Answer again** under the answer.', 'Choose the model (or a thinking level).', 'Both answers stay: the arrows switch between them.'] },
       { title: 'Compare two models blind', steps: ['Press **Compare** in the message box.', 'Choose two models, or leave it to chance.', 'Send your question, read both answers, and vote. The names show after your vote, and the vote counts on the Leaderboard.'] },
       { title: 'Share a chat', steps: ['Open **⋯** at the top right of the chat.', 'Choose **Share**.', 'Choose who may open it (everyone in the company, or chosen groups) and what it shows. The link is copied. **Revoke link** stops it.'] },
@@ -227,7 +228,7 @@ export const topics = {
       { name: 'Search', text: 'Words, a name in the code, a table: **Everything**, or only **Documents**, **Code** or **Data**. Documents are found by their words, then by meaning.' },
       { name: 'Sources', text: 'The knowledge sources you may read, with how many of their documents you may read; open one to browse its documents by title.' },
       { name: 'A document', text: 'Read whole, as it was last read from its source, with **Open the original** where it lives.' },
-      { name: 'Code', text: 'Files and symbols in the repositories you may read in GitLab, as Argus indexed them, ranked: the symbol a name means first (`MyLib::TestFunc`, `a.b.c`, any case, its start or its words such as `test func`), then the file it names, then the files that hold the words. Each match says how it matched; **Repositories** lists them, each once.' },
+      { name: 'Code', text: `Files and symbols in the repositories you may read in GitLab, as ${codeIntelName} indexed them, ranked: the symbol a name means first (\`MyLib::TestFunc\`, \`a.b.c\`, any case, its start or its words such as \`test func\`), then the file it names, then the files that hold the words. Each match says how it matched; **Repositories** lists them, each once.` },
       { name: 'Filters and pages', text: 'Narrow the code by kind (**Symbols**, **Code**, **Docs**, each with its count), repository, language, branch and path (`src/` or `*.h`). **Next** and **Previous** reach every match, 20 a page.' },
     ],
     tasks: [
@@ -382,7 +383,7 @@ export const topics = {
       { name: 'New secret', text: 'For tasks run by events: a new secret for its address. The old one stops working at once.' },
     ],
     tasks: [
-      { title: 'Get a morning digest', steps: ['Press **New task**.', 'Name it and write what to ask, as you would in the chat.', 'Under **Runs**, choose **On a schedule**, then **Weekdays** at 08:00 in your time zone.', 'Choose the tools it needs (Argus, Web) and save.', 'Press **Run now** once to check the answer.'] },
+      { title: 'Get a morning digest', steps: ['Press **New task**.', 'Name it and write what to ask, as you would in the chat.', 'Under **Runs**, choose **On a schedule**, then **Weekdays** at 08:00 in your time zone.', `Choose the tools it needs (${codeIntelName}, Web) and save.`, 'Press **Run now** once to check the answer.'] },
       { title: 'Review each merge request in GitLab', steps: ['Press **New task** and choose **On GitLab events**.', 'Tick **A merge request opened or updated**, and **Answer as a comment in GitLab**.', 'Save: the task shows its address and a secret, once.', 'In GitLab, add a webhook to the project or group with that address and secret.'] },
     ],
     manual: { doc: 'chat', section: 'scheduled-tasks' },
@@ -455,7 +456,7 @@ export const topics = {
       { name: 'The address, and your models', text: 'The gateway\'s address (OpenAI-compatible, and Anthropic\'s), and the models you may use with what each can do.' },
       { name: 'Set up your tool', text: 'Choose your system and your tool (Code Arena, Claude Code, Qwen Code, Continue, Python, curl, GitLab CI…), then follow its steps. Each ends with a check that it works.' },
       { name: 'Arena MCP', text: 'Your chat tools for your own agent, at one address, with your API key.' },
-      { name: 'Argus, the code index', text: 'Argus\'s address for coding agents over MCP. It answers as your GitLab account: only from code you may read.' },
+      { name: `${codeIntelName}, the code index`, text: `${codeIntelName}'s address for coding agents over MCP. It answers as your GitLab account: only from code you may read.` },
     ],
     tasks: [
       { title: 'Set up Claude Code (or another tool)', steps: ['Under **API key**, press **New key** and copy it.', 'Run the line that keeps the key for every terminal, then open a new terminal.', 'Choose your system and your tool under **Set up your tool**.', 'Run its steps in order; the last one checks that it works.'] },
@@ -535,7 +536,7 @@ export const topics = {
     parts: [
       { name: 'The numbers', text: 'Services up, people and admins, total spend, who is at or past their credit, app replicas, the code index and the certificate.' },
       { name: 'Services', text: 'Each service as probed from inside the stack, with why it is down.' },
-      { name: 'Code index', text: 'Whether Argus\'s index is current; when it is not, which repositories and why.' },
+      { name: 'Code index', text: `Whether ${codeIntelName}'s index is current; when it is not, which repositories and why.` },
       { name: 'Certificate', text: 'Days until the site\'s certificate expires and who issued it, and what to do near the end.' },
     ],
     tasks: [{ title: 'Find out why the chat does not answer', steps: ['Look at **Services**: a service down says why.', 'For the model, open Models to see whether it is loaded.', 'For more, open Logs and choose its container.'] }],
@@ -553,7 +554,7 @@ export const topics = {
       { name: 'Export CSV', text: 'Everyone, with this month\'s spend and credit of each kind, and their API access.' },
     ],
     tasks: [
-      { title: 'Add a person', steps: ['Press **Add person**.', 'Use their GitLab username, so Argus knows what they may read; add their email and name.', 'Press **Add person**, and give them the password and API key now: they are shown only once.'] },
+      { title: 'Add a person', steps: ['Press **Add person**.', `Use their GitLab username, so ${codeIntelName} knows what they may read; add their email and name.`, 'Press **Add person**, and give them the password and API key now: they are shown only once.'] },
       { title: 'Move local accounts to the directory', steps: ['Press **Show → Local accounts** and tick the people.', 'Press **Move to the directory**: each shows the directory entry they will sign in as and what changes, or why they stay.', 'Press **Move**: they sign in with their directory password from now on, and keep their chats, keys, spend and email.'] },
       { title: 'Raise someone\'s credit', steps: ['Tick them in the table.', 'Press **Set credit**, choose the kind, and type the new amount (empty: no limit).', 'It holds at once; their other credits stay as they were.'] },
     ],
@@ -738,16 +739,16 @@ export const topics = {
 
   code: {
     title: 'Code Studio',
-    about: 'Three parts, each shown to those who may use it: Workspaces (an IDE in the browser on your projects), Review (a change, a whole repository or several, by the model) and Ask and explore (questions and Argus\'s tools across repositories). Reviews read the code with your own access, through Argus, and write nothing to the code host.',
+    about: `Three parts, each shown to those who may use it: Workspaces (an IDE in the browser on your projects), Review (a change, a whole repository or several, by the model) and Ask and explore (questions and ${codeIntelName}'s tools across repositories). Reviews read the code with your own access, through ${codeIntelName}, and write nothing to the code host.`,
     parts: [
       { name: 'Workspaces', text: 'A GitLab project and branch the server keeps for you, with Code Arena\'s IDE: **Open** starts it, unused for 30 minutes it sleeps (its files stay), **Delete** takes it away. It clones and pushes with your GitLab token.' },
       { name: 'Review: a merge request', text: 'A project by its path (group/project): its open, merged or all merge requests; **Review** starts a review. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
       { name: 'Review: a branch', text: 'What a branch has over the one it goes into, without a merge request.' },
       { name: 'Review: a whole repository', text: 'Its product\'s code at a branch, tag or commit, read file by file (tests, vendored and generated code left out; the entry points and largest files first, at most 30), each finding checked by a second reviewer, then a summary of its health area by area.' },
-      { name: 'Review: several repositories', text: '2 to 10, each reviewed whole, then looked at across: how they depend on each other (Argus\'s links), problems at their boundaries, what they do alike or differently, what to fix first.' },
+      { name: 'Review: several repositories', text: `2 to 10, each reviewed whole, then looked at across: how they depend on each other (${codeIntelName}'s links), problems at their boundaries, what they do alike or differently, what to fix first.` },
       { name: 'Automatic reviews', text: 'A project whose merge requests are reviewed as they open and get new commits (GitLab\'s webhook, and a look every few minutes), and a branch reviewed on a schedule. Read with your access, at your cost; each review can go to a room.' },
       { name: 'Reviews', text: 'Yours, those of rooms you are in and those shared with you, with their verdict and what is still open: **All**, **Changes**, **Repositories** or **Automatic**, and found by a word.' },
-      { name: 'Ask and explore', text: '**Ask about code** in a chat with Argus; **What a change reaches**, **How two repositories are linked**, **Where a change belongs** and **The estate\'s map**, each asked in a chat with Argus\'s graph of the repositories; and the **Business map**.' },
+      { name: 'Ask and explore', text: `**Ask about code** in a chat with ${codeIntelName}; **What a change reaches**, **How two repositories are linked**, **Where a change belongs** and **The estate's map**, each asked in a chat with ${codeIntelName}'s graph of the repositories; and the **Business map**.` },
       { name: 'Security review, Fix it', text: 'The buttons at the top: Security review is its own section; Fix it lists the agent\'s fixes.' },
     ],
     tasks: [
@@ -763,7 +764,7 @@ export const topics = {
     about: 'Several repositories, each reviewed whole, then looked at across them.',
     parts: [
       { name: 'The repositories', text: 'Each one\'s state, verdict and what is open; each opens to its own review.' },
-      { name: 'Across the repositories', text: 'The model\'s look: how they fit together, problems between them, what they do alike and differently, and what to fix first; and how they depend on each other, as Argus resolved it.' },
+      { name: 'Across the repositories', text: `The model's look: how they fit together, problems between them, what they do alike and differently, and what to fix first; and how they depend on each other, as ${codeIntelName} resolved it.` },
       { name: 'Every finding', text: 'All of them together, the worst first, filtered by repository and severity.' },
     ],
     tasks: [{ title: 'Settle a convention across repositories', steps: ['Read **Alike and different** under **Across the repositories**.', 'Open each repository\'s review for the files it names.'] }],
@@ -776,10 +777,10 @@ export const topics = {
     parts: [
       { name: 'Sources', text: 'The files and lines, documents, issues, merge requests and wiki pages each item was read from; each opens in GitLab.' },
       { name: 'Find in the map', text: 'Narrows every part to the items that hold your words.' },
-      { name: 'Ask Argus', text: 'A chat with Argus about this system: it explains the business from the map, then shows it in the code.' },
+      { name: `Ask ${codeIntelName}`, text: `A chat with ${codeIntelName} about this system: it explains the business from the map, then shows it in the code.` },
       { name: 'Map again', text: 'Reads the project again, with your access and at your cost: after the code, the issues or the wiki changed.' },
     ],
-    tasks: [{ title: 'Map a system', steps: ['In **Code Studio → Business map**, type the project (group/project) and press **Map it**.', 'The map fills in as the model reads the code, the documents, the issues and the wiki.', 'Ask Argus about the business in any chat with Argus on.'] }],
+    tasks: [{ title: 'Map a system', steps: ['In **Code Studio → Business map**, type the project (group/project) and press **Map it**.', 'The map fills in as the model reads the code, the documents, the issues and the wiki.', `Ask ${codeIntelName} about the business in any chat with ${codeIntelName} on.`] }],
     manual: { doc: 'chat', section: 'the-business-map' },
   },
 
@@ -787,7 +788,7 @@ export const topics = {
     title: 'A workspace',
     about: 'Code Arena\'s IDE on one of your workspaces, the whole window: its editor, terminals, search, Git, language servers, debugger and agent, all on the server.',
     parts: [
-      { name: 'Its engine', text: 'Runs as a user of its own with limits, no Docker socket, and reaches the app, the gateway, Argus (with your key) and the internet only. Its agent has a key of its own at the gateway, against your credit.' },
+      { name: 'Its engine', text: `Runs as a user of its own with limits, no Docker socket, and reaches the app, the gateway, ${codeIntelName} (with your key) and the internet only. Its agent has a key of its own at the gateway, against your credit.` },
       { name: 'Asleep', text: 'Unused for 30 minutes, it stops; its files stay. Opening it again wakes it.' },
     ],
     tasks: [{ title: 'Work on a project in the browser', steps: ['Under **Code Studio → New workspace**, name the project (and a branch) and press **Open it**.', 'The IDE fills the window once the workspace is up; **Open** on its card brings it back later.', 'Edit, run and commit as in Code Arena; its agent works on the same files.'] }],
@@ -940,7 +941,7 @@ export const topics = {
     about: 'What takes room and where, how long it stays, and ways to free it: the chat\'s files to browse and delete, clean-ups, and each person\'s room. Nothing of a person on legal hold is ever deleted here.',
     admin: true,
     parts: [
-      { name: 'Where the room goes', text: 'The disks (the host\'s, and the folders the app mounts), how full each is and how fast it fills; then what takes room: each database and its largest tables, the chat\'s files, the model library, Argus, backups, logs and metrics, with their growth over 30 days. **How long things stay** lists the rules in force, and **What the app cannot see** what to look at on the host.' },
+      { name: 'Where the room goes', text: `The disks (the host's, and the folders the app mounts), how full each is and how fast it fills; then what takes room: each database and its largest tables, the chat's files, the model library, ${codeIntelName}, backups, logs and metrics, with their growth over 30 days. **How long things stay** lists the rules in force, and **What the app cannot see** what to look at on the host.` },
       { name: 'Files', text: 'The chat\'s files and what the tools made: whose, which chat, from where, how big and when. Filter by person, kind, where from, whether a chat still has it, size and age. Each downloads (audited); ticked ones are deleted after you confirm.' },
       { name: 'Clean-ups', text: 'Files in no chat, old pictures, videos and speech, files of deleted chats, leftovers on disk, old backups, and models nothing uses. **Preview** says what would go and the room it frees; **Clean up** asks first, and each run is audited. Old backups are only shown, with the command that removes them on the host: the app sees the backups read only.' },
       { name: 'People', text: 'Each person\'s files against their room. **Room** gives someone their own (0: no limit), or the company\'s again. **Give someone a room** finds anyone by name, before they have files.' },
@@ -1023,10 +1024,10 @@ export const topics = {
       'sign-in-and-sessions': { name: 'Sign-in and sessions', text: 'How long sessions last and how often they are checked, how many wrong passwords lock an account or an address, and for how long, the sign-ins a minute from one address, how long the tokens of apps that sign in with Arena last, and the admin group those apps see.' },
       'company-directory-ldap': { name: 'Company directory (LDAP)', text: 'Sign-in with the company directory (LDAP or Active Directory): the server, a read-only service account, where people and groups are, and the admin and required groups. A guide opens the group, with OpenLDAP and Active Directory examples. **Test the settings** checks the values in the form before you save them, step by step, and says exactly what is wrong; **Try a person\'s sign-in** checks someone\'s username and password as signing in would. Neither saves anything.' },
       'company-sign-in': { name: 'Company sign-in', text: 'Sign-in at the company\'s identity provider, by OIDC or SAML: the provider, its admin and required groups, and the button\'s label. Below the settings: what to register at the provider, a test, and SCIM.' },
-      'network-access': { name: 'Network access', text: 'Which addresses may reach Argus Arena at all, checked before every request to every page, the gateway and Argus: an allow list (empty: every address) and a block list, refused whatever the allow list says. One address or range a line (10.0.0.0/8, 2001:db8::/32, 192.168.1.20), # starts a comment. A list that would refuse your own address is not saved. IP_ALLOW in .env is a list of the same kind kept by Traefik itself, below this one.' },
+      'network-access': { name: 'Network access', text: `Which addresses may reach ${productName} at all, checked before every request to every page, the gateway and ${codeIntelName}: an allow list (empty: every address) and a block list, refused whatever the allow list says. One address or range a line (10.0.0.0/8, 2001:db8::/32, 192.168.1.20), # starts a comment. A list that would refuse your own address is not saved. IP_ALLOW in .env is a list of the same kind kept by Traefik itself, below this one.` },
       chat: { name: 'Chat', text: 'The chat\'s limits: tool calls, attachments, when a chat compacts, answers at once and the wait in line, sub-agents, the longest answer and tool call, memory and the leaderboard.' },
       model: { name: 'Model', text: 'The model new chats use, the model for sub-agents and small steps, the thinking levels, how many models the engine holds at once, the time zone of working hours, the engine\'s threads and the memory kept for the rest, how long the gateway and a vLLM model are waited for, and the Hugging Face address (a mirror inside the company).' },
-      'argus-gitlab': { name: 'Argus (GitLab)', text: 'When Argus reindexes by itself and in which time zone, and the GitLab address people\'s browsers open from Argus\'s answers.' },
+      'code-intelligence-gitlab': { name: `${codeIntelName} (GitLab)`, text: `When ${codeIntelName} reindexes by itself and in which time zone, and the GitLab address people's browsers open from ${codeIntelName}'s answers.` },
       'python-and-web': { name: 'Python and web', text: 'The sites the chat\'s Web tool may open, the search engine, the longest Python run, how much of Python\'s output and of a web page comes back, and the chat\'s browsers: how many and when an idle one closes.' },
       plugins: { name: 'Plugins', text: 'Where the plugin catalog comes from, and the key its index is signed with.' },
       'arena-mcp': { name: 'Arena MCP', text: 'Whether each person\'s chat tools are served to their own agent at /mcp.' },
@@ -1061,7 +1062,7 @@ export const topics = {
     about: 'Every sign-in and every change to people, settings, tools and the code index: who, to whom, from where.',
     admin: true,
     parts: [
-      { name: 'Show', text: 'All events, or only failed ones, sign-ins, people, settings or Argus.' },
+      { name: 'Show', text: `All events, or only failed ones, sign-ins, people, settings or ${codeIntelName}.` },
       { name: 'The events', text: 'When, who, what and from which address. **Load older events** goes further back.' },
       { name: 'Export CSV', text: 'The events shown, as a file.' },
     ],
@@ -1213,38 +1214,38 @@ export const topics = {
 
   indexing: {
     title: 'Indexing',
-    about: 'Argus\'s index of your GitLab: what it holds, how current it is, and runs on demand.',
+    about: `${codeIntelName}'s index of your GitLab: what it holds, how current it is, and runs on demand.`,
     admin: true,
     parts: [
       { name: 'The numbers', text: 'Repositories (each once, however many of its branches are indexed, with the branches beside it), failing ones, files and symbols.' },
       { name: 'Index now', text: 'Starts a run: its progress, overall and per repository, and its log. Extra branches can be indexed for this run only.' },
       { name: 'Repositories', text: 'What GitLab lists, and which are indexed: each at its default branch and the branches you add, one short row each (its default branch at its commit, and how many more). Its name or **Details** opens the rest: what it is for, its languages, branches, schedule and each indexed branch. **Update** brings one up to date now; **Refresh from GitLab** lists new ones.' },
-      { name: 'Schedule', text: 'When Argus reindexes by itself, in words or cron, in a time zone.' },
-      { name: 'Push and merge webhook', text: 'GitLab tells Argus when a branch changes, so it updates at once. The secret is shown once; the steps for GitLab are on the card.' },
+      { name: 'Schedule', text: `When ${codeIntelName} reindexes by itself, in words or cron, in a time zone.` },
+      { name: 'Push and merge webhook', text: `GitLab tells ${codeIntelName} when a branch changes, so it updates at once. The secret is shown once; the steps for GitLab are on the card.` },
     ],
     tasks: [
       { title: 'Index another branch of a repository', steps: ['Open **Branches** on the repository.', 'Tick the branch, or add a pattern such as release/*.', 'Save, then press **Update**.'] },
       { title: 'Update the index on every push', steps: ['Turn on the webhook and copy its address and secret.', 'In GitLab: the group or project → Settings → Webhooks, with Push and Merge request events.', 'Test it there: the delivery shows under **Last deliveries**.'] },
     ],
-    manual: { doc: 'argus', section: 'choosing-what-is-indexed' },
+    manual: { doc: 'code-intel', section: 'choosing-what-is-indexed' },
   },
 
   packs: {
     title: 'Knowledge packs',
-    about: 'Prebuilt indexes of documentation (SDKs, standards) that Argus searches next to your code. A pack added here is searched from the next question.',
+    about: `Prebuilt indexes of documentation (SDKs, standards) that ${codeIntelName} searches next to your code. A pack added here is searched from the next question.`,
     admin: true,
     parts: [
       { name: 'The packs', text: 'Each pack, whether it is searched, its version and licence. **Update** gets a newer one; **Update all** does every pack.' },
-      { name: 'Add a pack', text: '**From the library** (built packs on the host) or **From a URL** with its SHA-256. Only a pack built with Argus\'s embedding model can be searched.' },
+      { name: 'Add a pack', text: `**From the library** (built packs on the host) or **From a URL** with its SHA-256. Only a pack built with ${codeIntelName}'s embedding model can be searched.` },
       { name: 'Last pack operation', text: 'What the last install or update did, with its log.' },
     ],
     tasks: [{ title: 'Add a pack', steps: ['Press **Add a pack**.', 'Choose one from the library (or give its URL and SHA-256).', 'Press **Install**: the chat\'s next question can use it.'] }],
-    manual: { doc: 'argus/knowledge-packs', section: 'using-packs' },
+    manual: { doc: 'code-intel/knowledge-packs', section: 'using-packs' },
   },
 
   explore: {
     title: 'Explore',
-    about: 'Search what Argus holds: symbols and paths, where a name is used, words in the code, and the documentation packs.',
+    about: `Search what ${codeIntelName} holds: symbols and paths, where a name is used, words in the code, and the documentation packs.`,
     admin: true,
     parts: [
       { name: 'Symbols and paths', text: 'Symbols and files whose names contain your words, in one repository or all.' },
@@ -1281,7 +1282,7 @@ export const topics = {
       { name: 'LLM Overview and Stack Performance', text: 'Requests, tokens, cost and latency at the gateway; how fast the model answers, its queues and its cache.' },
       { name: 'Resources, GPU Hardware, Host & Containers', text: 'CPU, memory, GPU, disk and network, of the machine and of each container.' },
       { name: 'Stack Health & Alerts and Logs', text: 'Which services answer, the alerts firing now, and every service\'s logs.' },
-      { name: 'Argus and its index', text: 'Who asked Argus what, and its index runs.' },
+      { name: `${codeIntelName} and its index`, text: `Who asked ${codeIntelName} what, and its index runs.` },
     ],
     tasks: [],
     manual: { doc: 'admin', section: 'dashboards' },
@@ -1307,8 +1308,8 @@ export const topics = {
       'gpu-hardware': { name: 'GPU Hardware', text: 'The GPU: utilisation, memory, temperature, power and clocks.' },
       'host-containers': { name: 'Host & Containers', text: 'The host and each container: CPU, memory, disk and network.' },
       'stack-logs': { name: 'Logs (Loki)', text: 'Every service\'s logs, by container, searchable, and their volume.' },
-      argus: { name: 'Argus: who asked what', text: 'Who asked Argus what: tool calls, people, refusals and timings.' },
-      'stack-indexing': { name: 'Indexing: Argus code index', text: 'Argus\'s index runs: repositories, files, symbols and failures.' },
+      'code-intel': { name: `${codeIntelName}: who asked what`, text: `Who asked ${codeIntelName} what: tool calls, people, refusals and timings.` },
+      'stack-indexing': { name: `Indexing: ${codeIntelName} code index`, text: `${codeIntelName}'s index runs: repositories, files, symbols and failures.` },
       'usage-by-user': { name: 'Usage by person', text: 'Each person\'s tokens and cost. The Usage & cost page shows it too.' },
       'llm-users': { name: 'LLM and users', text: 'Requests, tokens, latency and time to first token; the line (running, waiting, the average wait, refusals); the engine\'s speed; and who uses what. With usage.read.' },
       system: { name: 'System', text: 'The services: which answer, their alerts, errors, restarts, the database and the logs\' volume. With monitoring.read.' },

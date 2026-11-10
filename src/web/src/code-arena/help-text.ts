@@ -1,5 +1,6 @@
 import type { HelpPart, HelpTask } from '@/help/topics'
 import { modKey } from './editor-state'
+import { codeIntelName } from '@/lib/brand'
 
 /**
  * Code Arena's help: what the workbench is for, what each part does, and the common tasks
@@ -247,7 +248,7 @@ export const tasks: HelpTask[] = [
     ],
   },
   {
-    title: "Use Arena's and Argus's tools",
+    title: `Use Arena's and ${codeIntelName}'s tools`,
     steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
   },
   {

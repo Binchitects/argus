@@ -44,7 +44,7 @@ const config: ChatConfig = {
   ],
   auto: null,
   presets: [{ level: 'off', label: 'Off' }, { level: 'high', label: 'High' }],
-  defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
+  defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
 }
 
 const msg = (id: string, role: Message['role'], over: Partial<Message> = {}): Message => ({ ...blank(id, role, id === 'm0' ? null : `m${Number(id.slice(1)) - 1}`), ...over })
@@ -1143,7 +1143,7 @@ describe('Code Arena in the browser', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Help' }))
     const sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
     expect(within(sheet).queryByRole('link')).not.toBeInTheDocument()
-    expect(within(sheet).getByText(/in your Argus Arena's manual: Manual, then Code Arena/)).toBeInTheDocument()
+    expect(within(sheet).getByText(/in your Farzan Arena's manual: Manual, then Code Arena/)).toBeInTheDocument()
   })
 
   it("quotes part of an answer as the web chat does: the toolbar, the command (listed only with a selection) and Ctrl+Shift+'", async () => {

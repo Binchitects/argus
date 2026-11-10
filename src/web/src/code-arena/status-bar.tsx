@@ -22,6 +22,7 @@ import { useSettings } from './settings'
 import { countProblems, useProblems } from './problems-store'
 import { useKeyFor, useKeymap } from './keyboard'
 import { LanguageStatus } from './language-status'
+import { codeIntelName, productName } from '@/lib/brand'
 
 function Item({ className, ...props }: ComponentProps<'button'>) {
   return (
@@ -36,7 +37,7 @@ function Item({ className, ...props }: ComponentProps<'button'>) {
 /** The share of the window in use, in whole percent. */
 const share = (state: CodeState) => (state.context > 0 ? Math.round((100 * state.contextUsed) / state.context) : 0)
 
-/** "Arena connected, Argus connecting". */
+/** "Arena connected, code-intel connecting". */
 const serversSaid = (servers: ServerStatus[]) => servers.map((s) => `${s.title} ${s.state === 'failed' ? 'not connected' : s.state === 'unavailable' ? 'not available' : s.state}`).join(', ')
 
 /**
@@ -181,7 +182,7 @@ export function StatusBar({
         )
       )}
       {state.servers.length > 0 && (
-        <Item onClick={() => setDialog('servers')} aria-label={`MCP servers: ${serversSaid(state.servers)}`} title="The MCP servers: Arena's, Argus's and your own" className={cn(down && 'bg-warning text-black')}>
+        <Item onClick={() => setDialog('servers')} aria-label={`MCP servers: ${serversSaid(state.servers)}`} title={`The MCP servers: Arena's, ${codeIntelName}'s and your own`} className={cn(down && 'bg-warning text-black')}>
           {down ? <Unplug aria-hidden="true" /> : <Plug aria-hidden="true" />}
           <span className="hidden tabular-nums md:inline">
             {connected}/{state.servers.length}
@@ -364,7 +365,7 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
   )
 }
 
-/** The session's MCP servers: connected or not and why, when they are tried again, and Try again. Turned off in config.json (arenaTools, argusTools). */
+/** The session's MCP servers: connected or not and why, when they are tried again, and Try again. Turned off in config.json (arenaTools, codeIntelTools). */
 function Servers({ open, onOpenChange, state }: { open: boolean; onOpenChange: (open: boolean) => void; state: CodeState }) {
   const queryClient = useQueryClient()
   const retry = async (name?: string) => {
@@ -403,7 +404,7 @@ function Servers({ open, onOpenChange, state }: { open: boolean; onOpenChange: (
           ))}
         </ul>
         <p className="text-xs text-muted-foreground">
-          Arena&apos;s and Argus&apos;s tools are on by default; turn them off with <code>&quot;arenaTools&quot;: false</code> or <code>&quot;argusTools&quot;: false</code> in code-arena&apos;s config.json.
+          Arena&apos;s and {codeIntelName}&apos;s tools are on by default; turn them off with <code>&quot;arenaTools&quot;: false</code> or <code>&quot;codeIntelTools&quot;: false</code> in code-arena&apos;s config.json.
         </p>
       </DialogContent>
     </Dialog>
@@ -418,7 +419,7 @@ export function About({ open, onOpenChange, state }: { open: boolean; onOpenChan
         <DialogHeader className="items-center text-center">
           <img src="/favicon.svg" alt="" className="mb-1 size-12 rounded-xl" />
           <DialogTitle>{state.name}</DialogTitle>
-          <DialogDescription>Argus Arena&apos;s coding agent, with its editor, terminals and chat in the browser.</DialogDescription>
+          <DialogDescription>{productName}&apos;s coding agent, with its editor, terminals and chat in the browser.</DialogDescription>
         </DialogHeader>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-muted-foreground">Version</dt>

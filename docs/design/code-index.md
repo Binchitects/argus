@@ -8,7 +8,7 @@ This is a design only. Nothing in /home/ghadyani/llm-service was changed, built 
 **Summary**
 - **What it is:** a local index of the working tree, written in C# with only the base class library.
 - **Where it lives:** in Code Arena's data folder, never in the repository.
-- **How code is read:** one scanner per language family, built on Argus's `CodeText.Blank`, which is linked in as a source file.
+- **How code is read:** one scanner per language family, built on Farzan Graph's `CodeText.Blank`, which is linked in as a source file.
 - **What the agent gets:** three read-only tools (`code_search`, `code_symbol`, `code_outline`), plus a `code` parameter on the existing `remember` tool.
 - **Downloads:** none on the default path.
 - **When it turns on:** it ships off (`codeIndex: false`). It becomes the default only after a benchmark against today's Code Arena (grep, glob, read_file, run_shell) passes the gate in section 6. Graphicle's own published result is the bar to beat: 16% *more* tokens than plain Claude Code, with its tools never called.
@@ -47,7 +47,7 @@ The criticism we must answer is that memory systems "did worse than the raw harn
 - **No always-on repo map in the system prompt.** That would break the stable prefix Code Arena keeps for the prompt cache (`ToolBox.InPlace`, Tools.cs:381-392). `code_outline` is the map, on demand.
 - **No guard hooks.** It never steers the agent away from grep or read. tokenix's A/B test found that outlines hid usages during renames.
 - **No type-checked call graph claims.** Every call edge carries an evidence level; anything left unresolved is counted and reported.
-- **No cross-repository graph.** That remains Argus's job, over GitLab-indexed code.
+- **No cross-repository graph.** That remains Farzan Graph's job, over GitLab-indexed code.
 - **No edits by symbol** (Serena-style). Edits stay `edit_file` with exact text.
 - **No index inside the repository.** So there is no `.gitignore` to write, and the index never shows up in `git ls-files --others`, and so never in glob or grep.
 - **No secrets indexed.** See section 3.
@@ -64,15 +64,15 @@ The criticism we must answer is that memory systems "did worse than the raw harn
 | Option | What it costs | What it gives |
 |---|---|---|
 | **tree-sitter via TreeSitter.DotNet 1.3.0** (nuget.org, MIT, 2026-01-22, netstandard2.0, no dependencies) | **A download that needs the person's yes:** the nupkg is **53,401,399 bytes**. It holds 25–30 grammars per platform (63.6–71.6 MB of native code per RID). The grammars we would keep, per RID on linux-x64: core 242,656 B; c-sharp 5,110,072; typescript 1,443,832; tsx 1,476,584; javascript 440,000; python 489,352; go 237,928; java 437,768; rust 1,145,296. That is ≈ **11.0 MB per RID** for all eight, or ≈ 9.2 MB for the first wave, across 5 RIDs. Other RIDs: c-sharp is 5,119,208 on linux-arm64, 5,206,528 on win-x64 and 5,090,336 / 5,171,504 on osx-x64 / arm64. The package would also have to go into `tools/offline-nuget` and `tools/fetch-code-arena-packs.sh`, because `--offline` restores only from there (publish-code-arena.sh:41-69). Its native libraries are extracted at run time (`IncludeNativeLibrariesForSelfExtract`, CodeArena.csproj:41), and we would pin the grammar ABI. | Exact syntax trees. But still no binding resolution: calls, imports and ranking are ours to write either way. |
-| **SQLite** (a storage option, listed here because it is the other native dependency) | Microsoft.Data.Sqlite.Core 10.0.12 plus SQLitePCLRaw.bundle_e_sqlite3 / config / provider / core 3.0.5 plus the SQLite 3.53.4 natives (nupkg 27.5 MB; per RID 1.47 MB linux-x64, 1.53 MB linux-arm64, 1.97 MB win-x64, 1.72 / 1.70 MB osx). These are already in the local NuGet cache because Argus uses them, so nothing new would be fetched from the internet. They would still go into offline-nuget and end the "base class library only" rule (CodeArena.csproj:3-4). | FTS5's BM25. But its tokenizer does not split camelCase, so we would tokenize before inserting anyway. |
-| **C# scanners, one per language family** | No packages. It does need the comment and string blanker, which Argus already has: `src/Argus/Util/CodeText.cs` uses only `System.Text`, and it handles C# verbatim, interpolated and raw strings, Java text blocks, Go raw strings, TS/JS template holes and Python triple quotes (CodeText.cs:30-31, 214-291). Its tests stay in `tests/Argus.Tests/CodeTextTests.cs`. | Declarations, ranges, imports and call tokens accurate enough for ranking and grouping, which is what the tools need. Weak spots are listed below. |
-| ctags (what Argus uses, Ctags.cs:96) | An outside program. It is not on this machine (`ctags: command not found`) and not shipped on Windows or macOS. | Used only as an independent check in tests and the benchmark, where CI installs it (ci.yml:34 does so for the argus job). |
+| **SQLite** (a storage option, listed here because it is the other native dependency) | Microsoft.Data.Sqlite.Core 10.0.12 plus SQLitePCLRaw.bundle_e_sqlite3 / config / provider / core 3.0.5 plus the SQLite 3.53.4 natives (nupkg 27.5 MB; per RID 1.47 MB linux-x64, 1.53 MB linux-arm64, 1.97 MB win-x64, 1.72 / 1.70 MB osx). These are already in the local NuGet cache because Farzan Graph uses them, so nothing new would be fetched from the internet. They would still go into offline-nuget and end the "base class library only" rule (CodeArena.csproj:3-4). | FTS5's BM25. But its tokenizer does not split camelCase, so we would tokenize before inserting anyway. |
+| **C# scanners, one per language family** | No packages. It does need the comment and string blanker, which Farzan Graph already has: `src/CodeIntel/Util/CodeText.cs` uses only `System.Text`, and it handles C# verbatim, interpolated and raw strings, Java text blocks, Go raw strings, TS/JS template holes and Python triple quotes (CodeText.cs:30-31, 214-291). Its tests stay in `tests/CodeIntel.Tests/CodeTextTests.cs`. | Declarations, ranges, imports and call tokens accurate enough for ranking and grouping, which is what the tools need. Weak spots are listed below. |
+| ctags (what Farzan Graph uses, Ctags.cs:96) | An outside program. It is not on this machine (`ctags: command not found`) and not shipped on Windows or macOS. | Used only as an independent check in tests and the benchmark, where CI installs it (ci.yml:34 does so for the code-intel job). |
 | Language servers (LanguageServers.cs, 13 servers) | Each must be installed; they run only in a trusted folder and only while the IDE page holds the socket (WebLsp.cs). | Exact references. A possible later "precise" arm, measured. Not version 1. |
 
 ### Recommendation: write the scanners in C#
 1. **It keeps the one-file, base-class-library build intact.** That means no offline-nuget change, no Dockerfile package step, no native code extracted for 5 RIDs, and no 53 MB download.
 2. **Tree-sitter only solves the easy half.** The hard part, resolving names to definitions, is the same code either way. The ranking needs symbol ranges and identifiers, not full trees.
-3. **The comment and string blanker already exists, and it is tested.** Link it the way `HistoryWords.cs` is linked (CodeArena.csproj:22-25). Only `CodeText.cs` is linked; Argus's `Parsers.cs` and `Links.cs` need Sqlite-touching splits and solve a cross-repository problem, so they are not taken.
+3. **The comment and string blanker already exists, and it is tested.** Link it the way `HistoryWords.cs` is linked (CodeArena.csproj:22-25). Only `CodeText.cs` is linked; Farzan Graph's `Parsers.cs` and `Links.cs` need Sqlite-touching splits and solve a cross-repository problem, so they are not taken.
 4. **It is measured, and tree-sitter is the fallback.** Each scanner sits behind an `ICodeScanner` interface. Tests compare its definitions with universal-ctags in CI. If any language's definition recall stays under 97%, or the benchmark traces misses to parsing, commit 23 swaps in tree-sitter for that language, with the person's yes.
 
 ### How a scanner works
@@ -109,7 +109,7 @@ The criticism we must answer is that memory systems "did worse than the raw harn
 - Python's dynamic dispatch is not resolved.
 
 ### Languages first
-- **First wave:** C# (1,198 files here), TypeScript, TSX and JavaScript (688), and Python (100). These make up this repository, and they lead Argus's language table (Parsers.cs:10-34).
+- **First wave:** C# (1,198 files here), TypeScript, TSX and JavaScript (688), and Python (100). These make up this repository, and they lead Farzan Graph's language table (Parsers.cs:10-34).
 - **Second wave:** Go, Java and Kotlin (close to C#), then Rust.
 - **Everything else** is searchable as text from the first commit, without symbols.
 
@@ -266,7 +266,7 @@ Inside code files, string literals of those token shapes are masked in excerpts 
 
 ### Limits
 - 100,000 files and 1 GiB of source per root. Past that, the index stops and says so.
-- Text indexing for files up to 2 MB, the IDE search's limit (Ide.cs:39-46). Symbols for files up to 1 MB, Argus's limit (ArgusConfig.cs:61-67). grep keeps its own 5,000,000-byte limit.
+- Text indexing for files up to 2 MB, the IDE search's limit (Ide.cs:39-46). Symbols for files up to 1 MB, Farzan Graph's limit (CodeIntelConfig.cs:61-67). grep keeps its own 5,000,000-byte limit.
 - At most 20,000 symbols per file and 2,000,000 per root.
 - Binary files are skipped (`Files.LooksBinary`, Workspace.cs:351).
 - Minified files are text only.
@@ -389,7 +389,7 @@ An ambiguous name returns its candidates as `path#Qualified`, so the next call c
 - **Sub-agents** get their own `Shown` set.
 - **Code mode.** A program gets results whole and prints only what it needs. Loops such as "callers of these six symbols" are where that pays off.
 - **The IDE.** It runs the same Runtime, so the tools are already there. Tool cards get chips for the top 3 citations (answer.tsx `placeOf` learns to read `[n] path:a-b`).
-- **Plans.** `GroundAsync` (Runtime.cs:1443-1497) skips `local/` projects today. It would also ground plan steps from the local index's callers and tests, while Argus keeps adding dependents in other repositories.
+- **Plans.** `GroundAsync` (Runtime.cs:1443-1497) skips `local/` projects today. It would also ground plan steps from the local index's callers and tests, while Farzan Graph keeps adding dependents in other repositories.
 
 ### CLI and IDE
 - **`code-arena index`:** build or refresh this folder's index, then print its status (files, symbols, edges, languages, skipped files with reasons, build time, memory used). With `--rebuild`, rebuild from scratch.
@@ -532,8 +532,8 @@ Each commit is small, tested and shippable on its own, and pushed before the nex
 2. **Benchmark skeleton and the grep-only baseline.** `evals/run_code_index.py` builds the tasks from git and the compiler, and runs the grep arm. `docs/measurements/code-index.md` gets the baseline.
    - *Check:* `--check` regenerates the tasks with the same seed and they come out identical. Answer keys are built before any model runs.
    - *Needs a yes:* none for llm-service; flask and zod clones (12.2 MB / 27.3 MB as GitHub reports) and the person's own repositories each need one.
-3. **Link Argus's `Util/CodeText.cs`** into CodeArena.csproj, and add it to the Dockerfile's COPY (Dockerfile:68-69 copies the linked files).
-   - *CodeIndexScanTests:* blanked C# raw strings and TS templates keep their line count, and braces inside them are not counted. The blanker's own tests stay in Argus.Tests.
+3. **Link Farzan Graph's `Util/CodeText.cs`** into CodeArena.csproj, and add it to the Dockerfile's COPY (Dockerfile:68-69 copies the linked files).
+   - *CodeIndexScanTests:* blanked C# raw strings and TS templates keep their line count, and braces inside them are not counted. The blanker's own tests stay in CodeIntel.Tests.
 4. **The file set** (`CodeFiles.cs`): `FilesUnder` plus the sensitive filter and the size, binary, generated, test and vendored tags.
    - *Tests:*
      - `.env`, `id_rsa`, `secrets/x.yaml` and a file holding a PEM private key are not content-indexed; `.env.example` is;
@@ -593,7 +593,7 @@ Each commit is small, tested and shippable on its own, and pushed before the nex
 16. **IDE: Go to Symbol in Workspace,** the status bar item, and citation chips on code_* tool cards.
     - *WebTests:* `/api/symbols?q=` ranks prefix and camel-hump matches.
     - *vitest:* quick-pick ordering, and `placeOf` reading `[n] path:a-b`.
-17. **Local plan grounding** in `GroundAsync` for `local/` projects (callers and tests), with Argus kept for other repositories. *PlanProveTests / PlanReviewTests:* a local plan step with symbols gets an `Impact` from the index.
+17. **Local plan grounding** in `GroundAsync` for `local/` projects (callers and tests), with Farzan Graph kept for other repositories. *PlanProveTests / PlanReviewTests:* a local plan step with symbols gets an `Impact` from the index.
 18. **Arena: `Memory.Anchors`.** The migration with `defaultValueSql '{}'`, an upgrade test showing existing rows survive, anchors and proposed on POST, anchors returned by GET and recall, and `POST /{id}/keep`.
     - *Tests in tests/Llm.Tests:* round trip, a proposal not served before it is kept, the person's own only.
     - *Must land after* the gateway work now uncommitted in `AppDbContext.cs` has been committed, so the two do not mix.
@@ -621,4 +621,4 @@ Each commit is small, tested and shippable on its own, and pushed before the nex
 - Commit 2/14's extra corpora: two clones, or the person's own repositories.
 - Commit 15's flip to on by default, after they see the numbers.
 
-Nothing else downloads. Commits 5–7 and 22 run the ctags comparisons in CI only once the code-arena job installs `universal-ctags`, as the argus job already does (ci.yml:34). That installs a package on GitHub's runner, not on the person's machine.
+Nothing else downloads. Commits 5–7 and 22 run the ctags comparisons in CI only once the code-arena job installs `universal-ctags`, as the code-intel job already does (ci.yml:34). That installs a package on GitHub's runner, not on the person's machine.

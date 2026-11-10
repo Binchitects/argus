@@ -1,7 +1,7 @@
 # Operations
 
-Everything here runs from `deploy/argus-standalone/`. Each `make` target has a script in
-`deploy/argus-standalone/scripts/`, in Bash and in PowerShell.
+Everything here runs from `deploy/code-intel-standalone/`. Each `make` target has a script in
+`deploy/code-intel-standalone/scripts/`, in Bash and in PowerShell.
 
 ## Is it working?
 
@@ -64,15 +64,15 @@ shown beside it stays the period's.
 make backup
 ```
 
-writes `backups/argus-<time>/` (`BACKUP_DIR`), keeping the newest
+writes `backups/code-intel-<time>/` (`BACKUP_DIR`), keeping the newest
 `BACKUP_KEEP`:
 
 | file | holds |
 |---|---|
-| `argus/app.db` | people, sessions, code index keys, conversations |
-| `argus/index.db`, `argus/index-audit.db` | the code index and the audit log |
-| `argus/packs/` | installed knowledge packs |
-| `argus/config.yaml` | the index configuration |
+| `code-intel/app.db` | people, sessions, code index keys, conversations |
+| `code-intel/index.db`, `code-intel/index-audit.db` | the code index and the audit log |
+| `code-intel/packs/` | installed knowledge packs |
+| `code-intel/config.yaml` | the index configuration |
 | `litellm.dump` | the gateway: people, keys, budgets, spend |
 | `env` | `.env` — its `LITELLM_SALT_KEY` is needed to read `litellm.dump` |
 | `SHA256SUMS` | checksums of all of the above |
@@ -84,11 +84,11 @@ Each database is copied with SQLite's `VACUUM INTO` and checked with
 To restore onto a fresh host:
 
 ```bash
-cp backups/argus-<time>/env deploy/argus-standalone/.env
-cd deploy/argus-standalone && docker compose up -d postgres argus && docker compose stop argus
-docker exec -i postgres pg_restore -U llmservice -d litellm --clean --if-exists < ../backups/argus-<time>/litellm.dump
-docker compose cp ../backups/argus-<time>/argus/. argus:/var/lib/argus/
-docker compose run --rm --no-deps --user root --entrypoint chown argus -R 10001:10001 /var/lib/argus
+cp backups/code-intel-<time>/env deploy/code-intel-standalone/.env
+cd deploy/code-intel-standalone && docker compose up -d postgres code-intel && docker compose stop code-intel
+docker exec -i postgres pg_restore -U llmservice -d litellm --clean --if-exists < ../backups/code-intel-<time>/litellm.dump
+docker compose cp ../backups/code-intel-<time>/code-intel/. code-intel:/var/lib/code-intel/
+docker compose run --rm --no-deps --user root --entrypoint chown code-intel -R 10001:10001 /var/lib/code-intel
 docker compose up -d
 ```
 
@@ -114,9 +114,9 @@ Edit the MODEL block of `.env` (or copy another sample's), then
 
 ## HTTPS
 
-Put a certificate and key in `deploy/argus-standalone/config/argus/tls/`, set
-`ARGUS_TLS_CERT=/etc/argus/tls/cert.pem` and
-`ARGUS_TLS_KEY=/etc/argus/tls/key.pem`, and `docker compose up -d argus`. The
+Put a certificate and key in `deploy/code-intel-standalone/config/code-intel/tls/`, set
+`CODE_INTEL_TLS_CERT=/etc/code-intel/tls/cert.pem` and
+`CODE_INTEL_TLS_KEY=/etc/code-intel/tls/key.pem`, and `docker compose up -d code-intel`. The
 session cookie becomes `Secure`. The gateway port stays HTTP; put it behind the
 same certificate with your own proxy if it leaves the machine.
 
@@ -124,13 +124,13 @@ same certificate with your own proxy if it leaves the machine.
 
 | symptom | cause |
 |---|---|
-| the chat says *No model gateway is configured* | `ARGUS_GATEWAY_URL` unset — only outside the stack |
+| the chat says *No model gateway is configured* | `CODE_INTEL_GATEWAY_URL` unset — only outside the stack |
 | *The model gateway is unreachable* | `litellm` is down or still starting: `make logs S=litellm` |
 | *Budget has been exceeded* | that person's budget is spent: raise it on People |
 | code tools answer *No GitLab account matches …* | the person's email is not a GitLab account's public email: link their GitLab username on People |
 | code tools answer *Cannot verify your GitLab access* | GitLab is unreachable and no recent permission is cached |
-| an editor gets `421` on `/mcp` | connect by a name listed in `ARGUS_HOSTNAME` |
+| an editor gets `421` on `/mcp` | connect by a name listed in `CODE_INTEL_HOSTNAME` |
 | an editor gets `401` on `/mcp` | the key is wrong, revoked, or its account disabled |
 | *Too many failed sign-ins* | ten failures for that name in ten minutes; wait, or reset the password |
-| the Overview says the index is stale | the schedule is off (`ARGUS_INDEX_INTERVAL=0`) or GitLab is failing: Repositories, filter by *Out of date* or *Failed*, and read each one's **Log** |
+| the Overview says the index is stale | the schedule is off (`CODE_INTEL_INDEX_INTERVAL=0`) or GitLab is failing: Repositories, filter by *Out of date* or *Failed*, and read each one's **Log** |
 | every repository is listed twice | an index from v5.2.0 or before, brought up with another token on a GitLab set up anew: upgrading merges the copies, and a new token never makes them again |

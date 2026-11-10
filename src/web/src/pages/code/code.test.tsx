@@ -141,9 +141,9 @@ describe('code', () => {
     expect(within(screen.getByRole('list', { name: 'Every finding' })).getByRole('link')).toHaveAttribute('href', '/code/reviews/r1')
   })
 
-  it('explores across repositories with Argus’s tools, each asked in a chat', async () => {
+  it('explores across repositories with Farzan Graph’s tools, each asked in a chat', async () => {
     const calls = fakeApi(member, {
-      'GET /api/code/business': () => ({ json: { argus: true, systems: [] } }),
+      'GET /api/code/business': () => ({ json: { codeIntel: true, systems: [] } }),
       'POST /api/code/ask': () => ({ json: { id: 'c9', message: 'asked' } }),
       'GET /api/chat/conversations/c9': () => ({ json: { id: 'c9', title: 'Code', messages: [] } }),
     })

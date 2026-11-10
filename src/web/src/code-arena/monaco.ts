@@ -108,7 +108,7 @@ export function stepAside(language: string, kept: Kept | null) {
   }
 }
 
-// Argus Arena's colour themes, each light and dark.
+// the product's colour themes, each light and dark.
 for (const [name, theme] of arenaMonacoThemes()) monaco.editor.defineTheme(name, theme)
 
 // VS Code's JSON files: comments and trailing commas allowed, and settings.json and keybindings.json checked against what

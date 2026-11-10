@@ -7,7 +7,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { weekdays } from '../tasks-schedule'
-import { scheduleForm, scheduleSpec, scheduleWords, type RepoSchedule, type ScheduleKind } from './argus-schedule-spec'
+import { scheduleForm, scheduleSpec, scheduleWords, type RepoSchedule, type ScheduleKind } from './code-intel-schedule-spec'
 
 /** The fields of a schedule: how often, and when. */
 export function ScheduleFields({ value, onChange, defaultWords }: { value: RepoSchedule; onChange: (s: RepoSchedule) => void; defaultWords?: string }) {

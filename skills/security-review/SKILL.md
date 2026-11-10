@@ -7,7 +7,7 @@ parameters:
 ---
 Do a security review of {{scope}}. Work from the code, not from memory: a finding you cannot cite is not a finding.
 
-1. **Find the entry points**: routes, handlers, controllers, message consumers, CLI commands, webhooks, file uploads. With Argus: `overview` and `repo_map` for the shape, `search_code` or `grep_at` for the framework's route attributes and handlers.
+1. **Find the entry points**: routes, handlers, controllers, message consumers, CLI commands, webhooks, file uploads. With Farzan Graph: `overview` and `repo_map` for the shape, `search_code` or `grep_at` for the framework's route attributes and handlers.
 2. **Find the sinks**, where data is used dangerously: SQL and NoSQL queries, OS commands, file paths, URLs the server fetches (SSRF), HTML or Markdown rendered (XSS), deserialisers, XML parsers (XXE), redirects, code run from text, templates. `grep_at` finds them by pattern at any branch.
 3. **Trace each sink back** with `find_references` and `get_file` (or `file_at`): who calls its function, and does data from an entry point reach it without what it needs (a parameter, an allow-list, encoding, a safe parser setting)? Data the program made itself, constants and configuration are not outside data.
 4. **Ground each suspicion in the security pack** before you report it: `docs_lookup` the weakness (`CWE-89`, `lang: "cwe"`) and read its mitigations; `docs_search` the fix in the OWASP cheat sheets (`lang: "cheatsheets"`), CodeQL's query for the language (`lang: "codeql-csharp"`, `"codeql-python"`...) and, for a web application, the ASVS requirement (`lang: "asvs"`). Drop any suspicion whose sink line you cannot quote from the file, or whose weakness the pack does not name.

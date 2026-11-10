@@ -1,6 +1,6 @@
 # The pgvector backend for symbol embeddings
 
-Argus stores symbol vectors in SQLite via `sqlite-vec`. This is an optional
+Farzan Graph stores symbol vectors in SQLite via `sqlite-vec`. This is an optional
 Postgres backend for the same data, selected per deployment. It is **off by
 default** and the SQLite path is unchanged.
 
@@ -35,13 +35,13 @@ the change that makes removing it possible.
 ## Enabling it
 
 ```bash
-ARGUS_VECTOR_BACKEND=pgvector
-ARGUS_PG_DSN=postgresql://user:pass@postgres:5432/argus
+CODE_INTEL_VECTOR_BACKEND=pgvector
+CODE_INTEL_PG_DSN=postgresql://user:pass@postgres:5432/code-intel
 ```
 
 Both are required; either missing leaves the SQLite path in force. The stack's
 Postgres already ships the extension (`pgvector/pgvector:0.8.0-pg16`) and the
-init script creates the `argus` database with `CREATE EXTENSION vector`.
+init script creates the `code-intel` database with `CREATE EXTENSION vector`.
 
 Install the optional dependency if you are not using the shipped image:
 
@@ -49,7 +49,7 @@ Install the optional dependency if you are not using the shipped image:
 pip install ".[pgvector]"
 ```
 
-`argus/store/pgvector.py` imports `psycopg` lazily, so its absence costs nothing
+`code-intel/store/pgvector.py` imports `psycopg` lazily, so its absence costs nothing
 on the default path.
 
 ## Three settings, none optional
@@ -76,7 +76,7 @@ what a filtering problem looks like.
 ## Measured: multi-repo, real embeddings
 
 The full symbol corpus of this repository -- **75,616 real embeddings**, every
-one produced through argus/embed.py's own path -- across 200 repos with
+one produced through code-intel/embed.py's own path -- across 200 repos with
 realistically uneven sizes (largest 5,508 symbols, median 218, smallest 115).
 Graded against exact cosine in numpy.
 

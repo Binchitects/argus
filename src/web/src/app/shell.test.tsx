@@ -61,7 +61,7 @@ describe('shell', () => {
   })
 
   const source = 'https://github.com/Binchitects/argus'
-  const withSource = { 'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '5.1.0', license: 'AGPL-3.0-only', source } }) }
+  const withSource = { 'GET /api/info': () => ({ json: { name: 'Farzan Arena', version: '5.1.0', license: 'AGPL-3.0-only', source } }) }
 
   it('offers the source beside the version, as the AGPL asks', async () => {
     fakeApi(member, withSource)

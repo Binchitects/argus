@@ -15,6 +15,7 @@ import { api, errorMessage } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
 import { reviewBatchQuery, type ReviewBatch } from './api'
 import { ReviewState } from './code'
+import { codeIntelName } from '@/lib/brand'
 
 const severityVariant = { critical: 'destructive', major: 'warning', minor: 'secondary', nit: 'outline' } as const
 const severities = ['critical', 'major', 'minor', 'nit'] as const
@@ -90,7 +91,7 @@ export function ReviewBatchPage() {
           <Card>
             <CardHeader>
               <CardTitle>Across the repositories</CardTitle>
-              <CardDescription>How they depend on each other, as Argus resolved it, and the model&apos;s look at them together.</CardDescription>
+              <CardDescription>How they depend on each other, as {codeIntelName} resolved it, and the model&apos;s look at them together.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               {d.report ? <Markdown text={d.report} /> : <p className="text-sm text-muted-foreground">{b.cross ? 'No look across: fewer than two repositories were reviewed.' : 'Not asked to look across them.'}</p>}

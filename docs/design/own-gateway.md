@@ -1,4 +1,4 @@
-# Argus Arena's own model gateway: replacing LiteLLM
+# Farzan Arena's own model gateway: replacing LiteLLM
 
 The design for item 10 of the requests of 2026-10-29: "develop a better
 alternative for litellm". Paths are relative to the repository's root, and
@@ -517,7 +517,7 @@ Every class LiteLLM touches today:
 - deploy/.env.example: remove `GATEWAY_KEY` (:39-40) and `LITELLM_REPLICAS` (:86).
 - deploy/scale.yml needs no change: the gateway scales with the app replicas, and the shared state is in Postgres.
 
-**Helm** (deploy/helm/argus-arena):
+**Helm** (deploy/helm/arena):
 
 - templates/gateway.yaml: delete the litellm Deployment and Service (:56-108). Move Postgres into templates/postgres.yaml with `POSTGRES_DB: llmapp` and readiness `-d postgres`. Valkey stays only when `valkey.enabled`.
 - configmaps.yaml: delete the `litellm.yaml` key (:8-10).
@@ -566,7 +566,7 @@ Every class LiteLLM touches today:
 - Remove :123-124 (`create database litellm` and the schema load) and the `Gateway__*` settings at :128.
 - Rename `E2E_NO_GATEWAY` → `E2E_NO_ENGINE` (:97, :104; src/web/e2e/helpers.ts:4-5).
 - Remove the litellm logs from the kind job (:223, :241) and `GATEWAY_KEY=sk-ci` (:252).
-- Keep :260-264 (argus-standalone samples).
+- Keep :260-264 (code-intel-standalone samples).
 - tests/deploy: support.py:34-48, test_features.py:15, delete test_ha.py, test_runtime_parity.py:40-49/103/361-365, test_airgap.py, test_installer.py (THIRD_PARTY images, litellm.yaml cases, the drop-database step), test_kube_install.py:302-315, test_recovery.py:153, test_recovery_check.py:35-38 (drop the decoy), and the GATEWAY_KEY placeholders in test_backup.py:259, test_sglang_image.py:54, test_pitr.py:55, test_vllm_image.py:47.
 - tests/Llm.Tests/HelmChartTests.cs:14 loses its litellm.yaml pair.
 
@@ -615,7 +615,7 @@ Kept: `ENGINE_KEY`, now also used by the app for chat traffic upstream; `Gateway
   - controls.yaml and controls.md: DAT-07, DAT-08 and NET-01 wording. The evidence test names stay, so the compliance-docs.py guard holds. IAM-02, IAM-06, DAT-04 and DAT-08 cite tests that are rewritten but keep their names (§5).
   - Recheck help topics topics.ts:405, 420, 528, 719, 877, 883, 1137, 1140, 1162.
 - **Leave as history:** CHANGELOG history, docs/measurements/model-serving.md and docs/design/v5.9-code-review-access.md.
-- **Out of scope, needs a decision:** `deploy/argus-standalone`, a separate product with its own LiteLLM and no Llm.Api (argus-standalone/docker-compose.yml:395-566; src/Argus/Platform/Gateway.cs). Options: keep it on LiteLLM and say so, or retire it. Under "no footprint", LiteLLM stays in the repository only there.
+- **Out of scope, needs a decision:** `deploy/code-intel-standalone`, a separate product with its own LiteLLM and no Llm.Api (code-intel-standalone/docker-compose.yml:395-566; src/CodeIntel/Platform/Gateway.cs). Options: keep it on LiteLLM and say so, or retire it. Under "no footprint", LiteLLM stays in the repository only there.
 
 ---
 
@@ -661,7 +661,7 @@ The type is renamed and keeps its recording API (`Requests`, `Passed`, `ImageReq
 
 Guardrail tests become API requests through `https://gateway.llm.test` with a key, asserting the status, the error body, the logged refusal, and that FakeEngine received nothing or masked text. This covers the helpers at GroupCreditTests.cs:56-79, ConcurrencyTests.cs:1142 and :1280, SecretScanningTests.cs:156-166, and IdentityTests:239/250. Their test names stay where compliance cites them (DAT-04: SecretScanningTests).
 
-Unchanged: CodeArena.Tests Fakes.cs (only comments change; GatewayRateLimitTests and HangCompactionTests stay valid because the sentences are kept) and Argus.Tests.
+Unchanged: CodeArena.Tests Fakes.cs (only comments change; GatewayRateLimitTests and HangCompactionTests stay valid because the sentences are kept) and CodeIntel.Tests.
 
 Web and e2e:
 
@@ -728,7 +728,7 @@ Each commit builds, passes the full Llm.Tests and CodeArena.Tests suites and the
 | 16 | Gateway metrics and health | `arena_gateway_*`; Admin → Overview per deployment; alert rules | Metrics and health tests; OperationsTests; functional-test "Model gateway" |
 | 17 | Measure our gateway against LiteLLM | `arenactl gateway-compare` (or deploy/scripts/gateway-compare.py) runs §7 in both modes; results in docs/measurements/gateway.md | The gates in §7 met on the live stack |
 | 18 | Our gateway by default | `Gateway:Mode` defaults to `own`; LiteLLM still deployed as a quick fallback | A soak of at least 24 h: dashboards, error rate, clients-check |
-| 19 | No LiteLLM in the app | Delete everything in §3 marked Delete, plus FakeGateway, LiteLlmClientTests, LitellmSeed, litellm-schema.sql, the `Gateway:Mode` switch, the old options and the settings rows | Full suite; the build carries no "litellm" outside the importer and the argus-standalone code; live |
+| 19 | No LiteLLM in the app | Delete everything in §3 marked Delete, plus FakeGateway, LiteLlmClientTests, LitellmSeed, litellm-schema.sql, the `Gateway:Mode` switch, the old options and the settings rows | Full suite; the build carries no "litellm" outside the importer and the code-intel-standalone code; live |
 | 20 | Deploy without LiteLLM | All of §4: compose, ha.yml, config files, features, .env.example, installer (and the drop of the litellm database after import), kube-install, bundles, arenactl, Helm, backups and drills, CI, tests/deploy, functional-test.py rewrite | tests/deploy; the kind CI job; live: installer upgrade on the live stack (the container and image go), restore-drill, clients-check, functional-test |
 | 21 | Docs, compliance and help for our gateway | All of the docs and compliance list in §4; `Risks.cs:215`; CHANGELOG ("Weakened controls" rule: none weakened), whats-new; then the release tag and `gh release create` | compliance-docs.py, release-scan.py, VoiceTests:866 doc checks, the help build |
 
@@ -792,7 +792,7 @@ state) until commit 11 moves the blocks to the app.
     - The engine key and remote keys are already in the app process (compose:87; ModelCatalog.cs:1065).
     - The ledger keeps less personal data than LiteLLM did.
 11. **Blast radius of one process.** The app already proxies all API traffic, so this is no worse than today. App replicas (Helm `app.replicas: 2`, scale.yml) give rolling restarts.
-12. **Argus standalone still uses LiteLLM** until you decide (§4).
+12. **Farzan Graph standalone still uses LiteLLM** until you decide (§4).
 
 ### Measurement plan (commit 17, live stack, both modes)
 
@@ -822,7 +822,7 @@ defaults, each easy to change before the commit that acts on it.
 1. **Existing keys and spend are imported once** (`LedgerImport`): people's
    API keys, Code Arena machines and Code Studio workspaces keep working, and
    the month's credit does not reset.
-2. **`deploy/argus-standalone` stays on LiteLLM** for now: it is a separate
+2. **`deploy/code-intel-standalone` stays on LiteLLM** for now: it is a separate
    product with no Llm.Api. It is the only place LiteLLM remains.
 3. **`/internal/models/defaults` is removed**: it had no caller (done 2026-10-30).
 4. **The temporary `Gateway:Mode` switch is accepted** for commits 10 to 18,

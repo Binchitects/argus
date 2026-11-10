@@ -12,8 +12,8 @@ Every number on this page was measured, not estimated. Where a figure comes
 from a small or synthetic corpus, it says so — those are shapes, not targets.
 
 ```bash
-argus kpi --config /etc/argus/config.yaml
-argus kpi --config /etc/argus/config.yaml --json >> /var/log/argus-kpi.jsonl
+code-intel kpi --config /etc/code-intel/config.yaml
+code-intel kpi --config /etc/code-intel/config.yaml --json >> /var/log/code-intel-kpi.jsonl
 ```
 
 Append the JSON weekly. **A KPI looked at once is a number; the same KPI

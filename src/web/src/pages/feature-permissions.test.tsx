@@ -46,12 +46,12 @@ describe('controls one may not use are hidden', () => {
 
   it('a room’s panel has no export without feature.export', async () => {
     const room = {
-      id: 'r1', title: 'Launch', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+      id: 'r1', title: 'Launch', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
       currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
       room: { role: 'member', membersInvite: false, answeringFor: null, groups: [], members: [{ id: 'o1', name: 'Olivia', role: 'owner' }, { id: member.id, name: member.displayName, role: 'member' }] },
     }
     fakeApi({ ...member, denied: ['feature.export'] }, {
-      'GET /api/chat/config': () => ({ json: { model: 'M', models: [], presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 1, imageTypes: [], denied: ['feature.export'] } }),
+      'GET /api/chat/config': () => ({ json: { model: 'M', models: [], presets: [], defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 1, imageTypes: [], denied: ['feature.export'] } }),
       'GET /api/chat/conversations': () => ({ json: [{ id: 'r1', title: 'Launch', updatedAt: new Date().toISOString(), isRoom: true, mine: false }] }),
       'GET /api/chat/conversations/r1': () => ({ json: room }),
       'GET /api/rooms/languages': () => ({ json: [] }),

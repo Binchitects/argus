@@ -18,6 +18,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/pages/chat/markdown'
+import { codeIntelName } from '@/lib/brand'
 
 type FixStatus = 'queued' | 'working' | 'ready' | 'failed' | 'opened' | 'stopped'
 
@@ -91,7 +92,7 @@ export function TokenCard() {
           <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" /> Your GitLab token
         </CardTitle>
         <CardDescription>
-          Fix it and Code Studio read, clone, push and open merge requests as you, with your own token (scope api), never Argus's. It is kept encrypted and never shown again.
+          Fix it and Code Studio read, clone, push and open merge requests as you, with your own token (scope api), never {codeIntelName}'s. It is kept encrypted and never shown again.
         </CardDescription>
       </CardHeader>
       <CardContent>

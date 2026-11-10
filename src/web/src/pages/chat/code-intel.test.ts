@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { gitlabLink, parseResult, resultCount, snippetParts, toHits } from './argus'
+import { gitlabLink, parseResult, resultCount, snippetParts, toHits } from './code-intel'
 import { collectFiles } from './files'
 import { blank } from './live'
 import type { Message } from './types'
 
-// The shapes Argus returns (src/Argus/Store/Queries.cs).
+// The shapes code-intel returns (src/code-intel/Store/Queries.cs).
 const symbol = { repo_id: 1, path_with_namespace: 'group/app', path: 'src/parse.c', name: 'ParseHeader', kind: 'function', line: 10, end_line: 24, signature: 'int ParseHeader(const char *buf)', scope: null, is_public: 1, doc: 'Reads a header.' }
 const reference = { repo: 'group/app', repo_id: 1, path: 'src/main.c', line: 42, context: '  ParseHeader(buf);', is_definition: false }
 const search = { repo_id: 1, path_with_namespace: 'group/app', path: 'src/parse.c', rank: -3.2, snippet: '…int [ParseHeader](const char *buf) { return buf[0]; }…' }
 const file = { repo_id: 1, path_with_namespace: 'group/app', path: 'src/parse.c', lang: 'c', size: 120, content: 'int ParseHeader(const char *buf) {\n  return 0;\n}\n', truncated: false }
 
-describe('Argus results', () => {
+describe('Farzan Graph results', () => {
   it('reads JSON, and leaves text (errors, notices) as text', () => {
     expect(parseResult('[{"a":1}]')).toEqual([{ a: 1 }])
     expect(parseResult('Nothing you have access to matches this')).toBeUndefined()
@@ -48,7 +48,7 @@ describe('Argus results', () => {
     expect(snippetParts('[ParseHeader] and [ParseBody]', 'Parse*').filter((p) => p.match)).toHaveLength(2)
   })
 
-  it('a file Argus read is in the Files panel, once, at its latest', () => {
+  it('a file Farzan Graph read is in the Files panel, once, at its latest', () => {
     const call = (id: string, args: object) => ({ id, function: { name: 'get_file', arguments: JSON.stringify(args) } })
     const path: Message[] = [
       { ...blank('q', 'user', null), content: 'show me' },

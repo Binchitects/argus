@@ -13,7 +13,7 @@ import { saveBlob } from '@/lib/zip'
 import { cn } from '@/lib/utils'
 import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { attachmentUrl, configQuery, downloadUrl } from './api'
-import { gitlabLink } from './argus'
+import { gitlabLink } from './code-intel'
 import { CodeBlock } from './code-block'
 import type { FileItem } from './files'
 import type { Attachment } from './types'
@@ -24,6 +24,7 @@ import { asViewerImages } from './viewer-images'
 import { LivePreview } from './live-preview'
 import { MediaPlayer } from './media'
 import { isMedia } from './sound'
+import { codeIntelName } from '@/lib/brand'
 
 /**
  * Like Claude's: every file in the branch on screen, and a viewer for the one
@@ -131,7 +132,7 @@ export function FilesPanel({
           <Viewer file={current} />
         ) : files.length === 0 ? (
           <EmptyState icon={FileCode2} title="No files yet" className="border-0">
-            Attachments, files Argus reads, and code the model writes show up here.
+            Attachments, files {codeIntelName} reads, and code the model writes show up here.
           </EmptyState>
         ) : (
           <ul className="grid gap-1">
@@ -151,7 +152,7 @@ export function FilesPanel({
                       {f.kind === 'code'
                         ? `${f.code.split('\n').length} lines · written in this chat`
                         : f.kind === 'repo'
-                          ? `read by Argus${f.repo ? ` from ${f.repo}` : ''}`
+                          ? `read by ${codeIntelName}${f.repo ? ` from ${f.repo}` : ''}`
                           : `${formatValue(f.attachment.size, 'bytes')} · ${f.made ? 'made in this chat' : 'attached'}`}
                     </span>
                   </span>
@@ -377,7 +378,7 @@ function ImageFile({ attachment }: { attachment: Extract<FileItem, { kind: 'atta
   )
 }
 
-/** A file Argus read from GitLab: its code, and where it lives. */
+/** A file code-intel read from GitLab: its code, and where it lives. */
 function RepoViewer({ file }: { file: Extract<FileItem, { kind: 'repo' }> }) {
   const gitlab = useQuery(configQuery).data?.gitlabUrl
   return (
@@ -393,7 +394,7 @@ function RepoViewer({ file }: { file: Extract<FileItem, { kind: 'repo' }> }) {
           </a>
         )}
       </p>
-      {file.truncated && <p className="text-xs text-muted-foreground">Argus sent the start of this file only.</p>}
+      {file.truncated && <p className="text-xs text-muted-foreground">{codeIntelName} sent the start of this file only.</p>}
       <CodeBlock code={file.code} lang={file.lang} name={file.path} />
     </div>
   )

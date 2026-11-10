@@ -35,7 +35,7 @@ controls with their discussion and baselines, SP 800-171's requirements, CSF
 2.0's categories and subcategories with their examples, the AI RMF's
 subcategories with the Playbook's suggested actions, the AI Act's 113 articles
 and 13 annexes). Build it with
-[the pack docs](../argus/knowledge-packs.md#governance-frameworks-the-grc-pack),
+[the pack docs](../code-intel/knowledge-packs.md#governance-frameworks-the-grc-pack),
 then load it in Admin → Packs.
 
 A framework is met by an organisation, not by a program. Arena gives the
@@ -154,7 +154,7 @@ start (the audit log says `compliance.starter`):
   and approve: a draft is not in force;
 - chats kept a year (**Settings → Data retention → Keep chats for**, 365
   days);
-- the services Arena connects to (Hugging Face, the GitLab Argus indexes) in
+- the services Arena connects to (Hugging Face, the GitLab Farzan Graph indexes) in
   the supplier register, for the company to say what data each gets and its
   agreements.
 
@@ -295,7 +295,7 @@ health data with no agreement said, or health data without a BAA, is flagged.
 
 The services Arena connects to are offered for the register until they are in
 it: the cloud model servers (Admin → Models), tool servers, knowledge
-connectors, the GitLab Argus reads, and Hugging Face. The register is in the
+connectors, the GitLab Farzan Graph reads, and Hugging Face. The register is in the
 evidence (`suppliers.csv`). The `suppliers` check is amber while such a
 service is missing, a review is past due, or an agreement is.
 
@@ -612,12 +612,12 @@ and, when the last try failed, why.
 python3 tools/release-scan.py
 ```
 
-It lists what the release ships: every .NET package the app, Argus and Code
+It lists what the release ships: every .NET package the app, Farzan Graph and Code
 Arena resolve (transitive ones too, as `dotnet list package` sees them), the
 web apps' npm packages from their lock files (the build tools left out), the
 Python packages the images pin in their Dockerfiles, and the base images. It
 asks [OSV](https://osv.dev) about each package at its version, writes
-`dist/argus-arena-VERSION.cdx.json` (CycloneDX 1.5, the vulnerabilities in it)
+`dist/arena-VERSION.cdx.json` (CycloneDX 1.5, the vulnerabilities in it)
 and its `.sha256`, and prints what it found, worst first.
 
 A critical vulnerability fails it (exit 1) unless

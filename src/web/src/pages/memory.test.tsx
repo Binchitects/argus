@@ -111,10 +111,10 @@ describe('an answer that read memories', () => {
   it('says how many, and shows them on a click', async () => {
     const config: ChatConfig = {
       model: 'Main-Model', models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
-      presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 20 * 1024 * 1024, imageTypes: [],
+      presets: [], defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 20 * 1024 * 1024, imageTypes: [],
     }
     const chat: Conversation = {
-      id: 'c1', title: 'Deploy', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+      id: 'c1', title: 'Deploy', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
       currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
       messages: [
         { ...blank('q1', 'user', null), content: 'How do I deploy?', status: 'complete' },

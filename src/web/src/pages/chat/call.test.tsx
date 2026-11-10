@@ -12,7 +12,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -22,7 +22,7 @@ const config: ChatConfig = {
 const msg = (id: string, parentId: string | null, role: Message['role'], over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), status: 'complete', ...over })
 
 const room: Conversation = {
-  id: 'r1', title: 'Launch', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'r1', title: 'Launch', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'q1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [msg('q1', null, 'user', { content: 'Call at ten?', author: { id: 'o1', name: 'Olivia' }, forPeople: true })],
   room: {

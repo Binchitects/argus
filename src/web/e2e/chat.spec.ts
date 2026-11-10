@@ -73,8 +73,8 @@ test.describe('chat without a model', () => {
   })
 })
 
-// A saved chat with Argus's answers and two images, served by the browser itself:
-// how they look needs neither a model nor Argus, so this runs in CI too.
+// A saved chat with code-intel's answers and two images, served by the browser itself:
+// how they look needs neither a model nor code-intel, so this runs in CI too.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 const blank = { reasoning: null, toolName: null, toolCallId: null, toolCalls: null, attachments: [], status: 'complete', error: null, model: null, promptTokens: null, cachedTokens: null, completionTokens: null, thinkingMs: null, durationMs: null, createdAt: new Date().toISOString(), noAccess: false }
 const image = (id: string, fileName: string) => ({ id, fileName, size: png.length, truncated: false, kind: 'image', contentType: 'image/png' })
@@ -84,8 +84,8 @@ const rows = [
 ]
 const file = { repo_id: 1, path_with_namespace: 'platform/codec', path: 'include/codec/frame.h', lang: 'c', size: 220, content: '#pragma once\n#include <stdint.h>\n\ntypedef struct { uint32_t id; uint16_t len; } frame_t;\n\nint DecodeFrame(const uint8_t *buf, size_t len, frame_t *out);\n', truncated: false }
 const call = (id: string, name: string, args: object) => ({ id, function: { name, arguments: JSON.stringify(args) } })
-const argusChat = {
-  id: '00000000-0000-4000-8000-00000000a7a5', title: 'Where is DecodeFrame?', thinking: 'off', useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+const codeIntelChat = {
+  id: '00000000-0000-4000-8000-00000000a7a5', title: 'Where is DecodeFrame?', thinking: 'off', useCodeIntel: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   messages: [
     { ...blank, id: 'q1', parentId: null, role: 'user', content: 'Where is DecodeFrame defined, and does it match these screenshots?', attachments: [image('11111111-1111-4111-8111-111111111111', 'before.png'), image('22222222-2222-4222-8222-222222222222', 'after.png')] },
@@ -110,33 +110,33 @@ async function serveChat(page: Page, chat: { id: string }) {
   await page.route(`**/api/chat/conversations/${chat.id}/checklist`, (route) => route.fulfill({ status: 204 }))
 }
 
-async function serveArgusChat(page: Page) {
+async function serveCodeIntelChat(page: Page) {
   // Read once, before the page, as the context gauge's.
   const config = await (await page.request.get('/api/chat/config')).json()
-  await page.route('**/api/chat/config', (route) => route.fulfill({ json: { ...config, argus: true, gitlabUrl: 'https://gitlab.example.com' } }))
-  await serveChat(page, argusChat)
+  await page.route('**/api/chat/config', (route) => route.fulfill({ json: { ...config, codeIntel: true, gitlabUrl: 'https://gitlab.example.com' } }))
+  await serveChat(page, codeIntelChat)
   await page.route('**/api/chat/attachments/*/content*', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
 }
 
-test.describe("Argus's answers and images", () => {
+test.describe("Farzan Graph's answers and images", () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`are shown for what they are (${theme})`, async ({ page, isMobile }, info) => {
       const errors = watchConsole(page)
       await withTheme(page, theme)
-      await serveArgusChat(page)
-      await page.goto(`/chat/${argusChat.id}`)
+      await serveCodeIntelChat(page)
+      await page.goto(`/chat/${codeIntelChat.id}`)
       const answer = page.getByRole('region', { name: 'Answer' })
       await answer.getByRole('button', { name: /Find symbol.*2 results/ }).click()
       const link = answer.getByRole('link', { name: /platform\/codec › src\/frame\/decode\.c:118–164/ })
       await expect(link).toHaveAttribute('href', 'https://gitlab.example.com/platform/codec/-/blob/HEAD/src/frame/decode.c#L118-164')
       await answer.getByRole('button', { name: /Search code/ }).click()
       await expect(answer.locator('mark', { hasText: 'DecodeFrame' })).toBeVisible()
-      await expectAccessible(page, info, `argus-${theme}`)
-      await screenshot(page, info, `chat-argus-${theme}${isMobile ? '-phone' : ''}`)
+      await expectAccessible(page, info, `code-intel-${theme}`)
+      await screenshot(page, info, `chat-code-intel-${theme}${isMobile ? '-phone' : ''}`)
 
       await page.getByRole('button', { name: /^Files \(\d+\)$/ }).click()
       const panel = page.getByRole('complementary', { name: 'Files' })
-      // All of them in one zip: the pictures, and the file Argus read under its repository.
+      // All of them in one zip: the pictures, and the file code-intel read under its repository.
       const saving = page.waitForEvent('download')
       await panel.getByRole('button', { name: /^Download all \d+ files as a zip$/ }).click()
       const zip = await saving
@@ -144,7 +144,7 @@ test.describe("Argus's answers and images", () => {
       const bytes = await fs.readFile(await zip.path())
       expect(bytes.subarray(0, 4).toString('hex')).toBe('504b0304')
       for (const name of ['before.png', 'after.png', 'platform/codec/include/codec/frame.h']) expect(bytes.includes(Buffer.from(name))).toBe(true)
-      await panel.getByRole('button', { name: /frame\.h.*read by Argus/ }).click()
+      await panel.getByRole('button', { name: /frame\.h.*read by Farzan Graph/ }).click()
       await expect(panel.getByRole('link', { name: /Open in GitLab/ })).toBeVisible()
       await expect(panel.getByRole('figure', { name: 'Code: include/codec/frame.h' })).toContainText('frame_t')
       await page.keyboard.press('Escape')
@@ -165,8 +165,8 @@ test.describe("Argus's answers and images", () => {
 
 // A Word file shown by its pages (drawn in the sandbox), zoomed in the panel and full size.
 const docChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000d0c5a', title: 'The plan', useArgus: false, currentLeafId: 'w2',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000d0c5a', title: 'The plan', useCodeIntel: false, currentLeafId: 'w2',
   messages: [
     {
       ...blank, id: 'w1', parentId: null, role: 'user', content: 'Summarize the plan.',
@@ -219,8 +219,8 @@ test.describe('document pages', () => {
 
 // How full the context is, and what fills it: from the last answer's prompt tokens.
 const contextChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000c0e7a', title: 'A long chat', useArgus: false, currentLeafId: 'x2', model: 'Test-Model',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000c0e7a', title: 'A long chat', useCodeIntel: false, currentLeafId: 'x2', model: 'Test-Model',
   messages: [
     { ...blank, id: 'x1', parentId: null, role: 'user', content: 'Summarize the attached report.' },
     {
@@ -306,14 +306,14 @@ test.describe('assistants', () => {
 
 test.describe('search', () => {
   test('words found in an answer open the chat at that answer', async ({ page, isMobile }, info) => {
-    await serveArgusChat(page)
+    await serveCodeIntelChat(page)
     let asked = ''
     await page.route('**/api/chat/search?*', (route) => {
       asked = new URL(route.request().url()).search
       return route.fulfill({
         json: [
-          { conversationId: argusChat.id, title: argusChat.title, archived: false, messageId: 'a2', where: 'answer', snippet: '`DecodeFrame` is defined in `src/frame/decode.c` (lines 118–164)…', at: new Date().toISOString(), model: 'Test-Model' },
-          { conversationId: argusChat.id, title: argusChat.title, archived: false, messageId: null, where: 'title', snippet: argusChat.title, at: new Date().toISOString(), model: null },
+          { conversationId: codeIntelChat.id, title: codeIntelChat.title, archived: false, messageId: 'a2', where: 'answer', snippet: '`DecodeFrame` is defined in `src/frame/decode.c` (lines 118–164)…', at: new Date().toISOString(), model: 'Test-Model' },
+          { conversationId: codeIntelChat.id, title: codeIntelChat.title, archived: false, messageId: null, where: 'title', snippet: codeIntelChat.title, at: new Date().toISOString(), model: null },
         ],
       })
     })
@@ -328,7 +328,7 @@ test.describe('search', () => {
     await expectAccessible(page, info, 'chat-search')
     await screenshot(page, info, `chat-search${isMobile ? '-phone' : ''}`)
     await results.getByRole('button', { name: /defined in/ }).click()
-    await expect(page).toHaveURL(new RegExp(`/chat/${argusChat.id}$`))
+    await expect(page).toHaveURL(new RegExp(`/chat/${codeIntelChat.id}$`))
     await expect(page.locator('[data-message="a2"]')).toHaveClass(/found/)
   })
 })
@@ -357,8 +357,8 @@ async function selectInAnswer(page: Page, messageId: string, words: string) {
 
 test.describe('quoting part of an answer', () => {
   test('a selection gets a toolbar, and Reply puts it above the box, accessible both ways', async ({ page }, info) => {
-    await serveArgusChat(page)
-    await page.goto(`/chat/${argusChat.id}`)
+    await serveCodeIntelChat(page)
+    await page.goto(`/chat/${codeIntelChat.id}`)
     await expect(page.locator('[data-message="a2"]')).toContainText('declared in')
     await selectInAnswer(page, 'a2', 'declared in')
     const bar = page.getByRole('toolbar', { name: 'The selected words' })
@@ -376,9 +376,9 @@ test.describe('quoting part of an answer', () => {
 
 test.describe('export', () => {
   test('a chat downloads as Markdown and as data, and its summary comes from the model', async ({ page }) => {
-    await serveArgusChat(page)
-    await page.route(`**/api/chat/conversations/${argusChat.id}/summary`, (route) => route.fulfill({ json: { title: argusChat.title, summary: '# DecodeFrame\n\n- Defined in src/frame/decode.c' } }))
-    await page.goto(`/chat/${argusChat.id}`)
+    await serveCodeIntelChat(page)
+    await page.route(`**/api/chat/conversations/${codeIntelChat.id}/summary`, (route) => route.fulfill({ json: { title: codeIntelChat.title, summary: '# DecodeFrame\n\n- Defined in src/frame/decode.c' } }))
+    await page.goto(`/chat/${codeIntelChat.id}`)
     const exportAs = async (item: string) => {
       await page.getByRole('button', { name: 'Chat actions' }).click()
       await page.getByRole('menuitem', { name: 'Export' }).click()
@@ -393,7 +393,7 @@ test.describe('export', () => {
     expect(md.text).toContain('*Attached: before.png, after.png*')
     expect(md.text).toContain('**Find symbol**')
     const json = JSON.parse((await exportAs('Data (.json)')).text)
-    expect(json.messages).toHaveLength(argusChat.messages.length)
+    expect(json.messages).toHaveLength(codeIntelChat.messages.length)
     const summary = await exportAs('Summary by the model (.md)')
     expect(summary).toEqual({ name: 'Where is DecodeFrame summary.md', text: '# DecodeFrame\n\n- Defined in src/frame/decode.c' })
   })
@@ -401,8 +401,8 @@ test.describe('export', () => {
 
 // Persian beside English: each block reads in its own direction, code stays left to right.
 const rtlChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000f0a51', title: 'خلاصه مخزن', useArgus: false, currentLeafId: 'r2',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000f0a51', title: 'خلاصه مخزن', useCodeIntel: false, currentLeafId: 'r2',
   messages: [
     { ...blank, id: 'r1', parentId: null, role: 'user', content: 'این مخزن چه کاری انجام می‌دهد؟' },
     {
@@ -434,8 +434,8 @@ test.describe('right-to-left text', () => {
 
 // A diagram is drawn in the answer; a broken one shows its code and why.
 const diagramChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000d1a90', title: 'How a frame is decoded', useArgus: false, currentLeafId: 'd2',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000d1a90', title: 'How a frame is decoded', useCodeIntel: false, currentLeafId: 'd2',
   messages: [
     { ...blank, id: 'd1', parentId: null, role: 'user', content: 'Draw how a frame flows through the decoder.' },
     {
@@ -474,8 +474,8 @@ test.describe('diagrams', () => {
 
 // The model asked before going on: the person answers on the card, and that is their next message.
 const askChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000a5c00', title: 'Plan the service', useArgus: false, currentLeafId: 'k3',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000a5c00', title: 'Plan the service', useCodeIntel: false, currentLeafId: 'k3',
   messages: [
     { ...blank, id: 'k1', parentId: null, role: 'user', content: 'Plan a small service for me.' },
     {
@@ -519,8 +519,8 @@ test.describe('questions from the model', () => {
 // Sub-agents did two parts side by side; the card shows each part's work, the pictures they drew too.
 const drawn = image('33333333-3333-4333-8333-333333333333', 'codec-flow.png')
 const agentsChat = {
-  ...argusChat,
-  id: '00000000-0000-4000-8000-0000000a9e75', title: 'Two repositories', useArgus: false, currentLeafId: 'g4',
+  ...codeIntelChat,
+  id: '00000000-0000-4000-8000-0000000a9e75', title: 'Two repositories', useCodeIntel: false, currentLeafId: 'g4',
   messages: [
     { ...blank, id: 'g1', parentId: null, role: 'user', content: 'How do codec and driver-shim log errors?' },
     {
@@ -1096,17 +1096,17 @@ test.describe('tools', () => {
   })
 })
 
-// With the Argus test fixture up and a person who cannot read eal-core:
-//   E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=...
-test.describe('chat with Argus', () => {
-  test.skip(!live || !process.env.E2E_ARGUS_PASSWORD, 'needs the Argus test fixture')
+// With the code-intel test fixture up and a person who cannot read eal-core:
+//   E2E_CODE_INTEL_USER=dev_beta E2E_CODE_INTEL_PASSWORD=...
+test.describe('chat with Farzan Graph', () => {
+  test.skip(!live || !process.env.E2E_CODE_INTEL_PASSWORD, 'needs the Farzan Graph test fixture')
   test.use({ storageState: { cookies: [], origins: [] } })
   test.setTimeout(240_000)
 
   test('someone without access is told which repository and whom to ask', async ({ page }) => {
     await page.goto('/login')
-    await page.getByLabel('Username or email').fill(process.env.E2E_ARGUS_USER ?? 'dev_beta')
-    await page.getByLabel('Password').fill(process.env.E2E_ARGUS_PASSWORD!)
+    await page.getByLabel('Username or email').fill(process.env.E2E_CODE_INTEL_USER ?? 'dev_beta')
+    await page.getByLabel('Password').fill(process.env.E2E_CODE_INTEL_PASSWORD!)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).not.toHaveURL(/\/login/)
     await page.goto('/chat')
@@ -1115,7 +1115,7 @@ test.describe('chat with Argus', () => {
     const note = page.getByRole('note')
     await expect(note).toContainText('You do not have access to some of this code.', { timeout: 180_000 })
     await expect(note).toContainText('root/eal-core')
-    // Which of Argus's tools the model picks varies; that one ran is what matters.
+    // Which of code-intel's tools the model picks varies; that one ran is what matters.
     await expect(page.getByRole('region', { name: 'Answer' }).last().locator('.tool-name').first()).toBeVisible()
   })
 })

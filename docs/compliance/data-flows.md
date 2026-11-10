@@ -15,7 +15,7 @@ company are in **bold**: each is one [Company] turns on and answers for.
                                     │   │                                  videogen, audio (the company's models)
                                     │   ├──────▶ embed (passages to vectors)
                                     │   ├──────▶ sandbox (no network: code, ffmpeg)
-                                    │   ├──────▶ argus (code questions, the person's GitLab membership)
+                                    │   ├──────▶ code-intel (code questions, the person's GitLab membership)
                                     │   └──────▶ searxng, browser (the web)
                                     └─ logs, masked ──▶ promtail ──▶ loki
 ```
@@ -43,7 +43,7 @@ company are in **bold**: each is one [Company] turns on and answers for.
 | **E-mail** | notifications: names, titles of what happened | Settings → Email | TLS to the relay |
 | **The alerts webhook** | alerts' titles | Settings → Notifications | its host must be allowed |
 | **The SIEM** | the audit log, each entry | Settings → Audit log | TLS; signed (LOG-04) |
-| **GitLab, Gitea, GitHub** | reviews' comments; Argus reads only | Settings → Argus, the integrations | read-only tokens for Argus |
+| **GitLab, Gitea, GitHub** | reviews' comments; Farzan Graph reads only | Settings → Farzan Graph, the integrations | read-only tokens for Farzan Graph |
 | **Off-site backups** | the encrypted backups | the backup copy you set up | encrypted before they leave |
 
 Nothing goes to Arena's makers: no telemetry, no licence check.

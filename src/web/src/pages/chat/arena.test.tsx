@@ -16,7 +16,7 @@ const config: ChatConfig = {
   ],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -24,7 +24,7 @@ const config: ChatConfig = {
 }
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
-  id: 'c1', title: 'Stable sorts', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Stable sorts', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [], arenas: [], ...over,
 })
 

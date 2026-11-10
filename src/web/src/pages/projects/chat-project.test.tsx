@@ -10,7 +10,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -26,7 +26,7 @@ describe('a chat’s project', () => {
   it('is chosen from the chat’s menu among the projects the person may add to, and taken out again', async () => {
     let projectId: string | null = null
     const chat = (): Conversation => ({
-      id: 'c1', title: 'Refunds', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+      id: 'c1', title: 'Refunds', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
       currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', projectId,
       messages: [{ ...blank('q1', 'user', null), status: 'complete', content: 'Hi' }, { ...blank('a1', 'assistant', 'q1'), status: 'complete', content: 'Hello' }],
     })

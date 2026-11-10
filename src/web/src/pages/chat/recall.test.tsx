@@ -12,7 +12,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 1024 * 1024,
@@ -23,7 +23,7 @@ const msg = (id: string, parentId: string | null, role: Message['role'], content
 
 /** A chat of two questions and their answers: the newest question last. */
 const conversation: Conversation = {
-  id: 'c1', title: 'Two questions', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Two questions', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [msg('q1', null, 'user', 'first question'), msg('a1', 'q1', 'assistant', 'One.'), msg('q2', 'a1', 'user', 'second question'), msg('a2', 'q2', 'assistant', 'Two.')],
 }

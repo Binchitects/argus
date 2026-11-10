@@ -1,6 +1,6 @@
 # Connecting any MCP client
 
-Argus speaks standard MCP. Nothing in the protocol path is specific to one
+Farzan Graph speaks standard MCP. Nothing in the protocol path is specific to one
 agent -- `tools/smoke_test.py` and `tools/agent_client_example.py` both use
 the vanilla `mcp` SDK, and both work unmodified.
 
@@ -15,21 +15,21 @@ The tools, the ACL and the audit log are identical on both.
 | | HTTP | stdio |
 |---|---|---|
 | serves | many developers, one server | one client, one process |
-| credential | `Authorization: Bearer <key>` per request | a GitLab token in `ARGUS_TOKEN` |
+| credential | `Authorization: Bearer <key>` per request | a GitLab token in `CODE_INTEL_TOKEN` |
 | identity | resolved per request | resolved once at startup |
 | needs | a running server, a port, TLS in production | nothing but the command |
 
 Use **HTTP** for a team: one indexed host, per-request ACL. In the platform the
 key is the person's **API key** (the app's **Your account → API key**,
-`sk-...`): Argus asks the app whose it is and answers as their GitLab account. It
-takes no GitLab token there. A standalone Argus takes each developer's own
+`sk-...`): Farzan Graph asks the app whose it is and answers as their GitLab account. It
+takes no GitLab token there. A standalone Farzan Graph takes each developer's own
 GitLab token instead. Use **stdio** for a single developer on one machine, or
 for a client that speaks nothing else.
 
 ## stdio
 
 ```bash
-ARGUS_TOKEN=<your-gitlab-pat> argus serve --config /etc/argus/config.yaml --stdio
+CODE_INTEL_TOKEN=<your-gitlab-pat> code-intel serve --config /etc/code-intel/config.yaml --stdio
 ```
 
 The credential is resolved *before* the server starts, so a bad token fails on
@@ -37,13 +37,13 @@ stderr where the person configuring the client sees it -- rather than as a tool
 error inside an agent transcript, which is where a missing credential is
 hardest to recognise for what it is.
 
-`stdout` carries the JSON-RPC stream. Everything Argus prints goes to stderr,
+`stdout` carries the JSON-RPC stream. Everything Farzan Graph prints goes to stderr,
 so nothing it says can corrupt the protocol.
 
 ### Claude Code
 
 ```bash
-claude mcp add argus --env ARGUS_TOKEN=<pat> -- argus serve --config /etc/argus/config.yaml --stdio
+claude mcp add code-intel --env CODE_INTEL_TOKEN=<pat> -- code-intel serve --config /etc/code-intel/config.yaml --stdio
 ```
 
 ### Continue
@@ -52,11 +52,11 @@ claude mcp add argus --env ARGUS_TOKEN=<pat> -- argus serve --config /etc/argus/
 
 ```yaml
 mcpServers:
-  - name: argus
-    command: argus
-    args: ["serve", "--config", "/etc/argus/config.yaml", "--stdio"]
+  - name: code-intel
+    command: code-intel
+    args: ["serve", "--config", "/etc/code-intel/config.yaml", "--stdio"]
     env:
-      ARGUS_TOKEN: <pat>
+      CODE_INTEL_TOKEN: <pat>
 ```
 
 ### OpenCode, Cursor, Windsurf, Zed
@@ -66,25 +66,25 @@ All take the same three fields under their own key -- `mcp`, `mcpServers` or
 
 ```json
 {
-  "command": "argus",
-  "args": ["serve", "--config", "/etc/argus/config.yaml", "--stdio"],
-  "env": { "ARGUS_TOKEN": "<pat>" }
+  "command": "code-intel",
+  "args": ["serve", "--config", "/etc/code-intel/config.yaml", "--stdio"],
+  "env": { "CODE_INTEL_TOKEN": "<pat>" }
 }
 ```
 
 ## HTTP
 
 ```bash
-argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --port 7700
+code-intel serve --config /etc/code-intel/config.yaml --host 0.0.0.0 --port 7700
 ```
 
 Below, `<key>` is your API key in the platform (keep it in
-`LLM_SERVICE_API_KEY`), or your GitLab token for a standalone Argus.
+`LLM_SERVICE_API_KEY`), or your GitLab token for a standalone Farzan Graph.
 
 ### Claude Code
 
 ```bash
-claude mcp add --transport http argus https://argus.internal/mcp --header "Authorization: Bearer <key>"
+claude mcp add --transport http code-intel https://code-intel.internal/mcp --header "Authorization: Bearer <key>"
 ```
 
 ### DeepSeek Harness
@@ -94,11 +94,11 @@ Executed end to end against a live stack; see
 
 ```bash
 LLM_SERVICE_API_KEY=<key> NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt \
-  dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
-  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
+  dsh --profile headless --patch clients/deepseek-harness/code-intel-mcp.patch.yml \
+  "Use the mcp__code-intel__find_symbol tool, with name=DecodeFrame."
 ```
 
-Argus logged `tool=find_symbol user=dev_alpha outcome=ok` — the per-person
+Farzan Graph logged `tool=find_symbol user=dev_alpha outcome=ok` — the per-person
 identity arriving on the caller's own credential (then a GitLab token, now the
 API key), not the shared chat credential.
 
@@ -107,18 +107,18 @@ API key), not the shared chat credential.
 Executed end to end; see [`clients/qwen-code/`](../../clients/qwen-code/).
 
 ```bash
-qwen mcp add argus https://argus.internal/mcp -t http \
+qwen mcp add code-intel https://code-intel.internal/mcp -t http \
   -H "Authorization: Bearer <key>" --trust
 ```
 
 `--trust` is required in a headless run: without it Qwen Code stops for
-confirmation before every Argus call and nothing proceeds.
+confirmation before every Farzan Graph call and nothing proceeds.
 
 ### Continue, Cursor, and anything else taking a URL
 
 ```json
 {
-  "url": "https://argus.internal/mcp",
+  "url": "https://code-intel.internal/mcp",
   "headers": { "Authorization": "Bearer <key>" }
 }
 ```
@@ -127,13 +127,13 @@ Behind a reverse proxy, pass the public hostname or every request is rejected
 with 421 by the DNS-rebinding guard:
 
 ```bash
-argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --allowed-host argus.internal
+code-intel serve --config /etc/code-intel/config.yaml --host 0.0.0.0 --allowed-host code-intel.internal
 ```
 
 ## Verifying, whichever client
 
 ```bash
-./arenactl check argus --url https://argus.internal/mcp --token <key>
+./arenactl check code-intel --url https://code-intel.internal/mcp --token <key>
 ```
 
 Seven checks: health, that a bad token is refused, the MCP handshake, the
@@ -142,7 +142,7 @@ pack, and the private index answering with the right repository count.
 
 ## What a client has to do to get the benefit
 
-**Pass the server's `instructions` through to the model.** Argus returns 1,803
+**Pass the server's `instructions` through to the model.** Farzan Graph returns 1,803
 characters at connect time saying that recollection of headers, libraries and
 IRQLs is unreliable. Measured: passing it through took tool use from 3 of 20
 questions to 8, and accuracy from 12/20 to 14/20. A client that drops it leaves

@@ -6,7 +6,7 @@ VS Code is: the folder's files, an editor, search, terminals and the agent's
 chat (or `code-arena chat` keeps the agent in the terminal). The agent reads
 and changes the code there, runs commands, and works through the Arena: the
 model through the gateway, and all of the chat's tools (web search and pages,
-Python in the sandbox, pictures, speech, Argus's code search, plugins,
+Python in the sandbox, pictures, speech, Farzan Graph's code search, plugins,
 knowledge) through Arena's MCP endpoint, as that person.
 
 It is **one file with nothing to install**: a self-contained .NET program for
@@ -272,7 +272,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
 | `/context` | what fills the model's window, piece by piece in its tokens, and what could be freed (below) |
 | `/cost` | tokens spent, and how full the model's window is |
-| `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
+| `/mcp [retry [name]]` | Arena's, Farzan Graph's and your MCP servers: connected or not and why; `retry` tries those not connected now |
 | `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
@@ -382,7 +382,7 @@ Studio between runs (its id is kept with the folder's state); deleting it
 there disconnects it, and the folder stays as it is. Arena's operators run
 the relay: connect folders you would open on that Arena's own workspaces.
 
-The page is laid out as VS Code is, in Argus Arena's design system:
+The page is laid out as VS Code is, in Farzan Arena's design system:
 
 - **activity bar** (the side bar's edge): Explorer, Search, Source control
   (with a count of the files changed since the last commit), Agent changes
@@ -692,7 +692,7 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   (read with the key from `GET /api/code-arena/config` at the start): which
   models are loaded, load when asked or are not loaded now, which see
   pictures, the deployment's thinking levels with their names, and which one
-  **Default** is; Argus's answers link to the same GitLab. Without Arena every
+  **Default** is; Farzan Graph's answers link to the same GitLab. Without Arena every
   model counts as loaded, with Code Arena's own five levels. **Files** go with
   a message as in the web chat: the clip, a paste or a drop on the box (Word,
   Excel, PowerPoint, PDF, text, code, pictures), up to 10, as large as Arena
@@ -1644,7 +1644,7 @@ review it is, with a link to it in Arena.
 **Review** in the activity bar has a reviewer look at **the changes not yet
 committed**, or at **this branch over** a base you name (main, origin/main, a
 commit), as `/review` does in the terminal: a fresh agent with the reading
-tools only (files, search, git, and Arena's and Argus's tools that change
+tools only (files, search, git, and Arena's and Farzan Graph's tools that change
 nothing) reads the changes and the code around them, tries to refute each
 finding before it keeps it, and changes nothing. Its steps show as it goes;
 **Stop the review** ends it (20 minutes at most).
@@ -2063,7 +2063,7 @@ a real Laya when `LAYA_URL` names one. It is a second look, not a sandbox:
 The IDE's Tools menu (the wrench under the chat box) lists every tool the model is given, as the context view counts
 them: Code Arena's own by family (files, commands and git, always on; virtual machines, the code index, memory, past
 sessions, skills, sub-agents, screenshots; the person's and the project's own), then each server's groups (Arena's,
-Argus's, an MCP server's), each with its functions. A group turned off leaves the requests and a call to it is
+Farzan Graph's, an MCP server's), each with its functions. A group turned off leaves the requests and a call to it is
 refused, for this session; `/tools off memory` in the terminal does the same.
 
 On the person's machine:
@@ -2139,11 +2139,11 @@ and the model hears that it timed out. Every connection has TCP keep-alive
 without a word (a laptop asleep, a VPN that changed) is found out in about a
 minute and a half rather than never.
 
-**Argus's tools** come from `https://argus.DOMAIN/mcp` with the same key
-(`"argusUrl"` in the config file for another address; none for an Arena
-reached by an IP address or as `localhost`). Arena serves the person's Argus
-tools too: those it serves are offered once, as Arena's, and Argus's own copy
-is used while Arena is not connected. Argus's other tools join beside them.
+**Farzan Graph's tools** come from `https://code-intel.DOMAIN/mcp` with the same key
+(`"codeIntelUrl"` in the config file for another address; none for an Arena
+reached by an IP address or as `localhost`). Arena serves the person's Farzan Graph
+tools too: those it serves are offered once, as Arena's, and Farzan Graph's own copy
+is used while Arena is not connected. Farzan Graph's other tools join beside them.
 
 Both are on by default once signed in, and both connect **in the
 background**: a session starts when the gateway has listed the models, and
@@ -2155,15 +2155,15 @@ often after that, up to every 5 minutes; a call that finds it gone (the
 connection dropped, or its proxy's 502, 503 or 504) has it connect again at
 once. `/mcp` (or **MCP servers** in the IDE's status bar) shows each one,
 connected or not and why; `/mcp retry` (**Try again**) tries now. When the
-Arena has no MCP endpoint at all, or no Argus beside it (`argus.DOMAIN` does
+Arena has no MCP endpoint at all, or no Farzan Graph beside it (`code-intel.DOMAIN` does
 not resolve, or has no MCP endpoint), the session says so once, quietly, and
 carries on. A server that fails in any other way is said and tried again
 the same way; nothing waits for it for ever (a command waits for Arena's
 first answer, for Laya, 20 seconds at most). An address that is not an http
-or https one (`"mcpUrl"`, `"argusUrl"`, `"gateway"` or their variables: a
+or https one (`"mcpUrl"`, `"codeIntelUrl"`, `"gateway"` or their variables: a
 port out of range, a space, `ftp://`) stops the session as it starts, saying
 where to fix it; an MCP server of your own at such an address is skipped and
-said. `"arenaTools": false` and `"argusTools": false` in
+said. `"arenaTools": false` and `"codeIntelTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
 
@@ -2462,7 +2462,7 @@ agent keeps it ([chat.md](chat.md#plans)).
 ### Reviewing a proposed plan
 
 In plan mode the agent makes its plan with the `plan` tool as a proposal.
-It is **grounded in the code** first: when Argus is connected and the project
+It is **grounded in the code** first: when Farzan Graph is connected and the project
 is a repository it indexes, each step's symbols are looked up with
 `change_impact` (at most 12 a plan), and the step shows what they reach: the
 lines that use each name in every repository, how many repositories depend
@@ -2639,8 +2639,8 @@ Rather than calling tools one by one, each call and its whole result passing
 through the model's window, the agent can call them as functions from it:
 `import arena`, then `arena.tools.search("…")` lists the functions that
 match, `help(arena.local.read_file)` says one's parameters, and
-`arena.local.grep(...)`, `arena.argus.find_symbol(...)`,
-`arena.<server>.<tool>(...)` call the session's own tools, Arena's, Argus's
+`arena.local.grep(...)`, `arena.code-intel.find_symbol(...)`,
+`arena.<server>.<tool>(...)` call the session's own tools, Arena's, Farzan Graph's
 and your MCP servers'. The program loops, filters and joins, and only what it
 prints comes back. Each call goes through a socket to Code Arena (on Windows,
 where Python has no Unix sockets, TCP on 127.0.0.1 with a token only the
@@ -2653,7 +2653,7 @@ a tool. The `arena` module is the one the web chat's sandbox has
 
 How the model is given its tools follows the model in use, as Arena says for
 it (Admin → Models → **Tools**, in Arena's chat config): **direct** leaves
-`run_code` out; **code** sends the servers' tools (Arena's, Argus's, your MCP
+`run_code` out; **code** sends the servers' tools (Arena's, Farzan Graph's, your MCP
 servers') only as functions for a program, named in Code Arena's note under
 "Tools as code", while the files, search, git and shell tools stay as they
 are; **both** (also without a word from Arena) sends all. `"toolMode":
@@ -3429,11 +3429,11 @@ without starting it. On Windows, `npx` and other `.cmd` scripts need
 
 The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
-`"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
-(no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
+`"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"codeIntelTools": false`
+(no Farzan Graph MCP), `"toolChars"` (tools on demand, above), `"codeIntelUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"condenseResults"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"`,
-`"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_CODE_INTEL_URL` in the environment gives Farzan Graph's address
 for one run.
 
 ## Your own tools and the project's
@@ -3490,7 +3490,7 @@ wait, with their commands.
 
 As Arena's own tool customisation (Admin → Tools) does for the web chat,
 **Configure Tools** (the gear beside the chat's Tools) sets each tool of the
-session up: the built-in ones, Arena's and Argus's, the MCP servers' and your
+session up: the built-in ones, Arena's and Farzan Graph's, the MCP servers' and your
 own and the project's.
 
 - **On or off.** A tool turned off is not offered to the model, and a call of
@@ -3651,12 +3651,12 @@ it or rewind past it.
 - **"Arena's tools are not available here"**: this Arena has no MCP endpoint
   (an older version), or a proxy in between does not pass `/mcp`. The session
   works with the local tools.
-- **"Arena's tools are still connecting"** or **"Argus's tools did not
+- **"Arena's tools are still connecting"** or **"Farzan Graph's tools did not
   connect"**: the server is slow or down. The session carries on without its
   tools and tries again; `/mcp` says why and `/mcp retry` tries now. A refusal
-  gives the server's reason: for Argus, **"refused the credentials (401): …"**
+  gives the server's reason: for Farzan Graph, **"refused the credentials (401): …"**
   names the key (make a new one and `code-arena login`) or says GitLab cannot
-  tell what you may read just now (Argus older than 5.3 refuses then; it
+  tell what you may read just now (Farzan Graph older than 5.3 refuses then; it
   connects now and only its code tools wait for GitLab).
 - **An edit "was not found"**: the file changed since the model read it, or the
   model got the whitespace wrong. It reads the file again and retries.

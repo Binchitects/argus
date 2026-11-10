@@ -1,4 +1,5 @@
 import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon, Calculator, Gauge, Shield, Sparkles } from 'lucide-react'
+import { codeIntelName } from '@/lib/brand'
 
 export interface NavItem {
   title: string
@@ -40,7 +41,7 @@ export const navigation: NavSection[] = [
     space: 'work',
     items: [
       { title: 'Home', path: '/', icon: Home },
-      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], may: ['feature.chat'] },
+      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'code-intel'], may: ['feature.chat'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Projects', path: '/projects', icon: FolderKanban, keywords: ['project', 'team', 'accounting', 'budget', 'progress', 'goals', 'milestones', 'tasks', 'report', 'export', 'pdf', 'excel', 'global'] },
       { title: 'Wiki', path: '/wiki', icon: BookOpenText, keywords: ['search', 'knowledge', 'documents', 'docs', 'handbook', 'code', 'files', 'tables', 'find', 'browse'], may: ['feature.wiki'] },
@@ -50,7 +51,7 @@ export const navigation: NavSection[] = [
     title: 'Build',
     space: 'work',
     items: [
-      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus', 'security', 'vulnerability', 'cwe', 'owasp'], feature: 'code-studio', may: ['code.studio', 'code.read', 'review.run'] },
+      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'code-intel', 'security', 'vulnerability', 'cwe', 'owasp'], feature: 'code-studio', may: ['code.studio', 'code.read', 'review.run'] },
       { title: 'Security review', path: '/security', icon: ShieldCheck, keywords: ['security', 'vulnerabilities', 'sast', 'cwe', 'injection', 'secrets', 'dependencies', 'cve', 'scanners', 'several repositories', 'cross-repo', 'audit', 'pentest'], feature: 'code-studio', may: ['review.run', 'code.read'] },
       { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'], feature: 'agents', may: ['feature.studio'] },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'], may: ['feature.tasks'] },
@@ -134,7 +135,7 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Models', path: '/admin/models', icon: Boxes, keywords: ['switch', 'load', 'llama', 'library', 'gguf', 'permissions'], permission: 'models.read' },
-      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions', 'openapi', 'api'], permission: 'tools.read' },
+      { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'code-intel', 'image generation', 'calculator', 'permissions', 'openapi', 'api'], permission: 'tools.read' },
       { title: 'Plugins', path: '/admin/plugins', icon: Blocks, keywords: ['catalog', 'install', 'jira', 'gitlab issues', 'oauth', 'integrations'], permission: 'plugins.read' },
       { title: 'Safeguards', path: '/admin/safeguards', icon: ShieldAlert, keywords: ['guardrails', 'dlp', 'secrets', 'personal data', 'pii', 'blocked words', 'moderation', 'jailbreak', 'prompt injection', 'review', 'refused'], permission: 'safeguards.read' },
       { title: 'Knowledge', path: '/admin/knowledge', icon: Library, keywords: ['documents', 'wiki', 'gitlab', 'folder', 'website', 'confluence', 'sharepoint', 'search', 'embeddings', 'rag'], permission: 'knowledge.read' },
@@ -142,13 +143,13 @@ export const navigation: NavSection[] = [
     ],
   },
   {
-    title: 'Argus',
+    title: `${codeIntelName}`,
     space: 'admin',
     adminOnly: true,
     items: [
-      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'], permission: 'argus.manage', feature: 'argus' },
-      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'], permission: 'argus.manage', feature: 'argus' },
-      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'], permission: 'argus.explore', feature: 'argus' },
+      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'], permission: 'code-intel.manage', feature: 'code-intel' },
+      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'], permission: 'code-intel.manage', feature: 'code-intel' },
+      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'], permission: 'code-intel.explore', feature: 'code-intel' },
     ],
   },
   {

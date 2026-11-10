@@ -1,6 +1,6 @@
 # Where people already are
 
-Argus Arena outside its own page: a bot in Slack, Mattermost and Teams, email
+Farzan Arena outside its own page: a bot in Slack, Mattermost and Teams, email
 in, the app installed on a phone or a desktop with push notifications, and a
 browser extension. Each person is always answered as themselves: their model
 access, tools, credit and rights, as in the chat.
@@ -49,7 +49,7 @@ Tools, comma separated; `none` for no tools). In a channel not on the list the
 bot says it does not answer there.
 
 **The answer is posted where the question was**: everyone in the channel reads
-it, though it was written with the asker's rights (a private repository Argus
+it, though it was written with the asker's rights (a private repository Farzan Graph
 reads for them, a plugin acting as them). Keep the channel list to channels
 whose members may see what their askers see, or leave the bots to direct
 messages. The person's email on the platform must be the one here, and
@@ -67,7 +67,7 @@ platform lets them be answered as someone else.
    `https://DOMAIN/api/bots/slack` (Slack checks it at once), and subscribe to
    the bot events `app_mention` and `message.im`. For direct messages, turn on
    **App Home → Messages tab**.
-4. Invite the bot to the channels (`/invite @argus`).
+4. Invite the bot to the channels (`/invite @code-intel`).
 
 Slack must reach the address from the internet. An event Slack sends again
 (it waits three seconds) is answered once.
@@ -79,7 +79,7 @@ Slack must reach the address from the internet. An event Slack sends again
    let it see email addresses (System Console → Site configuration → Users and
    teams → **Show email address**, or a bot with the system role that sees
    them). Add the bot to the channels.
-2. An **outgoing webhook** (trigger word such as `@argus`, callback URL
+2. An **outgoing webhook** (trigger word such as `@code-intel`, callback URL
    `https://DOMAIN/api/bots/mattermost`), or a **slash command** (`/ask`,
    POST to the same URL), or both. Their tokens go into **Mattermost:
    webhook and command tokens**, comma separated.
@@ -165,7 +165,7 @@ them on, with the app closed (see [chat.md](chat.md#notifications)):
 ## The browser extension
 
 `clients/browser-extension/` (Chrome, Edge, Firefox): right-click a selection or
-a page, or use the toolbar button, to ask Argus Arena about it. It opens the
+a page, or use the toolbar button, to ask Farzan Arena about it. It opens the
 app's `/ask` page with the page's title, address and text in the address's
 fragment (never sent to a server); the person signs in as usual, asks, and a
 chat starts with the page attached as a file. With their API key in the

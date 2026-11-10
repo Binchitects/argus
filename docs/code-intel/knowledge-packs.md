@@ -129,7 +129,7 @@ one directory. The directory is not a git checkout and there is nothing to
 (`qt4=4.8.7,qt5=5.15.2,qt6=6.10.3`).
 
 ```bash
-argus pack build --source qt --work-dir .packwork/docsrc/qt --out qt.arguspack --version 1.0
+code-intel pack build --source qt --work-dir .packwork/docsrc/qt --out qt.kpack --version 1.0
 ```
 
 Member lists (`-members.html`) and the source listings of examples are left
@@ -157,7 +157,7 @@ in `tools/grc-catalogs.py`), and records their checksums as its provenance:
 
 ```bash
 python3 tools/grc-catalogs.py --from <the downloaded sources> --texts .packwork/docsrc/grc
-argus pack build --source grc --work-dir "$PWD/.packwork/docsrc/grc" --out packs/grc-1.0.arguspack --version 1.0
+code-intel pack build --source grc --work-dir "$PWD/.packwork/docsrc/grc" --out packs/grc-1.0.kpack --version 1.0
 ```
 
 It has 1,437 pages and 5,349 passages, about 10 MB; the embedding takes a few
@@ -190,7 +190,7 @@ whose terms do not allow redistributing them, and the CIS benchmarks.
 ```bash
 tools/fetch-security-sources.sh
 python3 tools/security-texts.py --from .packwork/docsrc/security --out .packwork/docsrc/security-texts
-argus pack build --source security --work-dir "$PWD/.packwork/docsrc/security-texts" --out packs/security-1.0.arguspack --version 1.0
+code-intel pack build --source security --work-dir "$PWD/.packwork/docsrc/security-texts" --out packs/security-1.0.kpack --version 1.0
 ```
 
 The fetch takes about 50 MB (shallow, sparse clones and MITRE's XML), each
@@ -216,7 +216,7 @@ last affected one), which the `deps_check` tool matches a repository's
 locked versions against with no model. NVD's own records are not taken:
 their CVEs are the advisories' aliases.
 
-Argus renews it itself. With `ARGUS_ADVISORIES_RENEW_HOURS` set (the
+Farzan Graph renews it itself. With `CODE_INTEL_ADVISORIES_RENEW_HOURS` set (the
 stack sets 24), the server renews an installed advisories pack when it is
 that old, and Admin → Packs has **Renew** for any time. A renewal fetches
 again what changed in the advisory database and the KEV catalog, writes the
@@ -225,11 +225,11 @@ changed are embedded again, with the stack's own embedder. On a connected
 machine that builds packs for offline hosts:
 
 ```bash
-argus pack renew --packs-dir packs
-argus pack index --packs-dir packs --out packs/index.json --base-url https://packs.example.com/ advisories
+code-intel pack renew --packs-dir packs
+code-intel pack index --packs-dir packs --out packs/index.json --base-url https://packs.example.com/ advisories
 ```
 
-An offline host then takes it with `argus pack update` (or in a bundle made
+An offline host then takes it with `code-intel pack update` (or in a bundle made
 with `./arenactl bundle --packs`). The
 first fetch is a shallow, sparse clone of the reviewed advisories (about
 340 MB unpacked, two minutes) and the KEV catalog (2 MB); after that only
@@ -263,8 +263,8 @@ with its package URL.
 
 `scan_at` runs the security scanners on a project at any commit, as the
 person, within their GitLab rights. It works only where the `scanners`
-feature is installed (`ARGUS_SCANNERS_URL`); elsewhere the answer says how
-an admin turns it on. Argus sends the commit's files from the project's
+feature is installed (`CODE_INTEL_SCANNERS_URL`); elsewhere the answer says how
+an admin turns it on. Farzan Graph sends the commit's files from the project's
 mirror (`git archive`). With `history` (the default) it sends a git bundle
 of the commit instead, so gitleaks reads every commit before it too. The
 bundle's ref (`refs/arena/scan/...`) is removed again, and nothing sent is
@@ -272,7 +272,7 @@ kept on either side. A history over 1 GB is sent as the commit's files
 alone.
 
 The scanners run in `deploy/services/scanners`, on a network shared with
-Argus only, with no way out:
+Farzan Graph only, with no way out:
 
 - opengrep's engine with Arena's own rules (`rules/`, one file per language,
   each rule with its CWE, severity and confidence). The image is not built
@@ -288,9 +288,9 @@ named. gosec and the .NET analyzers are not there: they build the project,
 which fetches its packages.
 
 A change not committed anywhere yet (Fix it's, before its merge request) is
-scanned from its files: the app posts them to `/admin/scan-files` (Argus's
+scanned from its files: the app posts them to `/admin/scan-files` (Farzan Graph's
 admin token, never a model's tool), up to 200 files and 20 MB, paths inside
-the repository only, and Argus sends them to the scanners as a tar, with no
+the repository only, and Farzan Graph sends them to the scanners as a tar, with no
 history.
 
 ## Using packs
@@ -300,11 +300,11 @@ so the public tooling stands alone; `--config` is also accepted and reads
 `packs.dir` from it.
 
 ```bash
-argus pack list --packs-dir ~/.argus/packs
+code-intel pack list --packs-dir ~/.code-intel/packs
 ```
 
 ```bash
-argus pack install https://example.org/python-3.13.arguspack --sha256 <digest> --packs-dir ~/.argus/packs
+code-intel pack install https://example.org/python-3.13.kpack --sha256 <digest> --packs-dir ~/.code-intel/packs
 ```
 
 A pack that fails its checksum is **not installed** — no file, no registry
@@ -313,7 +313,7 @@ the failure this check exists to prevent, so always pass `--sha256` when
 installing from a URL.
 
 ```bash
-argus pack info python --packs-dir ~/.argus/packs
+code-intel pack info python --packs-dir ~/.code-intel/packs
 ```
 
 `info` prints provenance, licence and attribution in full. **That output is how
@@ -322,8 +322,8 @@ documentation, and it stays redistributable only while it says whose it is and
 under what terms.
 
 ```bash
-argus pack remove python --packs-dir ~/.argus/packs
-argus pack update --index-url https://example.org/packs/index.json --packs-dir ~/.argus/packs
+code-intel pack remove python --packs-dir ~/.code-intel/packs
+code-intel pack update --index-url https://example.org/packs/index.json --packs-dir ~/.code-intel/packs
 ```
 
 `update` compares every installed pack against a published index and installs
@@ -338,9 +338,9 @@ new artifact is verified before the old one is replaced.
 `update` reads a JSON index, and `pack index` writes one:
 
 ```bash
-argus pack build --source python --work-dir /tmp/cpython \
-  --out /srv/packs/python-3.13.arguspack --version 3.13 --fetch
-argus pack index --packs-dir /srv/packs \
+code-intel pack build --source python --work-dir /tmp/cpython \
+  --out /srv/packs/python-3.13.kpack --version 3.13 --fetch
+code-intel pack index --packs-dir /srv/packs \
   --base-url https://packs.example.org \
   --out /srv/packs/index.json
 ```
@@ -355,7 +355,7 @@ index looks like this:
     {
       "name": "python",
       "version": "3.13",
-      "url": "https://packs.example.org/python-3.13.arguspack",
+      "url": "https://packs.example.org/python-3.13.kpack",
       "sha256": "1f0c…",
       "size_bytes": 41234567,
       "license": "PSF-2.0",
@@ -381,15 +381,15 @@ holds several versions.
 ## Building a pack
 
 Requires the embedding server the stack runs (`llamacpp-embed`, nomic-embed-text)
-reachable at `ARGUS_EMBED_URL` -- the same model the index uses, so a pack's
+reachable at `CODE_INTEL_EMBED_URL` -- the same model the index uses, so a pack's
 vectors and a query's vectors share one space:
 
 ```bash
-export ARGUS_EMBED_URL=http://localhost:8081   # or wherever llamacpp-embed answers
+export CODE_INTEL_EMBED_URL=http://localhost:8081   # or wherever llamacpp-embed answers
 ```
 
 ```bash
-argus pack build --source python --work-dir /tmp/cpython --out python-3.13.arguspack --version 3.13 --fetch
+code-intel pack build --source python --work-dir /tmp/cpython --out python-3.13.kpack --version 3.13 --fetch
 ```
 
 `--fetch` clones or updates the source first. Without it, `--work-dir` must
@@ -402,7 +402,7 @@ Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
 `cppreference`, `qt`, `grc`, `security`, `advisories`, `debugger`, `algorithms`, `system-design`, the two composites
 `win32` and `wdk` (API reference *and* samples in one pack), and the halves on
 their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
-`argus pack build --help` prints the list.
+`code-intel pack build --help` prints the list.
 
 A build refuses to produce a pack whose source records no licence,
 licence URL, or attribution. It also writes to a temporary file and renames on
@@ -417,7 +417,7 @@ models are not comparable, and mixing them produces plausible-looking, subtly
 wrong results.
 
 A mismatched pack still installs and still serves `docs_lookup` and lexical
-search, which do not depend on the embedding space. `argus pack list` marks it
+search, which do not depend on the embedding space. `code-intel pack list` marks it
 `[INCOMPATIBLE]`, and `docs_search` returns a message naming the pack and the
 model rather than a traceback.
 

@@ -1,6 +1,6 @@
 # Backup and restore
 
-Most of what Argus keeps on disk is a **cache of GitLab**. Losing it costs
+Most of what Farzan Graph keeps on disk is a **cache of GitLab**. Losing it costs
 time, not information. Exactly one thing is irreplaceable, and knowing which
 is the whole procedure.
 
@@ -24,14 +24,14 @@ for a shorter one-off restore — the wrong way round.
 ## Taking a backup
 
 ```bash
-argus backup --config /etc/argus/config.yaml --out /backups/argus/$(date +%F)
+code-intel backup --config /etc/code-intel/config.yaml --out /backups/code-intel/$(date +%F)
 ```
 
 In a container deployment:
 
 ```bash
-docker compose exec server argus backup \
-    --config /etc/argus/config.yaml --out /var/lib/argus/backup
+docker compose exec server code-intel backup \
+    --config /etc/code-intel/config.yaml --out /var/lib/code-intel/backup
 ```
 
 Output names what it took and what it refused:
@@ -63,10 +63,10 @@ discovered during a restore.
 Restore is copying one file back.
 
 ```bash
-systemctl stop argus            # or: docker compose down
-cp /backups/argus/2026-08-07/index.db /var/lib/argus/index.db
-cp /backups/argus/2026-08-07/config.yaml /etc/argus/config.yaml
-cp -r /backups/argus/2026-08-07/packs/. /var/lib/argus/packs/   # if any
+systemctl stop code-intel            # or: docker compose down
+cp /backups/code-intel/2026-08-07/index.db /var/lib/code-intel/index.db
+cp /backups/code-intel/2026-08-07/config.yaml /etc/code-intel/config.yaml
+cp -r /backups/code-intel/2026-08-07/packs/. /var/lib/code-intel/packs/   # if any
 docker compose up -d
 ```
 
@@ -81,20 +81,20 @@ Everything keeps answering from the restored index while it runs.
 ### Verify the restore, don't assume it
 
 ```bash
-argus status --config /etc/argus/config.yaml
+code-intel status --config /etc/code-intel/config.yaml
 ```
 
 Every repo should be listed. Then make one real query through `/mcp` as a
 developer, not through `/healthz` — `/healthz` bypasses the auth middleware
 and returns 200 whether or not the server can serve anything. See
-`docs/argus/clients.md` for the exact call.
+`docs/code-intel/clients.md` for the exact call.
 
 ## If there is no backup
 
 Everything except `audit` rebuilds from GitLab:
 
 ```bash
-argus index --config /etc/argus/config.yaml
+code-intel index --config /etc/code-intel/config.yaml
 ```
 
 **Budget for this before you need it.** The only measured figure is 1,199
@@ -106,8 +106,8 @@ a guess.
 Knowledge packs rebuild separately and need the embedder (`llamacpp-embed`) with the pinned model:
 
 ```bash
-argus pack build --source python --work-dir /tmp/cpython \
-    --out python.arguspack --version 3.13 --fetch
+code-intel pack build --source python --work-dir /tmp/cpython \
+    --out python.kpack --version 3.13 --fetch
 ```
 
 Or reinstall them from wherever they are published, which is faster.

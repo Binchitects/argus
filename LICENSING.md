@@ -1,6 +1,6 @@
 # Licensing
 
-Argus Arena (with Argus, Code Arena and everything else in this repository,
+Farzan Arena (with Farzan Graph, Code Arena and everything else in this repository,
 unless a file says otherwise) is **dual-licensed**:
 
 1. under the **GNU Affero General Public License, version 3 only**
@@ -12,7 +12,7 @@ Copyright (C) 2026 Binchitects and contributors.
 
 ## Using it under the AGPL
 
-Anyone may use, study, change and share Argus Arena under the AGPL, at no cost.
+Anyone may use, study, change and share Farzan Arena under the AGPL, at no cost.
 The AGPL is a strong copyleft licence, and its conditions apply to every use,
 commercial or not:
 
@@ -32,7 +32,7 @@ commercial or not:
 Commercial use that does not fully meet the AGPL's conditions needs a
 commercial license. In particular, a commercial license is required to:
 
-- offer Argus Arena, Code Arena or a modified version of either as a hosted
+- offer Farzan Arena, Code Arena or a modified version of either as a hosted
   service, a managed offering or part of a paid product **without** releasing
   your complete source code under the AGPL to its users;
 - embed or bundle any part of it in proprietary or closed-source software,
@@ -60,7 +60,7 @@ to every copy and every modified version:
 
 1. **Attribution and source notice (section 7(b)).** The interactive user
    interfaces of the software show the product's licence and a "Source" link
-   (in the web app and in Argus's own web app, beside the version at the foot
+   (in the web app and in Farzan Graph's own web app, beside the version at the foot
    of the navigation; in Code Arena, in its about box and `--version` output).
    Those Appropriate Legal Notices, and the copyright and licence notices in
    the source files, must be preserved in every copy and modified version, and
@@ -68,8 +68,8 @@ to every copy and every modified version:
 2. **Origin (section 7(c)).** A modified version must be marked as changed, and
    must not be presented as the original or as made or endorsed by Binchitects.
 3. **Trademarks (section 7(e)).** The AGPL grants no rights to the names
-   "Argus Arena", "Argus" (as a product name), "Code Arena" or their logos. You
-   may say truthfully that your work is based on Argus Arena, but a product or
+   "Farzan Arena", "Farzan Graph" (as a product name), "Code Arena" or their logos. You
+   may say truthfully that your work is based on Farzan Arena, but a product or
    service offered to others under one of those names, or a confusingly similar
    one, needs written permission from Binchitects.
 
@@ -81,7 +81,7 @@ models (each under its own licence, which its model card on Hugging Face
 gives; Admin → Models → **Find on Hugging Face** shows it before a download),
 Laya (Apache-2.0), sqlite-vec's Linux build in `native/` (MIT or Apache-2.0,
 taken from its published wheel and checked against its SHA-256), and the knowledge packs (CC-BY-4.0, CC-BY-SA-3.0, PSF-2.0,
-GFDL-1.3 or public domain, per pack; `argus pack info <name>` prints each).
+GFDL-1.3 or public domain, per pack; `code-intel pack info <name>` prints each).
 Their licences, not this one, govern them.
 
 ## Contributions

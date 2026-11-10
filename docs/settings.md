@@ -90,7 +90,7 @@ How many backups are kept is `BACKUP_KEEP` in `.env`, read by
 **Settings → Branding → Where the source is** is linked as **Source** beside
 the version at the foot of the sidebar and of the navigation on a phone (the
 collapsed sidebar shows it as an icon, with the version in its tooltip), so
-every signed-in page offers it. Argus Arena is under the AGPL, which has every
+every signed-in page offers it. Farzan Arena is under the AGPL, which has every
 person who uses it over a network offered the complete source of the version
 they use: a deployment of a modified version points this at its own source.
 [LICENSING.md](../LICENSING.md) says when a commercial license is needed

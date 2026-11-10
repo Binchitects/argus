@@ -10,7 +10,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -36,7 +36,7 @@ describe('shared chats', () => {
       'GET /api/shared/s1': () => ({ json: shared() }),
       'POST /api/shared/s1/fork': () => ({ status: 201, json: { id: 'c9', title: 'Launch date (fork)' } }),
       'GET /api/chat/conversations': () => ({ json: [] }),
-      'GET /api/chat/conversations/c9': () => ({ json: { id: 'c9', title: 'Launch date (fork)', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null, currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [] } }),
+      'GET /api/chat/conversations/c9': () => ({ json: { id: 'c9', title: 'Launch date (fork)', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null, currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [] } }),
     })
     const { router } = renderApp('/shared/s1')
     expect(await screen.findByRole('heading', { name: 'Launch date' })).toBeInTheDocument()
@@ -76,7 +76,7 @@ describe('shared chats', () => {
       'GET /api/shared/s1': () => ({ json: shared({ mine: true, conversationId: 'c1', link: { id: 's1', reach: 'Company', groups: [], branch: false, leafId: null, opens: 5, people: 3, createdAt: '' } }) }),
       'DELETE /api/chat/conversations/c1/share': () => ({ status: 204 }),
       'GET /api/chat/conversations': () => ({ json: [] }),
-      'GET /api/chat/conversations/c1': () => ({ json: { ...shared(), id: 'c1', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null, archivedAt: null, forkedFrom: null, createdAt: '' } }),
+      'GET /api/chat/conversations/c1': () => ({ json: { ...shared(), id: 'c1', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null, archivedAt: null, forkedFrom: null, createdAt: '' } }),
     })
     const { router } = renderApp('/shared/s1')
     expect(await screen.findByText(/Opened 5 times by 3 people/)).toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('shared chats', () => {
   it('a chat is shared from its menu with chosen groups, its branch only, and revoked in one click', async () => {
     let share: object | null = null
     const chat: Conversation = {
-      id: 'c1', title: 'Launch date', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+      id: 'c1', title: 'Launch date', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
       currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages,
     }
     const calls = fakeApi(member, {

@@ -107,7 +107,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
                 groups = groups.Value, people = people.Value?.Take(10), problem = groups.Problem ?? people.Problem,
             }),
             ["library"] = Node(new { report = library.Value, problem = library.Problem }),
-            ["code-intel"] = await codeIntelTask,
+            ["codeIntel"] = await codeIntelTask,
             ["backups"] = Node(await backupsTask),
             ["logs"] = Node(await logsTask),
             ["metrics"] = Node(await metricsTask),

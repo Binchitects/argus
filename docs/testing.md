@@ -8,14 +8,14 @@ What runs today, what it leaves out, and the tests that would close the gap.
 
 | layer | entry point | asserts | needs |
 |---|---|---|---|
-| **Argus** | `./tools/dn test tests/Argus.Tests`; also the image's `test` stage and CI; `npm test` in `src/argus-web` | every route of its own app has its help; config and credentials, the parser, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs, the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
+| **Farzan Graph** | `./tools/dn test tests/CodeIntel.Tests`; also the image's `test` stage and CI; `npm test` in `src/code-intel-web` | every route of its own app has its help; config and credentials, the parser, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs, the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
 | **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **345 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, where the video server decodes (`sd-serve.sh` under `/bin/sh` with a fake `nvidia-smi`), messages queued while a chat answers, long documents' pages drawn twenty at a time, credit and alert news by email and webhook, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
 | **Deployment** | `./arenactl check upgrade --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **Code Arena** | `./tools/dn test tests/CodeArena.Tests`, `npx vitest run src/code-arena` in `src/web`, and CI | the agent against a fake gateway and MCP server (tools, modes, approvals, sessions, compaction); the prompt's line editor on a fake terminal (↑'s history per folder, the draft kept, editing keys, several lines, a paste taller than the screen drawn once, Ctrl+Z stopping it with the keys signals again and the prompt drawn as it was after); the IDE's server: files inside the folder only (absolute paths, `..` and links that lead out refused), search, the agent's changes accepted or reverted, this run's key and the Host and Origin checks on every call and on the terminal's WebSocket; terminals on a real pseudo-terminal with `/bin/sh` (echo, `stty size` after a resize, the exit code, close, a session and controlling terminal, no signal ignored or blocked, no API key), and the macOS helper's path run on Linux; the page (Explorer, tabs, saving, the diff view, search, the terminal panel, with Monaco, xterm.js and the socket faked); CI builds the Linux package with its page and starts it | Linux or macOS |
 | **arena CLI** | `python3 -m unittest discover clients/arena`, and CI | `arena ask`, `review` and `explain-failure` against a fake gateway and GitLab on a local socket: streaming, the model chosen, diffs and logs cut to the budget, the note posted, a private CA, every exit code; the GitLab CI template's jobs run by `sh` (with PyYAML) | nothing running |
 | **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | the fake vLLM (`tools/fake-vllm`: health, models, streamed answers at a set pace, vLLM's metrics, sleep and wake, the key from the environment, a failed load, a crash, a drain); `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; the offline installer (`make-installer.sh`, `installer.sh`): the bundle's layout and checksums, a damaged bundle or `.run` refused, arguments, dry runs that change nothing, the version gate, install, an upgrade from a 5.2.0 installation (backup, files, `.env` merged), a failed upgrade rolled back, an interrupted one carried on (also at once after Ctrl-C while its images load, and by a newer release's bundle) or rolled back instead, the record of the old release back after a rollback, the disk asked for only the images loaded, a hotfix's unchanged image loading by its new name, what a killed `.run` left removed by the next, repair, remove with and without `--purge`, status, on Docker and Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
 | **Restore and rollback** | `./arenactl check restore [--from DIR]`, `./arenactl check rollback FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
-| **Clients** | `./arenactl check clients` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
+| **Clients** | `./arenactl check clients` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Farzan Graph over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `./arenactl check scale` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
 | **People** | `./arenactl check load` | 50, 100 or 300 people arriving over a ramp: sign in, lists, a new chat, a streamed answer, the chat read back; p50/p95/p99 and every failure by kind | a running stack |
 | **Functional** | `./arenactl check functional` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
@@ -35,7 +35,7 @@ Docker stack, which it never touched (2026-10-09, Podman 5.7): a 5.2.0
 installation made the 5.2.0 way (5.2.0's `airgap.sh` bundle of the 5.2.0 images,
 then `podman compose up`) with a person, a group, a chat and a setting put in
 through the API; bundles made by `make-installer.sh` of a "5.3.0-test" (this
-branch's app, Argus and web built over 5.2.0's images) and of a release whose
+branch's app, Farzan Graph and web built over 5.2.0's images) and of a release whose
 app cannot start; then `upgrade` (the backup, the files, the images, every
 service's version, the data kept), `upgrade --rollback` (what went in after
 the upgrade gone, what was there before kept), the upgrade again, a failed
@@ -51,12 +51,12 @@ bundle.
 **Upgrades on a fresh offline host** (`tools/offline-e2e/run.sh`, 2026-11-03,
 for 7.7.1): a privileged container with its own Docker and no network at all,
 sharing the GPU through CDI. 7.6.3's `.run` installed there with every feature
-on (Argus and the scanners with a GitLab address where nothing answers: they
+on (Farzan Graph and the scanners with a GitLab address where nothing answers: they
 start without one, and the host has no network to reach one), a chat model on
 the GPU, and what people keep written through the API
 (`tools/offline-e2e/data.py`: a person, a chat the model answered, a file
 attached to it, a key of the admin's own, a setting); then a 7.7.1 bundle of
-this tree (7.7.0's images, the app and Argus saying 7.7.1). Every run ends with
+this tree (7.7.0's images, the app and Farzan Graph saying 7.7.1). Every run ends with
 status and verify, each container up and healthy, the admin's sign-in and
 overview, the data as it was, the model library's owner as it was, and the
 functional test (62 checks). The runs: stopped by Ctrl-C while its images load
@@ -114,7 +114,7 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 | S3.1 | OIDC discovery + real code exchange per client, claims correct | exists |
 | S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts)|
 | S3.3 | the registered OIDC clients are exactly the configured ones | exists — `OidcTests.A_client_the_configuration_does_not_name_is_removed_at_start` |
-| S3.4 | `config/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
+| S3.4 | `config/directory/users.yml` is hash-free and Farzan Graph can read it | exists — `IdentityTests.The_directory_for_code_intel_lists_people_without_passwords` |
 | S3.5 | a changed `APP_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
 
 ### S4 — Gateway *(good)*
@@ -130,14 +130,14 @@ refusals counted apart from requests, and an upgrade from v5.2.0 that keeps a
 limit a key already carried as its person's own.
 Missing: behaviour when the engine is down (retry, then a clear error).
 
-### S5 — Argus *(strong unit, weak integration)*
+### S5 — Farzan Graph *(strong unit, weak integration)*
 
-`tests/Argus.Tests` has 138 tests (§1). Missing at the stack level: index →
+`tests/CodeIntel.Tests` has 138 tests (§1). Missing at the stack level: index →
 MCP → per-token ACL end to end against a real GitLab **in CI** (the
 `tools/test-gitlab/` fixture runs it on demand, below), and the audit JSON
 stream actually reaching Loki.
 
-One lesson from the Python Argus is kept in the .NET tests: **a test fixture
+One lesson from the Python Farzan Graph is kept in the .NET tests: **a test fixture
 that is more permissive than production hides exactly the failures that only
 production can have.** `impact_of` was once dead for every caller, because the
 server opens the index read-only and the tool wrote a temporary table, while
@@ -189,7 +189,7 @@ exactly the history an operator enables collection to get.
 
 ### S8 — Ingress and TLS
 
-Traefik routes three names: the app, the gateway and Argus.
+Traefik routes three names: the app, the gateway and Farzan Graph.
 `functional-test.py` and `clients-check.py` reach each through it, and
 `compliance-check.py` checks its TLS. Missing: that a **denied** hostname
 really is denied.
@@ -241,7 +241,7 @@ makes (`loadtest-…`) are taken away at the end unless `--keep`.
 
 ### S10 — Migrations and upgrades
 
-`argus index` twice, compose `up` twice, `down`/`up`, and a version rollback.
+`code-intel index` twice, compose `up` twice, `down`/`up`, and a version rollback.
 The repo has been bitten by idempotency before. `upgrade-test.py --from TAG`
 runs `up` twice and `down`/`up`; `rollback-test.sh FROM_TAG TO_TAG` the
 rollback: the older images over the newer database, then the backup from
@@ -269,10 +269,10 @@ because it does not trust the certificate.
 
 | test | asserts |
 |---|---|
-| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified, and re-verified on v2.1.2** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__argus__find_symbol`, got `root/eal-core` back, and Argus logged `tool=find_symbol user=dev_alpha outcome=ok`. The variable is read at process start, so it cannot be set afterwards. Config: `clients/deepseek-harness/` |
-| C3.2 | Qwen Code connects to Argus, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Argus logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to the sign-in and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
+| C3.1 | DeepSeek Harness reaches the API with `NODE_EXTRA_CA_CERTS` set before launch. **Verified, and re-verified on v2.1.2** — `dsh --profile headless` with `NODE_EXTRA_CA_CERTS` and `--patch` called `mcp__code-intel__find_symbol`, got `root/eal-core` back, and Farzan Graph logged `tool=find_symbol user=dev_alpha outcome=ok`. The variable is read at process start, so it cannot be set afterwards. Config: `clients/deepseek-harness/` |
+| C3.2 | Qwen Code connects to Farzan Graph, calls a tool and completes. **Now verified** on v2.1.2 with qwen 0.23.3, against the stack's own gateway (`--auth-type openai --openai-base-url https://gateway.<domain>/v1`) rather than a cloud key: it called `find_symbol`, distinguished the definition in `src/decoder.c` from the declaration in `include/eal/decoder.h`, and Farzan Graph logged `user=dev_alpha outcome=ok`. Two things had to be learned: `--trust` is required in a headless run or every call waits for confirmation, and the gateway host is `gateway.<domain>` — `api.<domain>` routes to the sign-in and answers with a login redirect that reads as a 401. Config: `clients/qwen-code/` |
 | C3.3 | Hermes connects, lists tools and completes (see [hermes.md](hermes.md)) |
-| C3.4 | a generic MCP client connects to `argus.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik and lists 16 tools |
+| C3.4 | a generic MCP client connects to `code-intel.<domain>/mcp` with a GitLab PAT and lists tools. **Verified** — the harness MCP client (`@deepseek-ai/dsh-mcp-client`, streamable-http) handshakes through Traefik and lists 16 tools |
 | C3.5 | **per-person ACL**: developer A's PAT does not return developer B's private repository — the question `tools/test-gitlab/` exists to answer. **Verified and now automated** against a real GitLab CE by `./tools/test-gitlab/run.sh`, which is one command from a cold start: `DecodeFrame` (eal-core) is visible to `dev_alpha` and denied to `dev_beta`; `RunPipeline` (etl-decoder) the reverse; `ShimEntry` (driver-shim, which has no members) is denied to both, with the "does exist in 1 repository you cannot read" notice. `verify_tools.py` extends it to **all sixteen MCP tools over the wire**, checks each result's declared shape, and asserts that no structured field names a repository the caller cannot read |
 
 ### C4 — Browser *(G8, now covered by the app's Playwright suite)*
@@ -285,7 +285,7 @@ original minimum set, and where each item stands:
 | C4.1 | `https://<domain>/admin` sends a signed-out browser to sign in and back |
 | C4.2 | before the CA is trusted, the warning can be clicked through (no HSTS); after, no warning |
 | C4.3 | a chat renders a streamed answer incrementally: **done in the app's chat** (`chat.spec.ts`) |
-| C4.4 | Argus is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
+| C4.4 | Farzan Graph is offered to a non-admin: **done in the app's chat**, with the no-access notice for someone without access |
 | C4.5 | every dashboard draws every panel without an error: **done in the app** (`admin.spec.ts`) |
 | C4.6 | sign-out ends the session at the app and every service that trusts it |
 
@@ -297,24 +297,24 @@ key is a failure that S6.2 alone would not catch.
 
 ### The harness, 2026-09-15
 
-Argus as an MCP tool server for DeepSeek Harness, end to end:
+Farzan Graph as an MCP tool server for DeepSeek Harness, end to end:
 
 ```bash
-cat > /tmp/argus-mcp.patch.yml <<'YML'
+cat > /tmp/code-intel-mcp.patch.yml <<'YML'
 - insert:                       # `insert:` is the append form; a bare entry
   - name: '@deepseek-ai/dsh-mcp-client'   # is read as an override and rejected
     config:
-      serverName: argus
+      serverName: code-intel
       transport: streamable-http
-      url: https://argus.llm.localhost/mcp
+      url: https://code-intel.llm.localhost/mcp
       headers:
-        Authorization: !!js '`Bearer ${process.env.ARGUS_TOKEN}`'
+        Authorization: !!js '`Bearer ${process.env.CODE_INTEL_TOKEN}`'
 YML
 
-ARGUS_TOKEN=<gitlab PAT> NODE_EXTRA_CA_CERTS=config/traefik/certs/ca.crt \
-  dsh --profile headless --patch /tmp/argus-mcp.patch.yml \
-  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
-# -> root/eal-core, and Argus logs the call: outcome=ok, user=dev_alpha
+CODE_INTEL_TOKEN=<gitlab PAT> NODE_EXTRA_CA_CERTS=config/traefik/certs/ca.crt \
+  dsh --profile headless --patch /tmp/code-intel-mcp.patch.yml \
+  "Use the mcp__code-intel__find_symbol tool, with name=DecodeFrame."
+# -> root/eal-core, and Farzan Graph logs the call: outcome=ok, user=dev_alpha
 ```
 
 Two things this settled. The harness has **no per-server TLS option**, so
@@ -332,7 +332,7 @@ first time, which had been the largest untested claim in the project:
 ```
 
 That one command replaces the sequence below (up and seed; the per-tool
-verifier is not yet ported to the .NET Argus), and takes the fixture down again
+verifier is not yet ported to the .NET Farzan Graph), and takes the fixture down again
 when it is finished — including when seeding fails. The fixture is
 `restart: "no"` now; it used to be `unless-stopped`, which meant it survived
 reboots and sat at 2.63 GiB of RAM and 2.17% CPU indefinitely on a host whose
@@ -350,24 +350,24 @@ docker run --rm --user root --network host -e HOME=/tmp \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(command -v docker)":/usr/local/bin/docker \
   -v "$PWD/tools/test-gitlab:/t" -w /t python:3.13-slim python /t/seed.py
-docker exec argus argus index --config /etc/argus/config.yaml
+docker exec code-intel code-intel index --config /etc/code-intel/config.yaml
 docker compose -f tools/test-gitlab/docker-compose.yml down -v   # do not skip this
 ```
 
 An index outside a container needs its work directory off an NTFS checkout:
 SQLite in WAL mode cannot open its shared-memory file over that filesystem and
-`argus index` dies with `disk I/O error`.
+`code-intel index` dies with `disk I/O error`.
 
 Two things that had to be right first, all now recorded in the code:
 
-* Argus could not reach GitLab at all until the fixture was running, and every
-  chat's Argus call came back **401** — Argus rejects a chat user it cannot
+* Farzan Graph could not reach GitLab at all until the fixture was running, and every
+  chat's Farzan Graph call came back **401** — Farzan Graph rejects a chat user it cannot
   resolve access for.
 * The clone URL had to be rebased onto the configured GitLab: GitLab advertises
   `http://localhost:8929`, which inside a container is the container itself.
 
-Note that a deployment pointed at this fixture (`ARGUS_GITLAB_URL` in `.env`)
-has nothing to index while the fixture is down, so `ArgusIndexStale` fires and
+Note that a deployment pointed at this fixture (`CODE_INTEL_GITLAB_URL` in `.env`)
+has nothing to index while the fixture is down, so `CodeIntelIndexStale` fires and
 the app's Overview says the repositories are out of date. That is the
 system being right, not broken: the index genuinely cannot refresh.
 
@@ -385,7 +385,7 @@ Ordered by (risk × likelihood), not by effort:
 | ~~5~~ | ~~**S9.3 genuinely offline start**~~ — **done** (`tools/offline-e2e/run.sh`) | |
 | ~~6~~ | ~~**S3.4 hash-free account list**~~ — **done** (`IdentityTests`) | |
 | ~~7~~ | ~~**S9.1/S9.2 airgap round trip**~~ — **done**: S9.1 scripted (`airgap.sh`), S9.2 on a host with no network (`tools/offline-e2e/run.sh`) | |
-| ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./tools/test-gitlab/run.sh` runs the whole lifecycle, and `ARGUS_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
+| ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./tools/test-gitlab/run.sh` runs the whole lifecycle, and `CODE_INTEL_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
 | 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |
 
@@ -398,7 +398,7 @@ cd deploy
 
 # unit (no stack needed), from the repository root
 ../tools/dn test tests/Llm.Tests -c Release
-../tools/dn test tests/Argus.Tests -c Release
+../tools/dn test tests/CodeIntel.Tests -c Release
 (cd .. && python3 -m unittest discover -s tests/deploy)   # the recovery and offline scripts
 
 # against a real Laya (a throwaway container of services/laya on 127.0.0.1:18000); skipped without LAYA_URL
@@ -426,13 +426,13 @@ cd deploy
 E2E_PASSWORD=<admin password> E2E_CHAT=1 npm run e2e
 # (with E2E_CHAT=1 one test at a time: the engine answers in turn. CI's runners
 # have no model, so this run is on the stack's host, by hand)
-# ... and Argus's per-person access, with the test GitLab up
+# ... and Farzan Graph's per-person access, with the test GitLab up
 ./tools/test-gitlab/run.sh --keep   # from the repo root
-E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e
+E2E_CODE_INTEL_USER=dev_beta E2E_CODE_INTEL_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 npm run e2e
 
 # clients as developers point them: the API (OpenAI and Anthropic), streaming,
-# tool calls, spend attribution; Argus over MCP; Qwen Code and DeepSeek Harness
-# through the API and calling Argus (each with a throwaway home; the test GitLab up)
+# tool calls, spend attribution; Farzan Graph over MCP; Qwen Code and DeepSeek Harness
+# through the API and calling Farzan Graph (each with a throwaway home; the test GitLab up)
 ../arenactl check clients --dsh /path/to/node_modules/.bin/dsh
 
 # many people at once: the chat's fair-use queue (and no answer carrying another
@@ -452,7 +452,7 @@ E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 
 ../arenactl airgap pack --dry-run /tmp/arena.tar   # what an offline bundle would hold
 ```
 
-For the Argus case the stack's Argus must index the test GitLab, and the
+For the Farzan Graph case the stack's Farzan Graph must index the test GitLab, and the
 fixture's `dev_beta` must be a person in the app. Keep a copy of `.env` first,
 because all of this is temporary:
 
@@ -461,10 +461,10 @@ because all of this is temporary:
    from `tools/test-gitlab/seeded.json` (not in git; it is a throwaway
    instance). Then run `docker compose up -d` and wait for the first index.
 2. In the app, go to Admin → People and add `dev_beta` with the email
-   `dev_beta@argus.test`. Argus matches the chat user by that email.
+   `dev_beta@code-intel.test`. Farzan Graph matches the chat user by that email.
 3. Afterwards:
    - put the old `.env` back and run `docker compose up -d --remove-orphans`
-   - run `docker compose --profile argus rm -sf argus llamacpp-embed embed-init`
+   - run `docker compose --profile code-intel rm -sf code-intel llamacpp-embed embed-init`
    - delete `dev_beta` from the app
    - run `./tools/test-gitlab/run.sh --down`
 

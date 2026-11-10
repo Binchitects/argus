@@ -6,7 +6,7 @@ Three layers, five long-running containers, one network.
  browser ──────────────┐                         editors / agents (MCP, OpenAI API)
                        ▼                                  │            │
             ┌──────────────────────┐   /mcp  ◄───────────┘            │
-            │ argus  :8080          │                                 │
+            │ code-intel  :8080          │                                 │
             │  React app (static)   │                                 ▼
             │  /api   sign-in, chat,│   chat, per person   ┌──────────────────┐
             │         admin         ├─────────────────────►│ litellm  :4000   │
@@ -35,16 +35,16 @@ with Postgres behind it. Every person is an *internal user* keyed by email with
 a budget; every key belongs to a person. Nothing reaches the engine without
 going through a key, so spend is always attributable and budgets always bind.
 
-**App.** One .NET process (`src/Argus`) serves:
+**App.** One .NET process (`src/CodeIntel`) serves:
 
 | path | who | what |
 |---|---|---|
-| `/` | browsers | the React app (`src/argus-web/`), with a strict CSP |
+| `/` | browsers | the React app (`src/code-intel-web/`), with a strict CSP |
 | `/api/auth/*` | anyone | sign-in and sign-out |
 | `/api/*` | a signed-in person (session cookie) or their `ak_` key | chat, conversations, keys, settings; `/api/admin/*` for administrators |
-| `/admin/*` | an administrator's session, or `ARGUS_ADMIN_TOKEN` | the code index's operator surface: index runs, packs, explore, metrics |
+| `/admin/*` | an administrator's session, or `CODE_INTEL_ADMIN_TOKEN` | the code index's operator surface: index runs, packs, explore, metrics |
 | `/mcp` | an `ak_` key or a GitLab token | the 17 tools over MCP (streamable HTTP) |
-| `/hook/gitlab` | GitLab, with `ARGUS_WEBHOOK_TOKEN` | index a repository on push |
+| `/hook/gitlab` | GitLab, with `CODE_INTEL_WEBHOOK_TOKEN` | index a repository on push |
 | `/healthz` | anyone | liveness |
 
 ## Identity
@@ -54,9 +54,9 @@ People live in `app.db` (SQLite, beside the index): username, email, role
 optionally the GitLab username an administrator linked. A session is a random
 token in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over HTTPS), stored
 only as its SHA-256. Any change made with a session must carry the
-`X-Argus-Request` header, which a cross-site form cannot set. Failed sign-ins
+`X-Farzan Graph-Request` header, which a cross-site form cannot set. Failed sign-ins
 are throttled per name and per address; successful ones never are. Behind the
-sign-in form, Argus's logo gives way to its eyes, which open across the screen,
+sign-in form, Farzan Graph's logo gives way to its eyes, which open across the screen,
 look about and close back into it (a still logo when the device asks for
 reduced motion); it is drawn in the page itself, nothing is fetched for it.
 
@@ -90,7 +90,7 @@ message in the conversation, not as a broken page.
 
 ## The code index
 
-`argus index` (or the schedule, or the Indexing page, or a GitLab push)
+`code-intel index` (or the schedule, or the Indexing page, or a GitLab push)
 mirrors every project the service token can see, extracts symbols with
 Universal Ctags, doc comments and Python docstrings, resolves `#include`s
 across repositories into a dependency graph, and embeds each symbol with its
@@ -103,10 +103,10 @@ See [code-index/](../).
 
 | data | where | rebuildable? |
 |---|---|---|
-| people, sessions, `ak_` keys, conversations | `argus-data` volume, `app.db` | **no** — back it up |
-| code index, audit log | `argus-data`, `index.db`, `index-audit.db` | index yes (from GitLab), audit no |
-| knowledge packs | `argus-data`, `packs/` | yes (reinstall) |
-| mirrors and worktrees | `argus-data`, `mirrors/`, `trees/` | yes |
+| people, sessions, `ak_` keys, conversations | `code-intel-data` volume, `app.db` | **no** — back it up |
+| code index, audit log | `code-intel-data`, `index.db`, `index-audit.db` | index yes (from GitLab), audit no |
+| knowledge packs | `code-intel-data`, `packs/` | yes (reinstall) |
+| mirrors and worktrees | `code-intel-data`, `mirrors/`, `trees/` | yes |
 | gateway people, keys, budgets, spend | `postgres-data` | **no** — back it up |
 | model weights | `LLAMACPP_MODEL_DIR`, `EMBED_MODEL_DIR` | yes (download) |
 

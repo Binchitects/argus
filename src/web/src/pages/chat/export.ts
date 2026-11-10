@@ -2,6 +2,7 @@ import { Marked } from 'marked'
 import { sanitize } from './markdown-blocks'
 import { toolTitle } from './format'
 import type { Message } from './types'
+import { productName } from '@/lib/brand'
 
 /** What a tool answered, at most this much in an export (the chat keeps it all). */
 const ToolResultChars = 4_000
@@ -30,7 +31,7 @@ export function exportName(title: string | null, what: string, extension: string
 export function chatToMarkdown(title: string, path: Message[], at = new Date()): string {
   const results = new Map(path.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const models = [...new Set(path.map((m) => m.model).filter(Boolean))]
-  const out = [`# ${title}`, '', `*Exported from Argus Arena on ${at.toLocaleString()}${models.length ? ` · ${models.join(', ')}` : ''}*`, '']
+  const out = [`# ${title}`, '', `*Exported from ${productName} on ${at.toLocaleString()}${models.length ? ` · ${models.join(', ')}` : ''}*`, '']
   for (const m of path) {
     if (m.role === 'user') {
       out.push('## You', '')

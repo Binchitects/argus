@@ -1,13 +1,13 @@
 # Evaluations
 
-Not unit tests. They need a running Argus with packs loaded, and a model, so
+Not unit tests. They need a running Farzan Graph with packs loaded, and a model, so
 they live outside `tests/` and are run deliberately.
 
 | harness | what it measures | writes |
 |---|---|---|
 | `generate_questions.py <packs_dir> <out.json> [per_pack]` | builds a question set **from the packs**, each question with its answer taken from the same page | the file you name |
 | `run_hermes_packs.py [pack ...]` | whether the real Hermes CLI answers each loaded pack's question correctly, over MCP, graded on a token from the pack | `hermes-packs-results.json` |
-| `run_code_review.py <url> <token> <file>` | an agentic review of a real source file, closed book against with Argus's tools, printed side by side for a person to judge | stdout |
+| `run_code_review.py <url> <token> <file>` | an agentic review of a real source file, closed book against with Farzan Graph's tools, printed side by side for a person to judge | stdout |
 | `run_load_test.py --url ... --token ...` | where the single-SQLite index stops scaling: concurrent readers, with and without a writer | `load-test-results.json` |
 | `run_tool_modes.py --models A,B` | the same tasks through Arena's chat with each model's tools direct and as code (run_code): pass, tokens, seconds, calls; the answer key looked up in the packs first | `tool-modes-results.json` |
 | `run_context_bench.py --model GGUF --alias NAME [--free-gpu C1,C2]` | Code Arena over a long session of seven coding tasks on a C# shop, each checked by a hidden program: results whole and calls as written (before) against results summarised once used and calls mended (after): tokens per task, tasks passed, the tool calls' faults, mended calls and retries; the model in a throwaway llama.cpp container | `context-bench-results.json` |

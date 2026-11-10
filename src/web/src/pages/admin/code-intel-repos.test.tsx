@@ -2,8 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { admin, fakeApi, type Handler, renderApp } from '@/test/utils'
-import type { RepoRow } from './argus-repos'
-import { scheduleForm, scheduleSpec, scheduleWords } from './argus-schedule-spec'
+import type { RepoRow } from './code-intel-repos'
+import { scheduleForm, scheduleSpec, scheduleWords } from './code-intel-schedule-spec'
 
 const now = Math.floor(Date.now() / 1000)
 
@@ -35,12 +35,12 @@ const view = (rows: RepoRow[] = repos, over: object = {}) => ({
 
 function routes(extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
-    'GET /api/admin/argus/status': () => ({
+    'GET /api/admin/code-intel/status': () => ({
       json: { job: { state: 'idle', branches: [], started: null, finished: null, returncode: null, tail: [], trigger: null }, index: { repos: 4, stale: 0, errored: 1, files: 10, symbols: 100 }, interval: 0, webhook: false, pending: [] },
     }),
-    'GET /api/admin/argus/schedule': () => ({ json: { schedule: '*/15 * * * *', timeZone: 'UTC', problem: null, nextRuns: [new Date(Date.now() + 600_000).toISOString()] } }),
-    'GET /api/admin/argus/webhook': () => ({ json: { enabled: false, fromEnv: false, url: '', header: 'X-Gitlab-Token', deliveries: [] } }),
-    'GET /api/admin/argus/repos': () => view(),
+    'GET /api/admin/code-intel/schedule': () => ({ json: { schedule: '*/15 * * * *', timeZone: 'UTC', problem: null, nextRuns: [new Date(Date.now() + 600_000).toISOString()] } }),
+    'GET /api/admin/code-intel/webhook': () => ({ json: { enabled: false, fromEnv: false, url: '', header: 'X-Gitlab-Token', deliveries: [] } }),
+    'GET /api/admin/code-intel/repos': () => view(),
     ...extra,
   }
 }
@@ -96,7 +96,7 @@ describe('admin indexing: repositories', () => {
       repo(2, 'team-a/etl-decoder', { state: 'queued', progress: { state: 'queued' } }),
       repo(3, 'team-b/shim', { state: 'failed', progress: { state: 'failed', outcome: 'failed', message: 'Could not fetch it from GitLab: 403.' } }),
     ]
-    fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows, { running: true }) }))
+    fakeApi(admin, routes({ 'GET /api/admin/code-intel/repos': () => view(rows, { running: true }) }))
     renderApp('/admin/indexing')
     const c = await card()
     expect(await within(c).findByText('Reading files on main: 30 of 120')).toBeInTheDocument()
@@ -117,9 +117,9 @@ describe('admin indexing: repositories', () => {
     })
     const rows = () => (running ? [repo(1, 'team-a/eal-core', { state: 'queued', progress: { state: 'queued' } })] : [repo(1, 'team-a/eal-core')])
     fakeApi(admin, routes({
-      'GET /api/admin/argus/status': status,
-      'GET /api/admin/argus/repos': () => view(rows(), { running }),
-      'POST /api/admin/argus/index': () => {
+      'GET /api/admin/code-intel/status': status,
+      'GET /api/admin/code-intel/repos': () => view(rows(), { running }),
+      'POST /api/admin/code-intel/index': () => {
         running = true
         return { json: { status: 'started' } }
       },
@@ -142,9 +142,9 @@ describe('admin indexing: repositories', () => {
       },
     }
     fakeApi(admin, routes({
-      'GET /api/admin/argus/status': () => running,
+      'GET /api/admin/code-intel/status': () => running,
       // Its first look came just before the scheduled pass took it.
-      'GET /api/admin/argus/repos': () =>
+      'GET /api/admin/code-intel/repos': () =>
         seen++ === 0
           ? view([repo(1, 'team-a/eal-core')])
           : view([repo(1, 'team-a/eal-core', { state: 'indexing', progress: { state: 'files', branch: 'main', done: 3, total: 12, started: now } })], { running: true }),
@@ -156,7 +156,7 @@ describe('admin indexing: repositories', () => {
 
   it('changes many at once after asking, then says what came of each', async () => {
     const calls = fakeApi(admin, routes({
-      'POST /api/admin/argus/repos/batch': (body) => {
+      'POST /api/admin/code-intel/repos/batch': (body) => {
         const b = body as { ids: number[]; action: string }
         return {
           json: {
@@ -179,7 +179,7 @@ describe('admin indexing: repositories', () => {
     expect(ask).toHaveTextContent('Update 4 repositories now?')
     expect(ask).toHaveTextContent('team-a/eal-core, team-a/etl-decoder, team-b/tools/shim, team-b/legacy')
     await userEvent.click(within(ask).getByRole('button', { name: 'Update now' }))
-    await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/argus/repos/batch')?.body).toEqual({ ids: [1, 2, 3, 4], action: 'reindex' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/code-intel/repos/batch')?.body).toEqual({ ids: [1, 2, 3, 4], action: 'reindex' }))
     const done = await screen.findByRole('dialog', { name: 'Updated now' })
     expect(done).toHaveTextContent('Done for 3 of 4 repositories; 1 could not be changed, and each says why.')
     const outcome = within(done).getByRole('list', { name: 'Outcome for each repository' })
@@ -195,12 +195,12 @@ describe('admin indexing: repositories', () => {
     await userEvent.type(within(dialog).getByLabelText('At'), '03:30')
     expect(within(dialog).getByText('Every day at 03:30.')).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Apply to 4 repositories' }))
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/argus/repos/batch').at(-1)?.body).toEqual({ ids: [1, 2, 3, 4], action: 'schedule', schedule: 'daily:03:30' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/code-intel/repos/batch').at(-1)?.body).toEqual({ ids: [1, 2, 3, 4], action: 'schedule', schedule: 'daily:03:30' }))
     expect(await screen.findByRole('dialog', { name: 'Schedule changed' })).toBeInTheDocument()
   })
 
   it('shows no next run for a repository GitLab no longer lists, as it cannot be fetched', async () => {
-    fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view([repo(1, 'team-a/eal-core'), repo(5, 'team-c/moved', { listed: false })]) }))
+    fakeApi(admin, routes({ 'GET /api/admin/code-intel/repos': () => view([repo(1, 'team-a/eal-core'), repo(5, 'team-c/moved', { listed: false })]) }))
     renderApp('/admin/indexing')
     const c = await card()
     await within(c).findByText('moved')
@@ -210,15 +210,15 @@ describe('admin indexing: repositories', () => {
 
   it("sets the schedule for all, and one repository's own, and reads its log", async () => {
     const calls = fakeApi(admin, routes({
-      'PUT /api/admin/argus/repos/settings': () => ({ json: { status: 'saved' } }),
-      'PATCH /api/admin/argus/repos/1': () => ({ json: { status: 'saved', repo: 'team-a/eal-core' } }),
-      'GET /api/admin/argus/repos/1/log': () => ({
+      'PUT /api/admin/code-intel/repos/settings': () => ({ json: { status: 'saved' } }),
+      'PATCH /api/admin/code-intel/repos/1': () => ({ json: { status: 'saved', repo: 'team-a/eal-core' } }),
+      'GET /api/admin/code-intel/repos/1/log': () => ({
         json: {
           repo: 'team-a/eal-core', progress: null,
           lines: [
             { run: (now - 3600) * 1000, at: now - 3600, level: 'info', text: 'Run started by its schedule (every 6 hours).' },
             { run: (now - 3600) * 1000, at: now - 3598, level: 'warning', text: 'main: 2 files could not be read or stored; each is tried again on the next runs (up to 3 times).' },
-            { run: now * 1000, at: now, level: 'error', text: 'Could not fetch it from GitLab: 403. Check that Argus\'s GitLab account can read this repository.' },
+            { run: now * 1000, at: now, level: 'error', text: 'Could not fetch it from GitLab: 403. Check that Farzan Graph\'s GitLab account can read this repository.' },
           ],
         },
       }),
@@ -257,7 +257,7 @@ describe('admin indexing: repositories', () => {
 })
 
 describe('repository schedules', () => {
-  it('read and write the form Argus stores, and say themselves', () => {
+  it('read and write the form Farzan Graph stores, and say themselves', () => {
     expect(scheduleSpec(scheduleForm('weekly:7:23:05'))).toBe('weekly:7:23:05')
     expect(scheduleSpec(scheduleForm('daily:2:30'))).toBe('daily:02:30')
     expect(scheduleSpec(scheduleForm(''))).toBe('')
@@ -269,7 +269,7 @@ describe('repository schedules', () => {
   it('keeps each row short: its default branch at its commit and how many more, the rest of its branches in its details', async () => {
     const develop = branch({ branch: 'develop', default: false, sha: 'fedcba9876543210', message: 'Try the new decoder', error: 'clone failed' })
     const rows = [repo(1, 'team-a/eal-core', { branches: ['develop', 'release/*'], indexed: [branch(), develop] })]
-    fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows) }))
+    fakeApi(admin, routes({ 'GET /api/admin/code-intel/repos': () => view(rows) }))
     renderApp('/admin/indexing')
     const c = await card()
     await within(c).findByText('eal-core')
@@ -290,7 +290,7 @@ describe('repository schedules', () => {
 
   it('shows what each repository is for, and an admin says it in their own words', async () => {
     const rows = [repo(1, 'team-a/eal-core', { purpose: 'Decodes frames from the radios.', purpose_source: 'readme' })]
-    const calls = fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows), 'PATCH /api/admin/argus/repos/1': () => ({ json: { status: 'saved' } }) }))
+    const calls = fakeApi(admin, routes({ 'GET /api/admin/code-intel/repos': () => view(rows), 'PATCH /api/admin/code-intel/repos/1': () => ({ json: { status: 'saved' } }) }))
     renderApp('/admin/indexing')
     const c = await card()
     // The row stays two short lines; what it is for is in its details.

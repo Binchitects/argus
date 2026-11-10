@@ -18,7 +18,7 @@ const config = (vision: boolean, others: string[] = []): ChatConfig => ({
   models: [model('Eyes-Model', vision), ...others.map((n) => model(n, true))],
   presets: [{ level: 'off', label: 'No thinking' }],
   defaultThinking: 'off',
-  argus: false,
+  codeIntel: false,
   tools: [],
   gitlabUrl: null,
   maxUploadBytes: 20 * 1024 * 1024,
@@ -26,7 +26,7 @@ const config = (vision: boolean, others: string[] = []): ChatConfig => ({
 })
 
 const conversation: Conversation = {
-  id: 'c1', title: 'New chat', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'New chat', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
 }
 

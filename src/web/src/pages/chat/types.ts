@@ -37,7 +37,7 @@ export interface ChatConfig {
   auto?: { model: string; byDefault: boolean } | null
   presets: { level: string; label: string }[]
   defaultThinking: string | null
-  argus: boolean
+  codeIntel: boolean
   tools: ChatTool[]
   gitlabUrl: string | null
   maxUploadBytes: number
@@ -378,7 +378,7 @@ export interface Conversation extends ConversationSummary {
   thinking: string | null
   /** The ids of the tools this chat has on. */
   tools: string[]
-  useArgus: boolean
+  useCodeIntel: boolean
   model: string | null
   systemPrompt: string | null
   temperature: number | null
@@ -422,7 +422,7 @@ export interface ChatSettings {
   thinking?: string | null
   /** Tool ids; unset means the tools that are on in new chats. */
   tools?: string[]
-  useArgus?: boolean
+  useCodeIntel?: boolean
   model?: string | null
   systemPrompt?: string | null
   temperature?: number | null

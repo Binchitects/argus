@@ -1,40 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <title>Argus Arena</title>
+  <title>Arena</title>
+  <!-- The app's own icon for a phone's home screen: the mark within the safe circle, the background to the edges. -->
   <defs>
     <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0" stop-color="#141f45"/>
-      <stop offset="1" stop-color="#070b1b"/>
+      <stop offset="0" stop-color="#12304a"/>
+      <stop offset="1" stop-color="#06131f"/>
     </linearGradient>
     <linearGradient id="a" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2ec8ff"/>
-      <stop offset="0.55" stop-color="#1c86f0"/>
-      <stop offset="1" stop-color="#0d5fe6"/>
-    </linearGradient>
-    <linearGradient id="fold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#021046" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#021046" stop-opacity="0"/>
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="0.55" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0d8075"/>
     </linearGradient>
     <linearGradient id="white" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#d9e6fb"/>
+      <stop offset="1" stop-color="#e3eef0"/>
     </linearGradient>
-    <radialGradient id="iris" cx="0.45" cy="0.2" r="0.95">
-      <stop offset="0" stop-color="#2fd6ff"/>
-      <stop offset="0.5" stop-color="#1673e8"/>
-      <stop offset="1" stop-color="#0a3db5"/>
+    <radialGradient id="iris" cx="0.42" cy="0.32" r="0.9">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="0.55" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#b45309"/>
     </radialGradient>
-    <clipPath id="letter">
-      <path id="A" d="M160 760 L428 228 Q446 196 482 196 L542 196 Q578 196 596 228 L864 760 L752 760 Q728 760 714 734 L512 318 L310 734 Q296 760 272 760 Z"/>
-    </clipPath>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  <g transform="translate(512 512) scale(0.72) translate(-512 -478)">
-    <use href="#A" fill="url(#a)"/>
-  <!-- The legs fold under the eye. -->
-  <rect x="150" y="536" width="724" height="140" fill="url(#fold)" clip-path="url(#letter)"/>
-  <path d="M286 540 C372 470 436 420 512 420 C588 420 652 470 738 540 C668 540 612 642 512 642 C412 642 356 540 286 540 Z" fill="url(#white)"/>
-  <circle cx="512" cy="528" r="96" fill="url(#iris)"/>
-  <circle cx="512" cy="530" r="42" fill="#06102a"/>
-  <circle cx="545" cy="494" r="18" fill="#ffffff"/>
+  <g transform="translate(512 512) scale(0.72) translate(-512 -497)">
+  <!-- The A: its peak the owl's crown, its legs the wings. -->
+  <path d="M160 790 L428 238 Q446 204 482 204 L542 204 Q578 204 596 238 L864 790 L748 790 Q724 790 710 764 L512 352 L314 764 Q300 790 276 790 Z" fill="url(#a)"/>
+  <!-- The face: two eyes side by side, the beak between them. -->
+  <circle cx="392" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="632" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="400" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="624" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="404" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="620" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="426" cy="534" r="15" fill="#ffffff"/>
+  <circle cx="642" cy="534" r="15" fill="#ffffff"/>
+  <path d="M512 640 L476 600 Q512 584 548 600 Z" fill="#f59e0b"/>
   </g>
 </svg>

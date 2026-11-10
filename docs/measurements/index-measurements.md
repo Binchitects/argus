@@ -19,7 +19,7 @@ point of the exercise.
 
 ```bash
 python scripts/test-gitlab/seed_corpus.py --tier baseline   # ~50 s
-python -m argus.cli index --config scripts/test-gitlab/work/config.yaml
+python -m code-intel.cli index --config scripts/test-gitlab/work/config.yaml
 ```
 
 | project | ref |
@@ -34,7 +34,7 @@ harmless.** It was cloned from each project's default branch and squashed to a
 single commit, so the upstream revision was gone — the surviving clones
 reported `1.3.2.1-motley` and `1.8.0.git`, moving development versions rather
 than releases. Re-cloning a month later gives different code, so a changed
-number could not be attributed to a change in Argus rather than a change
+number could not be attributed to a change in Farzan Graph rather than a change
 upstream. Every figure on this page was, in that sense, an anecdote.
 
 Re-pinning to release tags changed real numbers, which is the proof it
@@ -55,7 +55,7 @@ worth knowing, and is exactly the kind of fact an unpinned corpus hides.
 ## Precondition
 
 The roadmap requires checking this before trusting any number, because
-`argus/gitlab.py` enumerates with `membership=false`, which for a **non-admin**
+`code-intel/gitlab.py` enumerates with `membership=false`, which for a **non-admin**
 token returns only public projects.
 
 ```
@@ -278,8 +278,8 @@ questions.
 
 ```bash
 python scratchpad/seed_real_repos.py     # clone + push the four projects
-argus index   --config ~/.argus-measure/argus.yml
-argus resolve --config ~/.argus-measure/argus.yml
+code-intel index   --config ~/.code-intel-measure/code-intel.yml
+code-intel resolve --config ~/.code-intel-measure/code-intel.yml
 ```
 
 ---

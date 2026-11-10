@@ -40,7 +40,7 @@
 9. **Emergency access**: [the break-glass account, sealed, its use audited and
    reviewed].
 10. **Source code** of [Company]'s own is reached through [GitLab] by its
-    groups; Argus reads it with a read-only token.
+    groups; Farzan Graph reads it with a read-only token.
 11. **Privileged programs** on the hosts (shells, `docker`) are used only by
     [IT], and their use is logged by [how].
 

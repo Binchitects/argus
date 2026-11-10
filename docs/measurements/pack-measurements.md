@@ -116,7 +116,7 @@ unhandled. Both are now interpreted, and the Python pack was rebuilt.
 
 Verified end to end over HTTP rather than assumed:
 
-- `argus pack install http://…/react.arguspack --sha256 …` into an empty
+- `code-intel pack install http://…/react.kpack --sha256 …` into an empty
   directory succeeded, and `pack list` reported it correctly from there.
 - The same install with one byte of the digest changed was refused, and **left
   zero files behind** — no pack, no staging file, nothing registered.
@@ -1136,7 +1136,7 @@ names *another page's* command drops 3 and keeps 567.
 
 ## Verified end to end
 
-Through the reference client -- native function calling, Argus's instructions,
+Through the reference client -- native function calling, Farzan Graph's instructions,
 `qwen3.6:35b`, the same path Hermes uses:
 
 > **Q.** In WinDbg, which command displays the contents of a structure at an
@@ -1153,11 +1153,11 @@ so the new corpus does not interfere with the existing ones.
 
 # Two models, two arms, ten task families
 
-Does Argus close the gap, and does model size close it instead? Ten task
+Does Farzan Graph close the gap, and does model size close it instead? Ten task
 families -- test development, code review, performance, coding style, SDK,
 WDK, win32, scripting, security review, code safety -- one question each, run
 against `qwen3.6:27b` (dense, 27.8B) and `qwen3.6:35b` (MoE, 36.0B), closed
-book and then with Argus over native function calling.
+book and then with Farzan Graph over native function calling.
 
 The two models differ in **architecture as well as size**, so a gap between
 them is not a clean parameter-count result and is not reported as one.
@@ -1165,16 +1165,16 @@ them is not a clean parameter-count result and is not reported as one.
 | model | arm | pass | tool calls | median |
 |---|---|---|---|---|
 | `qwen3.6:27b` | closed book | 5 / 10 | 0 | 17.1 s |
-| `qwen3.6:27b` | **with Argus** | **10 / 10** | 26 | 22.2 s |
+| `qwen3.6:27b` | **with Farzan Graph** | **10 / 10** | 26 | 22.2 s |
 | `qwen3.6:35b` | closed book | 5 / 10 | 0 | 5.5 s |
-| `qwen3.6:35b` | **with Argus** | **9 / 10** | 19 | 2.4 s |
+| `qwen3.6:35b` | **with Farzan Graph** | **9 / 10** | 19 | 2.4 s |
 
 ## Scale did not help; retrieval did
 
 **Both models scored 5/10 closed book, failing the same five tasks.** Not
 similar scores -- the same five, task for task:
 
-| | closed book | with Argus |
+| | closed book | with Farzan Graph |
 |---|---|---|
 | coding-style, performance, scripting, sdk-support, code-safety | both PASS | both PASS |
 | test-development (`dispatch_level`) | both FAIL | both PASS |
@@ -1223,7 +1223,7 @@ trusted, all of which would have published as findings:
 - **401 read as 0/10.** The first full run scored both models 0/10 with zero
   tool calls. Every row held `<ERROR: unhandled errors in a TaskGroup>`, which
   unwrapped to `401 Unauthorized`: the ACL cache had aged 9.6 h past its
-  window and Argus correctly denied. Nothing about the models.
+  window and Farzan Graph correctly denied. Nothing about the models.
 - **A `forbid` rule that fired on a correct answer.** `passive_level` was
   forbidden on the lookaside task, but the documented contract is
   `<= DISPATCH_LEVEL`, which *includes* PASSIVE_LEVEL, so a fully correct
@@ -1325,7 +1325,7 @@ runs on that draft whether it wanted it or not, and only what the
 documentation CONTRADICTS is fed back. Silence leaves the draft untouched --
 re-prompting on silence invites a correct answer to become a different one.
 
-| model | closed book | with Argus | verify-after |
+| model | closed book | with Farzan Graph | verify-after |
 |---|---|---|---|
 | `qwen3.6:27b` | 5/10 @ 16.8 s | **10/10** @ 17.7 s | 9/10 @ 29.1 s |
 | `qwen3.6:35b` | 5/10 @ 5.2 s | 9/10 @ 2.3 s | **10/10** @ 13.3 s |
@@ -1337,10 +1337,10 @@ task, which is the property the arm exists to guarantee.
 ## Neither arm dominates, and that is the finding
 
 Verify-after gained 35b its missing task and cost 27b one -- the same
-`security-review`, which 27b had passed with-argus using 5 tool calls.
+`security-review`, which 27b had passed with-code-intel using 5 tool calls.
 
 The mechanism explains both directions. Verify-after guarantees exactly ONE
-check, of a finished draft. With-argus allows MANY targeted lookups, but only
+check, of a finished draft. With-code-intel allows MANY targeted lookups, but only
 if the model chooses to make them. So verify-after rescues a model that will
 not look, and under-serves one that would have looked repeatedly: `docs_verify`
 speaks only where the packs contradict, so a draft wrong in a way the
@@ -1361,7 +1361,7 @@ costs 11 s.
 ## Three arms, and three bogus tables before them
 
 The first verify-after run reported 16 of 20 rows as FAIL and 35b at 0/10.
-Every one was `<ERROR: unhandled errors in a TaskGroup>`: the Argus server had
+Every one was `<ERROR: unhandled errors in a TaskGroup>`: the Farzan Graph server had
 died mid-run. Read at face value it was a dramatic, entirely fictional result.
 
 That was the third infrastructure failure to wear a FAIL badge on this bench --

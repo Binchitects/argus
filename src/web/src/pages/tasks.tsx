@@ -25,6 +25,7 @@ import { api, errorMessage, meQuery } from '@/lib/api'
 import { configQuery } from './chat/api'
 import { blankSchedule, cronOf, describe, scheduleOf, weekdays, type Repeat, type Schedule } from './tasks-schedule'
 import { gitlabEvents as studioGitlabEvents } from './studio/studio-api'
+import { codeIntelName } from '@/lib/brand'
 
 interface Run {
   id: string
@@ -506,7 +507,7 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
           </Select>
         </Field>
         {form.action === 'ask' ? (
-          <Field label="What to ask" hint="As you would write it in the chat. With Argus on, it can read your repositories.">
+          <Field label="What to ask" hint={`As you would write it in the chat. With ${codeIntelName} on, it can read your repositories.`}>
             <Textarea dir="auto" required maxLength={20000} className="min-h-28" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} />
           </Field>
         ) : (

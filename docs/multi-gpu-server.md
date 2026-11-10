@@ -1,4 +1,4 @@
-# Argus Arena on a 4× RTX PRO 6000 Blackwell server: design and implementation plan
+# Farzan Arena on a 4× RTX PRO 6000 Blackwell server: design and implementation plan
 
 *Design, 2026-10-16. Sizes and versions as found that day on Hugging Face and the projects' release pages; nothing was downloaded. Section 8 is the plan the code follows; section 7 lists what the owner decides.*
 
@@ -651,7 +651,7 @@ What the code handles, how it was checked, and what still needs the real hardwar
   - **One GPU lent for media**: `Models/GpuShare.cs`.
 - Engine and gateway control is done through files, with no Docker socket: `deploy/services/llamacpp/router.sh`, and `EngineOptions.ConfigDir` holding the presets, keep list, max and Prometheus targets.
 - Fair queue: `src/Llm.Api/Chat/AnswerGate.cs`. Replicas: `src/Llm.Api/Operations/Replicas.cs` (advisory lock and LISTEN/NOTIFY). Gateway: `deploy/config/litellm.yaml` (`least-busy`, guardrail `fail_closed`, no Redis today).
-- Compose: `deploy/docker-compose.yml` (no Redis, `nvidia_gpu_exporter`, `pgvector:0.8.0-pg16`), `deploy/scale.yml`. Helm: `deploy/helm/argus-arena/templates/engines.yaml` and `values.yaml`.
+- Compose: `deploy/docker-compose.yml` (no Redis, `nvidia_gpu_exporter`, `pgvector:0.8.0-pg16`), `deploy/scale.yml`. Helm: `deploy/helm/arena/templates/engines.yaml` and `values.yaml`.
 - Load tests: `deploy/scripts/scale-test.py` and `deploy/scripts/multiuser-bench.py`.
 - Live host: RTX 3090 24 GB, driver 595.99.02, 61 GB RAM, 24 threads, 1.3 TB free on NVMe.
 

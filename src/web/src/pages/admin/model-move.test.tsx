@@ -579,7 +579,7 @@ describe('admin models: the Engine field as the library and the page change', ()
     renderApp('/admin/models')
     const dialog = await edit('Qwen3')
     expect(
-      within(dialog).getByText(/vLLM is off here: the installer turns it on with \.\/arenactl repair --with vllm from the checkout, or sh argus-arena-VERSION-offline\.run repair --with vllm with the offline installer/),
+      within(dialog).getByText(/vLLM is off here: the installer turns it on with \.\/arenactl repair --with vllm from the checkout, or sh arena-VERSION-offline\.run repair --with vllm with the offline installer/),
     ).toBeInTheDocument()
     // The checkout builds arena-vllm; the offline installer carries it built.
     expect(within(dialog).getByText(/with the offline installer \(its image, arena-vllm, is vLLM's own with its GGUF plugin: the checkout builds it on VLLM_IMAGE, the offline installer carries it\)\.$/)).toBeInTheDocument()

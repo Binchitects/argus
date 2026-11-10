@@ -23,7 +23,7 @@ type Group = { title: string; pages: Page[] }
 export function ManualPage() {
   const me = useOutletContext<Me>()
   const { '*': splat = '' } = useParams()
-  // As the address names it, or as the file does (argus/README.md is argus).
+  // As the address names it, or as the file does (code-intel/README.md is code-intel).
   const id = splat.replace(/\/+$/, '').replace(/\.md$/, '').replace(/(^|\/)README$/, '')
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''

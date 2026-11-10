@@ -29,7 +29,7 @@ deployment's address and model filled in.
    posts the comment: a project access token (the project's **Settings →
    Access tokens**) with the Reporter role and the `api` scope. The comment
    comes from the token's bot account. This is the project's own token, never
-   Argus's read-only one.
+   Farzan Graph's read-only one.
 3. **The CI/CD variables**, in the project's (or its group's) **Settings →
    CI/CD → Variables**. Mark the key and the token **Masked**.
 
@@ -49,7 +49,7 @@ deployment's address and model filled in.
 4. **The CLI where the jobs find it**, one of:
    - a copy of `clients/arena/arena` in your repository, named by `ARENA_CLI`
      (`ci/arena` below). Nothing is fetched; update the copy now and then.
-   - the Argus Arena repository in your GitLab: `ARENA_PROJECT` (its path)
+   - the Farzan Arena repository in your GitLab: `ARENA_PROJECT` (its path)
      and `ARENA_REF` (a branch or tag, `main` by default). The jobs read the
      file through GitLab's API with `ARENA_GITLAB_TOKEN`, so that token must
      be able to read that repository: a project access token is a member of
@@ -60,7 +60,7 @@ deployment's address and model filled in.
 
    ```yaml
    include:
-     - project: platform/argus-arena     # the Argus Arena repository in your GitLab
+     - project: platform/arena     # the Farzan Arena repository in your GitLab
        ref: main                         # or the release tag you run
        file: clients/gitlab-ci/arena-review.yml
 

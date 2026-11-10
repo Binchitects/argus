@@ -39,7 +39,7 @@ describe('the sign-in notice', () => {
         return { status: 204 }
       },
     })
-    const authorize = '/connect/authorize?client_id=argus&redirect_uri=https%3A%2F%2Fargus.llm.test%2Fsignin&response_type=code'
+    const authorize = '/connect/authorize?client_id=code-intel&redirect_uri=https%3A%2F%2Fcode-intel.llm.test%2Fsignin&response_type=code'
     renderApp(`/continue?rd=${encodeURIComponent(authorize)}`)
     await userEvent.click(await screen.findByRole('button', { name: 'I have read it and accept it' }))
     await waitFor(() => expect(replace).toHaveBeenCalledWith(authorize))
@@ -57,7 +57,7 @@ describe('the sign-in notice', () => {
 
   it('is on the sign-in page for anyone to read', async () => {
     fakeApi(null, {
-      'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '1', notice: { title: 'Acceptable use', text: 'No customer data in prompts.', version: '1' } } }),
+      'GET /api/info': () => ({ json: { name: 'Farzan Arena', version: '1', notice: { title: 'Acceptable use', text: 'No customer data in prompts.', version: '1' } } }),
       'GET /api/auth/company': () => ({ json: { label: null } }),
     })
     renderApp('/login')

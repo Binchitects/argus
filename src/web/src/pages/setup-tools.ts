@@ -1,6 +1,7 @@
+import { codeIntelName, productName } from '@/lib/brand'
 /**
  * How each tool connects: where its settings live, what to put there, how to
- * start it, how to check it works, and Argus over MCP where the tool speaks it.
+ * start it, how to check it works, and code-intel over MCP where the tool speaks it.
  * Filled in with this deployment's addresses and the chosen model, for the
  * person's system (a Unix shell, or Windows PowerShell), with the certificate
  * step each tool needs when the site's certificate comes from a private CA.
@@ -8,7 +9,7 @@
  * change: check its docs when one stops working).
  */
 
-/** Where the API key is kept in each setup: an environment variable, not pasted into a file. Argus takes the same key. */
+/** Where the API key is kept in each setup: an environment variable, not pasted into a file. code-intel takes the same key. */
 export const KEY = 'LLM_SERVICE_API_KEY'
 
 /** The name the page saves the site's CA certificate under, in the person's home folder. */
@@ -38,7 +39,7 @@ export interface Context {
   model: string
   context: number
   maxOutput: number
-  argusUrl: string
+  codeIntelUrl: string
   /** The key the person just made, when they chose to see it filled in; else setups say <your API key>. */
   apiKey?: string
   /** This Arena's own address, https://DOMAIN. */
@@ -72,8 +73,8 @@ export interface Tool {
   trust: (c: Context) => Step[]
   /** One command or action that shows the setup works. */
   check: (c: Context) => Step
-  /** Argus over MCP, with the person's API key (Argus answers as their GitLab account); a string when the tool cannot. */
-  argus: ((c: Context) => Step[]) | string
+  /** code-intel over MCP, with the person's API key (code-intel answers as their GitLab account); a string when the tool cannot. */
+  codeIntel: ((c: Context) => Step[]) | string
 }
 
 const json = (v: unknown) => JSON.stringify(v, null, 2)
@@ -225,7 +226,7 @@ mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
       },
     ],
     check: () => ({ text: 'Check it answers:', file: 'shell', code: `code-arena -p "${OK}"` }),
-    argus: "Nothing to add: once signed in, Code Arena connects to Argus by itself, beside Arena's own tools, as you, with the code you may read. It connects in the background, so a slow Argus never holds it up; /mcp shows whether it is connected.",
+    codeIntel: `Nothing to add: once signed in, Code Arena connects to ${codeIntelName} by itself, beside Arena's own tools, as you, with the code you may read. It connects in the background, so a slow ${codeIntelName} never holds it up; /mcp shows whether it is connected.`,
   },
   {
     id: 'claude',
@@ -282,9 +283,9 @@ mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
       },
     ],
     check: () => ({ text: 'Check it answers (then /status inside it shows the gateway):', file: 'shell', code: `claude -p "${OK}"` }),
-    argus: (c) => [
-      { text: 'Add Argus once, for every project (--scope user):', file: 'shell', code: `claude mcp add --transport http --scope user argus ${c.argusUrl}${more(c)}--header ${bearer(c)}` },
-      { text: 'Check it connects:', file: 'shell', code: 'claude mcp get argus' },
+    codeIntel: (c) => [
+      { text: `Add ${codeIntelName} once, for every project (--scope user):`, file: 'shell', code: `claude mcp add --transport http --scope user code-intel ${c.codeIntelUrl}${more(c)}--header ${bearer(c)}` },
+      { text: 'Check it connects:', file: 'shell', code: 'claude mcp get code-intel' },
     ],
   },
   {
@@ -302,7 +303,7 @@ model_context_window = ${c.context}
 web_search = "disabled"
 
 [model_providers.llm-service]
-name = "Argus Arena"
+name = "${productName}"
 base_url = "${c.base}"
 env_key = "${KEY}"
 wire_api = "responses"`,
@@ -317,12 +318,12 @@ wire_api = "responses"`,
       },
     ],
     check: () => ({ text: 'Check it answers (codex doctor checks the network and certificates):', file: 'shell', code: `codex exec --skip-git-repo-check "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus in the same file:',
+        text: `Add ${codeIntelName} in the same file:`,
         file: home(c, '.codex/config.toml'),
-        code: `[mcp_servers.argus]
-url = "${c.argusUrl}"
+        code: `[mcp_servers.code-intel]
+url = "${c.codeIntelUrl}"
 bearer_token_env_var = "${KEY}"`,
       },
     ],
@@ -352,11 +353,11 @@ bearer_token_env_var = "${KEY}"`,
     ],
     trust: (c) => nodeTrust(c, 'Qwen Code'),
     check: () => ({ text: 'Check it answers (with the settings file, --auth-type is not needed):', file: 'shell', code: `qwen --auth-type openai -p "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus once (in single quotes, the setting keeps the variable, not the key; --trust runs its tools without asking each time):',
+        text: `Add ${codeIntelName} once (in single quotes, the setting keeps the variable, not the key; --trust runs its tools without asking each time):`,
         file: 'shell',
-        code: `qwen mcp add argus ${c.argusUrl} -t http${more(c)}-H 'Authorization: Bearer $${KEY}' --trust`,
+        code: `qwen mcp add code-intel ${c.codeIntelUrl} -t http${more(c)}-H 'Authorization: Bearer $${KEY}' --trust`,
       },
     ],
   },
@@ -374,7 +375,7 @@ bearer_token_env_var = "${KEY}"`,
           provider: {
             'llm-service': {
               npm: '@ai-sdk/openai-compatible',
-              name: 'Argus Arena',
+              name: `${productName}`,
               options: { baseURL: c.base, apiKey: `{env:${KEY}}` },
               models: { [c.model]: { name: c.model, limit: { context: c.context, output: c.maxOutput } } },
             },
@@ -387,11 +388,11 @@ bearer_token_env_var = "${KEY}"`,
     ],
     trust: (c) => nodeTrust(c, 'OpenCode'),
     check: (c) => ({ text: 'Check it answers:', file: 'shell', code: `opencode run -m llm-service/${c.model} "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus to the same file, beside "provider" (oauth off: it signs in with the key):',
+        text: `Add ${codeIntelName} to the same file, beside "provider" (oauth off: it signs in with the key):`,
         file: home(c, '.config/opencode/opencode.json'),
-        code: json({ mcp: { argus: { type: 'remote', url: c.argusUrl, enabled: true, oauth: false, headers: { Authorization: `Bearer {env:${KEY}}` } } } }),
+        code: json({ mcp: { 'code-intel': { type: 'remote', url: c.codeIntelUrl, enabled: true, oauth: false, headers: { Authorization: `Bearer {env:${KEY}}` } } } }),
       },
     ],
   },
@@ -425,7 +426,7 @@ bearer_token_env_var = "${KEY}"`,
       },
     ],
     check: (c) => ({ text: 'Check it answers:', file: 'shell', code: `aider --model openai/${c.model} --no-git --message "${OK}"` }),
-    argus: 'Aider has no MCP, so Argus is not available in it.',
+    codeIntel: `Aider has no MCP, so ${codeIntelName} is not available in it.`,
   },
   {
     id: 'hermes',
@@ -446,20 +447,20 @@ bearer_token_env_var = "${KEY}"`,
     ],
     trust: (c) => [
       ...systemTrust('Hermes'),
-      ...(c.ca ? [{ text: "Its MCP servers check certificates on their own: the Argus setup below gives them the CA's file (ssl_verify)." }] : []),
+      ...(c.ca ? [{ text: `Its MCP servers check certificates on their own: the ${codeIntelName} setup below gives them the CA's file (ssl_verify).` }] : []),
     ],
     check: () => ({ text: 'Check it answers (hermes doctor checks the setup):', file: 'shell', code: `hermes chat -q "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus to the same file:',
+        text: `Add ${codeIntelName} to the same file:`,
         file: unix(c) ? '~/.hermes/config.yaml' : '%LOCALAPPDATA%\\hermes\\config.yaml',
         code: `mcp_servers:
-  argus:
-    url: ${c.argusUrl}
+  code-intel:
+    url: ${c.codeIntelUrl}
     headers:
       Authorization: "Bearer \${${KEY}}"${c.ca ? `\n    ssl_verify: ${caLiteral(c)}` : ''}`,
       },
-      { text: 'Check it connects:', file: 'shell', code: 'hermes mcp test argus' },
+      { text: 'Check it connects:', file: 'shell', code: 'hermes mcp test code-intel' },
     ],
   },
   {
@@ -495,13 +496,13 @@ bearer_token_env_var = "${KEY}"`,
       },
     ],
     check: (c) => ({ text: 'Check it answers:', file: 'shell', code: `openclaw agent exec "${OK}" --model llm-service/${c.model}` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus to the same file (the key from the environment, not written in):',
+        text: `Add ${codeIntelName} to the same file (the key from the environment, not written in):`,
         file: home(c, '.openclaw/openclaw.json'),
-        code: json({ mcp: { servers: { argus: { url: c.argusUrl, transport: 'streamable-http', headers: { Authorization: `Bearer \${${KEY}}` } } } } }),
+        code: json({ mcp: { servers: { 'code-intel': { url: c.codeIntelUrl, transport: 'streamable-http', headers: { Authorization: `Bearer \${${KEY}}` } } } } }),
       },
-      { text: 'Check it connects:', file: 'shell', code: 'openclaw mcp doctor argus --probe' },
+      { text: 'Check it connects:', file: 'shell', code: 'openclaw mcp doctor code-intel --probe' },
     ],
   },
   {
@@ -532,17 +533,17 @@ bearer_token_env_var = "${KEY}"`,
     ],
     trust: (c) => nodeTrust(c, 'dsh'),
     check: () => ({ text: 'Check it answers:', file: 'shell', code: `dsh headless "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus to the same file, after the provider (insert: appends the MCP client; !!js reads the key from the environment):',
+        text: `Add ${codeIntelName} to the same file, after the provider (insert: appends the MCP client; !!js reads the key from the environment):`,
         file: unix(c) ? '~/.dsh/cordis.patch.yml' : '%USERPROFILE%\\.dsh\\cordis.patch.yml',
         code: `- insert:
-    - id: mcp-argus
+    - id: mcp-code-intel
       name: '@deepseek-ai/dsh-mcp-client'
       config:
-        serverName: argus
+        serverName: code-intel
         transport: streamable-http
-        url: ${c.argusUrl}
+        url: ${c.codeIntelUrl}
         headers:
           Authorization: !!js '\`Bearer \${process.env.${KEY}}\`'`,
       },
@@ -558,7 +559,7 @@ bearer_token_env_var = "${KEY}"`,
       {
         text: 'Add the model:',
         file: home(c, '.continue/config.yaml'),
-        code: `name: Argus Arena
+        code: `name: ${productName}
 version: 0.0.1
 schema: v1
 
@@ -575,16 +576,16 @@ models:
       maxTokens: ${c.maxOutput}${c.ca ? `\n    requestOptions:\n      caBundlePath: ${caLiteral(c)}` : ''}`,
       },
     ],
-    trust: () => [{ text: "The model's requestOptions.caBundlePath above gives it the CA's file (and the Argus setup below has the same line)." }],
+    trust: () => [{ text: `The model's requestOptions.caBundlePath above gives it the CA's file (and the ${codeIntelName} setup below has the same line).` }],
     check: () => ({ text: "Check it answers: send any message in Continue's chat panel, or with its CLI:", file: 'shell', code: `cn -p "${OK}"` }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'Add Argus to the same file:',
+        text: `Add ${codeIntelName} to the same file:`,
         file: home(c, '.continue/config.yaml'),
         code: `mcpServers:
-  - name: argus
+  - name: code-intel
     type: streamable-http
-    url: ${c.argusUrl}
+    url: ${c.codeIntelUrl}
     requestOptions:
       headers:
         Authorization: Bearer \${{ secrets.${KEY} }}${c.ca ? `\n      caBundlePath: ${caLiteral(c)}` : ''}`,
@@ -607,11 +608,11 @@ models:
       },
     ],
     check: () => ({ text: 'Check it answers: ask it anything in its panel.' }),
-    argus: (c) => [
+    codeIntel: (c) => [
       {
-        text: 'MCP Servers → Configure → Configure MCP Servers, and add Argus (type streamableHttp, or it tries the old SSE transport; Cline does not read variables here, so the key is written in):',
+        text: `MCP Servers → Configure → Configure MCP Servers, and add ${codeIntelName} (type streamableHttp, or it tries the old SSE transport; Cline does not read variables here, so the key is written in):`,
         file: 'cline_mcp_settings.json',
-        code: json({ mcpServers: { argus: { type: 'streamableHttp', url: c.argusUrl, headers: { Authorization: `Bearer ${yourKey(c)}` }, disabled: false, autoApprove: [] } } }),
+        code: json({ mcpServers: { 'code-intel': { type: 'streamableHttp', url: c.codeIntelUrl, headers: { Authorization: `Bearer ${yourKey(c)}` }, disabled: false, autoApprove: [] } } }),
       },
     ],
   },
@@ -643,7 +644,7 @@ print(reply.choices[0].message.content)`,
       },
     ],
     check: () => ({ text: 'Check it answers:', file: 'shell', code: 'python app.py' }),
-    argus: 'Any MCP client library connects to Argus with the address and header below.',
+    codeIntel: `Any MCP client library connects to ${codeIntelName} with the address and header below.`,
   },
   {
     id: 'curl',
@@ -682,7 +683,7 @@ print(reply.choices[0].message.content)`,
         ? `curl${c.ca ? ` --cacert ${caShell(c)}` : ''} ${c.base}/models -H "Authorization: Bearer $${KEY}"`
         : `Invoke-RestMethod -Uri "${c.base}/models" -Headers @{ Authorization = "Bearer $env:${KEY}" }`,
     }),
-    argus: 'Argus speaks MCP over HTTP: a client library, not curl, is the way to call its tools.',
+    codeIntel: `${codeIntelName} speaks MCP over HTTP: a client library, not curl, is the way to call its tools.`,
   },
   {
     id: 'gitlab-ci',
@@ -696,15 +697,15 @@ print(reply.choices[0].message.content)`,
         code: c.root,
       },
       {
-        text: 'Copy clients/arena/arena from the Argus Arena repository into yours, as ci/arena, and include the template from that repository (its path in your GitLab in place of platform/argus-arena):',
+        text: `Copy clients/arena/arena from the ${productName} repository into yours, as ci/arena, and include the template from that repository (its path in your GitLab in place of platform/arena):`,
         file: '.gitlab-ci.yml',
         code: `include:
-  - project: platform/argus-arena     # the Argus Arena repository in your GitLab
+  - project: platform/arena     # the ${productName} repository in your GitLab
     ref: main                         # or the release tag you run
     file: clients/gitlab-ci/arena-review.yml
 
 variables:
-  ARENA_CLI: ci/arena                 # or ARENA_PROJECT: platform/argus-arena, when ARENA_GITLAB_TOKEN can read it
+  ARENA_CLI: ci/arena                 # or ARENA_PROJECT: platform/arena, when ARENA_GITLAB_TOKEN can read it
   ARENA_MODEL: ${c.model}
   ARENA_EXPLAIN_POST: "true"          # a failed pipeline's explanation on its merge request too`,
       },
@@ -716,6 +717,6 @@ variables:
     ],
     trust: () => [{ text: "Add a CI/CD variable ARENA_CA_CERT with the CA certificate's text (open the downloaded file: from -----BEGIN CERTIFICATE----- to its end)." }],
     check: () => ({ text: "Check it: open a merge request. Its pipeline has an arena-review job, and the review comes as a comment from the project token's bot." }),
-    argus: 'The jobs call the gateway only: Argus is for agents, over MCP.',
+    codeIntel: `The jobs call the gateway only: ${codeIntelName} is for agents, over MCP.`,
   },
 ]

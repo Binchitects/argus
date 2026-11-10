@@ -7,11 +7,11 @@ import type { ChatConfig, Conversation } from './types'
 
 const config: ChatConfig = {
   model: 'Main-Model', models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
-  presets: [{ level: 'off', label: 'No thinking' }], defaultThinking: 'off', argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 20 * 1024 * 1024, imageTypes: ['image/png'],
+  presets: [{ level: 'off', label: 'No thinking' }], defaultThinking: 'off', codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 20 * 1024 * 1024, imageTypes: ['image/png'],
 }
 
 const conversation: Conversation = {
-  id: 'c1', title: 'Release', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Release', thinking: null, tools: [], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
 }
 

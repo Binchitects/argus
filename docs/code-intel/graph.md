@@ -1,6 +1,6 @@
-# How Argus links repositories
+# How Farzan Graph links repositories
 
-Argus links two repositories when one uses what the other provides. It reads
+Farzan Graph links two repositories when one uses what the other provides. It reads
 this from the files it already indexes, with no build run (see
 [overview.md](overview.md#across-repositories) for what each ecosystem
 declares). This page says how sure each link is and what a query walks.
@@ -99,7 +99,7 @@ Each link keeps:
 
 ## Measuring it against what owners know
 
-`argus graph-eval --config CONFIG --truth FILE` measures the links against
+`code-intel graph-eval --config CONFIG --truth FILE` measures the links against
 what the repositories' owners know. The file has one link per line (`#` for
 comments):
 
@@ -128,8 +128,8 @@ is counted wrong. The report gives:
   of right links, drawn toward its prior as if it had 4 more links at it.
 
 `--json` gives the whole report. `--write-priors` writes the calibrated
-priors to `link-priors.json` beside the index (or to `ARGUS_LINK_PRIORS`);
-each index pass (and `argus resolve`) reads them, each replacing that kind's
+priors to `link-priors.json` beside the index (or to `CODE_INTEL_LINK_PRIORS`);
+each index pass (and `code-intel resolve`) reads them, each replacing that kind's
 built-in prior; `--apply` rebuilds the links with them at once. Deleting the
 file goes back to the built-in priors.
 
@@ -214,7 +214,7 @@ library.
 
 ## The symbol graph
 
-Inside each repository, Argus also keeps who uses what: every use in its C#, TypeScript, JavaScript and Python code
+Inside each repository, Farzan Graph also keeps who uses what: every use in its C#, TypeScript, JavaScript and Python code
 tied to the definition it names, and each type tied to the types it extends or implements. It is built when the
 repository's default branch is indexed (and once for a repository indexed before it was), from the files of its
 checkout, by the same scanners and resolution Code Arena's IDE and agent use (linked, so the three agree). Nothing is
@@ -234,7 +234,7 @@ tail (`Orders.Save`), or `path#Qualified`; `depth` 2 or 3 walks further, each fu
 
 A name with more than three definitions, or none, makes no edge. A call through reflection, a delegate kept elsewhere or
 a dynamic import is not seen, so an empty answer means "not found by the graph". Like every read, each step puts the
-reader's allowlist in its SQL; the graph is per repository, so a walk never crosses into another. `ARGUS_SYMBOL_GRAPH=0`
+reader's allowlist in its SQL; the graph is per repository, so a walk never crosses into another. `CODE_INTEL_SYMBOL_GRAPH=0`
 turns it off (nothing built, the tool answers nothing). The edges are in `sym_edges`, one row per use, rebuilt for a
 repository at each new commit of its default branch.
 

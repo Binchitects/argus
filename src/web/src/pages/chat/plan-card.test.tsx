@@ -10,7 +10,7 @@ const config: ChatConfig = {
   models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
   presets: [],
   defaultThinking: null,
-  argus: false,
+  codeIntel: false,
   tools: [{ id: 'plans', title: 'Plans', description: 'Makes and keeps plans.', icon: 'list-checks', onByDefault: false, askFirst: false }],
   gitlabUrl: null,
   maxUploadBytes: 1024 * 1024,
@@ -21,7 +21,7 @@ const msg = (id: string, parentId: string | null, role: Message['role'], over: P
 
 /** A chat whose answer proposed a plan of its own work. */
 const chat: Conversation = {
-  id: 'c1', title: 'Market study', thinking: null, tools: ['plans'], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+  id: 'c1', title: 'Market study', thinking: null, tools: ['plans'], useCodeIntel: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: 'a2', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '',
   messages: [
     msg('q1', null, 'user', { content: 'Study the market for e-bikes.' }),

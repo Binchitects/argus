@@ -5,3 +5,13 @@
  */
 export const productName: string = import.meta.env.VITE_PRODUCT_NAME || 'Farzan Arena'
 export const codeIntelName: string = import.meta.env.VITE_CODE_INTEL_NAME || 'Farzan Graph'
+
+/** The names a text people read was written with (the docs): the defaults. */
+export const defaultProductName = 'Farzan Arena'
+export const defaultCodeIntelName = 'Farzan Graph'
+
+/** A text written with the default names (a page of the manual), with the names built. */
+export function named(text: string): string {
+  if (productName === defaultProductName && codeIntelName === defaultCodeIntelName) return text
+  return text.replaceAll(defaultProductName, productName).replaceAll(defaultCodeIntelName, codeIntelName)
+}

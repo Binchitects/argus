@@ -7,7 +7,7 @@ across every page, anchors, and links between pages that stay in the app. The
 **?** at the top of every page opens that page's help: what the page is for,
 what each part does, and the common tasks step by step
 (`src/web/src/help/topics.ts`). On a wide screen it sits beside the page and
-stays open while you work; on a smaller one it opens over the page. Argus's
+stays open while you work; on a smaller one it opens over the page. Farzan Graph's
 own app has a lighter version: **Help** in its sidebar (and on its sign-in
 page), beside the page on a wide screen and over it on a smaller one, and
 `/help`. Code Arena's IDE has **Help** in its activity bar and a **?** on each
@@ -21,7 +21,7 @@ names, passwords or private procedures.
 
 A new page here, in any folder, is placed on purpose: in the manual
 (`src/web/src/help/manual.ts`), or among the pages it leaves out (the
-developers', and Argus run alone); a test fails until it is. Only
+developers', and Farzan Graph run alone); a test fails until it is. Only
 `measurements/` is left out whole: it holds results, not pages.
 
 ## Running the platform
@@ -44,21 +44,21 @@ developers', and Argus run alone); a test fails until it is. Only
 | [integrations.md](integrations.md) | where people already are: Slack, Mattermost and Teams bots, email in, the installable app with push notifications, the browser extension |
 | [code-arena.md](code-arena.md) | Code Arena, our own coding agent and its IDE: getting it offline, signing in, the IDE (code-arena) and its terminals, modes, tools, ARENA.md, sessions, MCP servers, building and packaging it |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |
-| [hermes.md](hermes.md) | pointing Hermes at the model and at Argus |
+| [hermes.md](hermes.md) | pointing Hermes at the model and at Farzan Graph |
 
-## Argus, the code index
+## Farzan Graph, the code index
 
 | page | what it covers |
 |---|---|
-| [argus/README.md](argus/README.md) | Argus in the platform: per-person access, private CAs, the audit stream |
-| [argus/overview.md](argus/overview.md) | what it gives an agent, keeping the index current, knowledge packs, measurements |
-| [argus/clients.md](argus/clients.md) | connecting an MCP client, and the reference client |
-| [argus/knowledge-packs.md](argus/knowledge-packs.md) | building and publishing packs |
-| [argus/branches.md](argus/branches.md) | indexing more than one branch |
-| [argus/pgvector-backend.md](argus/pgvector-backend.md) | the optional Postgres backend for embeddings |
-| [argus/backup-and-restore.md](argus/backup-and-restore.md) | what is worth keeping and how to get it back |
-| [argus/roadmap.md](argus/roadmap.md) | what is not yet proven |
-| [argus/standalone/](argus/standalone/architecture.md) | Argus alone, without the platform: [architecture](argus/standalone/architecture.md), [configuration](argus/standalone/configuration.md), [operations](argus/standalone/operations.md) |
+| [code-intel/README.md](code-intel/README.md) | Farzan Graph in the platform: per-person access, private CAs, the audit stream |
+| [code-intel/overview.md](code-intel/overview.md) | what it gives an agent, keeping the index current, knowledge packs, measurements |
+| [code-intel/clients.md](code-intel/clients.md) | connecting an MCP client, and the reference client |
+| [code-intel/knowledge-packs.md](code-intel/knowledge-packs.md) | building and publishing packs |
+| [code-intel/branches.md](code-intel/branches.md) | indexing more than one branch |
+| [code-intel/pgvector-backend.md](code-intel/pgvector-backend.md) | the optional Postgres backend for embeddings |
+| [code-intel/backup-and-restore.md](code-intel/backup-and-restore.md) | what is worth keeping and how to get it back |
+| [code-intel/roadmap.md](code-intel/roadmap.md) | what is not yet proven |
+| [code-intel/standalone/](code-intel/standalone/architecture.md) | Farzan Graph alone, without the platform: [architecture](code-intel/standalone/architecture.md), [configuration](code-intel/standalone/configuration.md), [operations](code-intel/standalone/operations.md) |
 
 ## Building and testing
 

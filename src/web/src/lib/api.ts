@@ -3,6 +3,8 @@ export interface AppInfo {
   version: string
   /** The icon an admin chose (Settings → Branding), its address changing with it; null: the app's own. */
   icon?: string | null
+  /** The code-intelligence service's MCP address (CODE_INTEL_HOST.DOMAIN); null where it is off. */
+  codeIntelUrl?: string | null
   /** Branding (Settings page). */
   signInHeadline?: string | null
   supportContact?: string | null

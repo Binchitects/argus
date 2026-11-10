@@ -219,7 +219,7 @@ class KubeInstall(unittest.TestCase):
         self.assertIn('cert-manager.io/cluster-issuer: "letsencrypt"', values)
         self.assertIn('sharedStorageClass: "nfs", sharedAccessMode: ReadWriteMany', values)
         self.assertNotIn("llamacpp: { enabled: false }", values, "a GPU node: the GPU servers stay on")
-        self.assertIn("the app answers: Arena 7.3.0", r.stdout)
+        self.assertIn("the app answers: Farzan Arena 7.3.0", r.stdout)
         self.assertEqual(0o600, (self.keep / "arena-values.yaml").stat().st_mode & 0o777)
 
     def test_Without_GPUs_the_GPU_servers_are_left_out_and_secrets_already_there_are_kept(self):
@@ -339,7 +339,7 @@ class KubeInstall(unittest.TestCase):
         r = self.run_it("requirements", "--kubernetes", "--cluster-issuer", "letsencrypt", "--shared-storage-class", "nfs",
                         script=REPO / "deploy" / "scripts" / "installer.sh")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("The cluster has what Arena needs.", r.stdout)
+        self.assertIn("The cluster has what Farzan Arena needs.", r.stdout)
 
 
 if __name__ == "__main__":

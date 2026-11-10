@@ -60,11 +60,11 @@ program, and Edge or Chrome 109.
 
 ## Next
 
-1. **Argus's code graphs.** Who calls a method, what implements an interface,
+1. **Farzan Graph's code graphs.** Who calls a method, what implements an interface,
    what a merge request breaks across every repository a person can read, with
    the lines, tests and owners. A Code map page, call and type hierarchy in
    Code Arena, an Impact card on reviews; `symbol_graph`, `mr_impact` and
-   `service_contracts` for agents. Design: [argus-graph.md](design/argus-graph.md),
+   `service_contracts` for agents. Design: [code-intel-graph.md](design/code-intel-graph.md),
    31 commits; the headline is reachable at commit 27. Done: 1 (access kept as
    GitLab project ids, repository row ids never reused), 2 (the allowlist in
    the SQL of the graph tools, impact_of and semantic search), 3 (a name several
@@ -92,7 +92,7 @@ program, and Edge or Chrome 109.
 
 1. vLLM and SGLang measured on the H200 host: a smoke test per model, numbers,
    and the people load tests; DCGM's image.
-2. `argus graph-eval` with the owners' links of the company's repositories,
+2. `code-intel graph-eval` with the owners' links of the company's repositories,
    and the priors calibrated from it.
 3. Reviews: plain git repositories, two refs compared on Gitea, and GitHub's
    and Gitea's webhooks for automatic reviews.

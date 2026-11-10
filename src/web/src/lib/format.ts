@@ -35,7 +35,7 @@ export function ago(v: number | string | null | undefined, now = Date.now()): st
   return when(v)
 }
 
-/** "3 minutes ago" for an epoch-seconds time (Argus reports those). */
+/** "3 minutes ago" for an epoch-seconds time (code-intel reports those). */
 export const agoSeconds = (s: number | null | undefined) => (s ? ago(s) : 'never')
 
 export function duration(seconds: number): string {

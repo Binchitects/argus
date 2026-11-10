@@ -23,7 +23,7 @@ tools/dn test tests/Llm.Tests -c Release
    service that exists only in code is not finished.
 4. **Commit messages** say what changed and why, in plain words: a subject line,
    a blank line, then the reasoning. Measured numbers beat adjectives.
-5. **Open a pull request.** CI must pass: the API and Argus tests, both web apps
+5. **Open a pull request.** CI must pass: the API and Farzan Graph tests, both web apps
    in a browser, the deployment tooling, and every env sample resolving.
 
 ## Rules that are not negotiable
@@ -44,7 +44,7 @@ secret removed. For a vulnerability, see [SECURITY.md](SECURITY.md) instead.
 
 ## Licensing of contributions
 
-Argus Arena is offered under the AGPL-3.0 and under a commercial license
+Farzan Arena is offered under the AGPL-3.0 and under a commercial license
 ([LICENSING.md](LICENSING.md)). So that both stay possible, by submitting a
 contribution (a pull request, a patch, an issue with code) you agree that:
 

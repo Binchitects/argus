@@ -10,7 +10,7 @@ that needs one does.
 
 ## Common Criteria
 
-**The Target of Evaluation (TOE)**: Argus Arena's app, web and gateway, as a
+**The Target of Evaluation (TOE)**: Farzan Arena's app, web and gateway, as a
 release ships them, with the configuration its guidance gives. The hosts, the
 container engine, Postgres and the models are its environment.
 

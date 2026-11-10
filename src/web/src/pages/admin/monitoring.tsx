@@ -3,18 +3,20 @@ import { ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { api } from '@/lib/api'
+import { api, infoQuery } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
 import type { Probe } from './ops-api'
 import { RuntimesCard } from './runtimes'
 import { ServiceList } from './services'
+import { codeIntelName } from '@/lib/brand'
 
 export function MonitoringPage() {
+  const info = useQuery(infoQuery)
   const s = useQuery({ queryKey: ['admin', 'services'], queryFn: ({ signal }) => api<Probe[]>('/api/admin/services', { signal }), refetchInterval: 15_000 })
   const links: [string, string, string][] = [
     ['Prometheus', serviceUrl('metrics'), 'Raw metrics and ad hoc queries.'],
     ['Alertmanager', serviceUrl('alerts'), 'Silences, and where notifications go.'],
-    ['Argus MCP', `${serviceUrl('argus')}mcp`, 'The code index, for agents.'],
+    [`${codeIntelName} MCP`, info.data?.codeIntelUrl ?? `${serviceUrl('code-intel')}mcp`, 'The code index, for agents.'],
   ]
   return (
     <>

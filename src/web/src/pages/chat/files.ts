@@ -1,5 +1,5 @@
 import { Marked, type Token, type Tokens } from 'marked'
-import { argsOf, parseResult, toHits } from './argus'
+import { argsOf, parseResult, toHits } from './code-intel'
 import { previewKindOf, type PreviewKind } from '@/preview/kind'
 import { extensionFor, languageOf } from './highlight'
 import type { AgentWork, Attachment, Message } from './types'
@@ -54,7 +54,7 @@ function codeTokens(tokens: Token[]): Tokens.Code[] {
 }
 
 /**
- * Everything in the branch on screen that is a file: attachments, files Argus read,
+ * Everything in the branch on screen that is a file: attachments, files code-intel read,
  * and code the model wrote. Sub-agents' files and code count as soon as they are made
  * (`agents`: their work while it runs, by delegate call).
  */

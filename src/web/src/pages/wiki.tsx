@@ -16,6 +16,7 @@ import { api } from '@/lib/api'
 import { ago, count } from '@/lib/format'
 import { CodeBlock } from '@/pages/chat/code-block'
 import { Markdown } from '@/pages/chat/markdown'
+import { codeIntelName } from '@/lib/brand'
 
 type Where = 'all' | 'knowledge' | 'code' | 'data'
 
@@ -548,7 +549,7 @@ export function WikiFilePage() {
             <ArrowLeft /> Wiki
           </Link>
         </Button>
-        <PageHeader title="Repositories" description="The code you may read in GitLab, as Argus indexed it. Search the wiki for a name or words to find a file." />
+        <PageHeader title="Repositories" description={`The code you may read in GitLab, as ${codeIntelName} indexed it. Search the wiki for a name or words to find a file.`} />
         {repos.error && <QueryError error={repos.error} retry={() => repos.refetch()} />}
         {repos.isPending && <Skeleton className="h-40" />}
         <ul aria-label="Repositories" className="grid gap-1 text-sm">

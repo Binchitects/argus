@@ -2,7 +2,7 @@
 
 Every tool a person has in the chat, for their own agent: one MCP server at
 `https://DOMAIN/mcp`, signed in with **their API key**. Code Arena, Claude
-Code, Qwen Code, Continue or any MCP client connects once and gets Argus, the
+Code, Qwen Code, Continue or any MCP client connects once and gets Farzan Graph, the
 web, Python, pictures and the servers, APIs and plugins the admins added, with
 the same names and schemas as in the chat, run as that person.
 
@@ -44,11 +44,11 @@ every definition, two tools.
 
 - **`search_tools`** (`query`, `most`, 8 unless said, up to 30) finds the
   functions a program may call by what they do: each as Python calls it
-  (`arena.argus.find_symbol`), with its description and its parameters.
+  (`arena.code-intel.find_symbol`), with its description and its parameters.
   Without words, the whole list, a line each.
 - **`run_code`** (`code`) runs a Python program in Arena's sandbox, as the
   chat's **Tools as code** does ([chat.md](chat.md)): `import arena`, then
-  `arena.argus.find_symbol(name="DecodeFrame")`. Each call goes to Arena MCP
+  `arena.code-intel.find_symbol(name="DecodeFrame")`. Each call goes to Arena MCP
   as a call of the agent's own would: as the person, audited (`mcp.call`, the
   program as `code` and each call it made), counted against their requests a
   minute. Only what it prints comes back; at most 100 calls a program.
@@ -70,7 +70,7 @@ with the tools direct at `/mcp`.
   Tools: everyone, admins, or groups) and available now. A tool off in new
   chats is still theirs, so it is served. There is no separate switch per tool:
   taking a tool away in Admin → Tools takes it away here at once.
-- **The same functions**: Argus's (`find_symbol`, …), `run_python`, `web_search`,
+- **The same functions**: Farzan Graph's (`find_symbol`, …), `run_python`, `web_search`,
   `fetch_page`, `generate_image`, `generate_video`, `speak`, `calculate`,
   `current_time`, `days_between`, `decide` (Laya, while its module runs:
   [chat.md](chat.md#decide-laya)), `deep_research` (below), and
@@ -95,7 +95,7 @@ with the tools direct at `/mcp`.
   person's own, or one shared with them, or not found. Every other route of
   the chat takes the sign-in alone.
 - **Each function says whose it is**: `_meta` `arena/tool` names the chat's
-  tool it is a function of (`argus`, `python`, `web`...), so a client can group
+  tool it is a function of (`code-intel`, `python`, `web`...), so a client can group
   them as the chat's **Tools** menu does (Code Arena's menu and its tools on
   demand do).
 - **Not served**: the chat's own tools. Reading files (a chat's files),
@@ -106,7 +106,7 @@ with the tools direct at `/mcp`.
   its description tells the client to ask before each call. Let the client ask:
   do not trust every tool (`--trust`, yolo modes).
 - **Notes for the agent** come with `initialize`: who the tools run as, each
-  tool's own instructions (Argus's among them), and the tools that are not
+  tool's own instructions (Farzan Graph's among them), and the tools that are not
   available now with the reason (a plugin whose account the person has not
   connected yet, a server that is down or too slow to answer).
 - **Files a tool makes** (a picture, a sound, Python's output) come back as a
@@ -126,7 +126,7 @@ with the tools direct at `/mcp`.
   the app. The answer is kept for 30 seconds, so a replaced, deleted or blocked
   key stops working within that. A disabled person is refused on their next
   request.
-- Argus answers as the person (the chat's token and their email): no GitLab
+- Farzan Graph answers as the person (the chat's token and their email): no GitLab
   token is needed here. A plugin calls its service with the person's own
   account. Pictures and speech go through the gateway on the person's credit;
   while they have none of a kind left (or none given: "You have no picture
@@ -160,16 +160,16 @@ with the tools direct at `/mcp`.
   `Mcp-Session-Id` it gives is only a label.
 - **Connecting never waits long for a tool server.** `initialize` and
   `tools/list` start the person's tools; those that are a network round trip
-  (Argus, an admin's MCP server, a plugin) start together, beside the others,
+  (Farzan Graph, an admin's MCP server, a plugin) start together, beside the others,
   and are waited for 10 seconds at most (`Mcp:ListWaitSeconds`), all together.
   A plugin with a sign-in of each person's own has it read first (and renewed
   if it lapsed) within the same wait, then connects beside the rest. One slower is listed as not available now, with
   that reason, and the list is then kept 10 seconds instead of a minute, so
   the next list asks it again. Before 5.3 they started one after another and
-  each could hold the connection for a minute: a slow Argus made Claude Code
+  each could hold the connection for a minute: a slow Farzan Graph made Claude Code
   (30 s), Qwen Code and Code Arena give up on Arena MCP.
 - `tools/call` answers as server-sent events when the client accepts them: the
-  tool's progress as it comes (when the client sent a `progressToken`; Argus
+  tool's progress as it comes (when the client sent a `progressToken`; Farzan Graph
   and MCP servers report it), a comment line every 15 seconds while it runs
   (so a proxy does not drop it), then the answer. `notifications/cancelled`
   stops a call; so does the client hanging up.
@@ -181,7 +181,7 @@ with the tools direct at `/mcp`.
 **Settings → Arena MCP → Arena MCP** (`Mcp:Enabled`, on by default, applies
 at once). Off, `/mcp` and `/.well-known/mcp` answer 404 and Connect your tools
 leaves it out. **Wait for a slow tool server** (`Mcp:ListWaitSeconds`, 10
-seconds, applies at once) is how long connecting waits for Argus, the MCP
+seconds, applies at once) is how long connecting waits for Farzan Graph, the MCP
 servers and the plugins (above).
 
 Traefik sends `/mcp` and `/mcp/code` on `DOMAIN` to the app, beside `/api`,
@@ -193,8 +193,8 @@ Traefik sends `/mcp` and `/mcp/code` on `DOMAIN` to the app, beside `/api`,
 with plain requests: initialize, list and call with a person's key, each call
 audited; no key, a wrong key, a blocked key and a disabled person refused, the
 gateway asked once for a while; a group's tool served only to its members, and
-a tool that asks first marked; an Argus call made as the person (their email at
-Argus); an admin's MCP server proxied with its progress; a call cancelled; a
+a tool that asks first marked; an Farzan Graph call made as the person (their email at
+Farzan Graph); an admin's MCP server proxied with its progress; a call cancelled; a
 picture inline and as a link that `resources/read` reads and the person opens;
 a server that never answers listed as not available within the wait, and
 asked again on the next list, a plugin with a person's own sign-in too; at

@@ -18,7 +18,7 @@ page covers the rest.
 ## Admin
 
 Every table here (and in Usage, the Leaderboard, the dashboards' table panels
-and Argus's own pages) sorts by any of its columns, by a click on the column's
+and Farzan Graph's own pages) sorts by any of its columns, by a click on the column's
 heading, and has a box above it that keeps the rows holding what is typed.
 
 | Page | What it is for |
@@ -26,16 +26,16 @@ heading, and has a box above it that keeps the rows holding what is typed.
 | **Overview** | Services up, people and admins, this month's spend, who is at or past a credit of their own, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
 | **People** | Add, search, and per person: credits (one per kind), API access, rate limits for their API keys, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. With the company directory on, **Move to the directory** moves the local accounts selected to directory sign-in, keeping everything of theirs ([authentication.md](authentication.md#moving-local-accounts-to-the-directory)). **Export CSV** downloads everyone with this month's spend and credit of each kind, and whether they have API access. |
 | **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, credits a month, one per kind (shared or each member's), a cost centre, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credits](#credits) and [Rate limits for API keys](#rate-limits-for-api-keys). |
-| **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), **Deep research** (a plan, sub-agents that search the web, and a report with its sources: it runs only through this tool: only those who may use it see it in the chat's **Tools**; on in a chat, the model starts one when asked, and **Ask before each run** has the chat ask the person first. As installed, and after an upgrade from v5.2.0 or earlier, it is on for everyone, on in new chats and asks first, so everyone keeps it until you change that; the deep research a day per person is under **Settings → Safeguards**: [chat.md](chat.md#what-it-does)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
+| **Tools** | What the chat's model may call: Farzan Graph, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), **Deep research** (a plan, sub-agents that search the web, and a report with its sources: it runs only through this tool: only those who may use it see it in the chat's **Tools**; on in a chat, the model starts one when asked, and **Ask before each run** has the chat ask the person first. As installed, and after an upgrade from v5.2.0 or earlier, it is on for everyone, on in new chats and asks first, so everyone keeps it until you change that; the deep research a day per person is under **Settings → Safeguards**: [chat.md](chat.md#what-it-does)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), Confluence spaces and SharePoint or OneDrive sites and libraries (read by whom Confluence or SharePoint lets read, and the groups you choose where they cannot tell), folders mounted under `/knowledge`, and websites (read by the groups you choose). Confluence and SharePoint take an account's token or an app's secret, stored encrypted, and have **Test connection**. Per source: the last sync's state and errors, documents and passages, who may read it and what is mirrored, **Sync now**, its documents, **Settings**, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
-| **Storage** | What takes room and where: the disks (the host's, and the folders the app mounts), each database and its largest tables, the chat's files by kind and by person, the model library and what uses each model, Argus's index and packs, backups, logs and metrics, how each grew, and how long each is kept. The chat's files to find, download and delete; clean-ups that show what would go first; each person's room for files. See [Storage](#storage) below. |
+| **Storage** | What takes room and where: the disks (the host's, and the folders the app mounts), each database and its largest tables, the chat's files by kind and by person, the model library and what uses each model, Farzan Graph's index and packs, backups, logs and metrics, how each grew, and how long each is kept. The chat's files to find, download and delete; clean-ups that show what would go first; each person's room for files. See [Storage](#storage) below. |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. Each card is a line or two: its name, its status, one line about it, what needs a look, and Load or Unload, Edit, Remove and **Details**. **Details** (or **Why**) holds the rest: its badges, its engine and **Change engine…**, a move to another engine, how it runs, its price and token cache, each problem in full, **Keep loaded**, **Who may use it** and **Tools**. Each control shows only to who holds its permission (`models.load`, `models.edit`, `models.delete`, `models.access`). See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
-| **Indexing** | The Argus code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), the GitLab push and merge webhook (its secret, shown once, the steps for GitLab, and the last deliveries), and a run's progress (a percentage overall and per repository) and log. The counts are of repositories: a repository is one row and counts once, with its branches inside it (the Repositories figure says how many branches there are). Each row is short (its name and path, its default branch at its commit and how many more); its name or **Details** opens the rest. See [Choosing what is indexed](argus/README.md#choosing-what-is-indexed). |
-| **Packs** | Knowledge packs, loaded like the models: the **pack library** (built packs on the host, the repository's `packs/` or `ARGUS_PACK_LIBRARY_DIR`) lists each with **Load** and **Unload**. Loading links the pack into Argus, instantly and without a copy, and only a pack built with Argus's embedding model loads (another's vectors would not compare). A pack not in the library can still be installed from a URL (with its SHA-256), updated from the published index, and removed. |
-| **Explore** | What Argus holds, searched across every repository: **symbols and paths**; **references**, every line where a name is used, the definitions marked (as `find_references` answers a model); **code**, words in the files (`"a phrase"`, `prefix*`); and the **documentation** packs by their words, an API's name, or meaning. Each result opens: a file at its line, or a page of a pack. For "a tool found nothing: is it absent, named differently, or never indexed?". |
-| **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Argus, and links to Prometheus's and Alertmanager's own pages. **Engines and sandboxes**: each engine, picture and video server and sandbox with its state, and **Reload**, **Restart** or **Reset**. See [Engines and sandboxes](#engines-and-sandboxes) below. |
-| **Dashboards** | Ten dashboards, drawn by the app: the model and the gateway (LLM Overview, Stack Performance), the machine (Resources, GPU Hardware, Host & Containers), the services (Stack Health & Alerts, Logs), Argus and its index, and usage by person. See [Dashboards](#dashboards) below. |
+| **Indexing** | The Farzan Graph code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), the GitLab push and merge webhook (its secret, shown once, the steps for GitLab, and the last deliveries), and a run's progress (a percentage overall and per repository) and log. The counts are of repositories: a repository is one row and counts once, with its branches inside it (the Repositories figure says how many branches there are). Each row is short (its name and path, its default branch at its commit and how many more); its name or **Details** opens the rest. See [Choosing what is indexed](code-intel/README.md#choosing-what-is-indexed). |
+| **Packs** | Knowledge packs, loaded like the models: the **pack library** (built packs on the host, the repository's `packs/` or `CODE_INTEL_PACK_LIBRARY_DIR`) lists each with **Load** and **Unload**. Loading links the pack into Farzan Graph, instantly and without a copy, and only a pack built with Farzan Graph's embedding model loads (another's vectors would not compare). A pack not in the library can still be installed from a URL (with its SHA-256), updated from the published index, and removed. |
+| **Explore** | What Farzan Graph holds, searched across every repository: **symbols and paths**; **references**, every line where a name is used, the definitions marked (as `find_references` answers a model); **code**, words in the files (`"a phrase"`, `prefix*`); and the **documentation** packs by their words, an API's name, or meaning. Each result opens: a file at its line, or a page of a pack. For "a tool found nothing: is it absent, named differently, or never indexed?". |
+| **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Farzan Graph, and links to Prometheus's and Alertmanager's own pages. **Engines and sandboxes**: each engine, picture and video server and sandbox with its state, and **Reload**, **Restart** or **Reset**. See [Engines and sandboxes](#engines-and-sandboxes) below. |
+| **Dashboards** | Ten dashboards, drawn by the app: the model and the gateway (LLM Overview, Stack Performance), the machine (Resources, GPU Hardware, Host & Containers), the services (Stack Health & Alerts, Logs), Farzan Graph and its index, and usage by person. See [Dashboards](#dashboards) below. |
 | **Logs** | Every service's logs from Loki, newest first: by container, level (all, warnings and errors, errors) and text, over five minutes to a month, and **Live** for new lines as they are written. The filters are in the address, so a view can be linked. |
 | **Alerts** | What fires now (from Alertmanager, with silenced ones marked), every time an alert fired over a day, a week or a month, and every rule with its state, severity, how long its condition must hold, and its query (the app's own disk rule says what it checks in words: it is not PromQL). The certificate alerts warn 30 days before it expires and are critical 7 days before. An alert that starts firing reaches every admin's bell, and by email (when set up) and the alerts webhook (**Settings → Notifications**), once per firing. |
 | **Traces** | The slowest answers of a time range (an hour to a month), across people: when, who, the model, the whole time, the slowest step, tokens and the tools used (the sub-agents' too). Each opens its trace: the wait in line, getting ready, each round of the model with its tokens, cache share, first token and the engine's read and write speeds (llama.cpp's own timings when the stream carries them, else worked out from the times), each tool call, and each sub-agent with its time, tokens and tool calls; the slowest step is named, with why. The same trace opens from the timer under an answer in the chat. Times, tokens, sizes and tool names only: what was asked and answered is never shown. |
@@ -45,8 +45,8 @@ heading, and has a box above it that keeps the rows holding what is typed.
 | **Quality** | How people rate the answers, over the time window chosen (a preset or a custom range, kept in the address): per model and per assistant, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
 | **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: OIDC or SAML, the identity provider (its issuer or SAML entity ID), its admin and required groups, and whether SCIM is on. |
 
-Indexing, Packs and Explore talk to Argus through the app's server with
-`ARGUS_KEY`, which never reaches a browser. With Argus left out they say
+Indexing, Packs and Explore talk to Farzan Graph through the app's server with
+`CODE_INTEL_KEY`, which never reaches a browser. With Farzan Graph left out they say
 that it is not set up, and how to turn it on.
 
 ### Access: roles and rules
@@ -108,9 +108,9 @@ bell says so, and the History tab and the audit log keep who answered. The
 audit log can show what one person did (`?actor=` their id): the duties
 handed out, and how each was done.
 
-Rules on repositories hold in Argus too, for the chat's Argus tool and for
+Rules on repositories hold in Farzan Graph too, for the chat's Farzan Graph tool and for
 coding agents with an API key alike: a repository is named
-`gitlab:group/project` (or a pattern, `gitlab:team-a/*`), and Argus asks the
+`gitlab:group/project` (or a pattern, `gitlab:team-a/*`), and Farzan Graph asks the
 app which of what GitLab lets the person read their rules leave them
 (kept five minutes). Without `code.read` they read no code. GitLab's own
 rights stay the ceiling: no rule here opens a project GitLab keeps from them.
@@ -131,7 +131,7 @@ What each person may do is decided in one place, from three things:
   and `feature.assistants.share` stop new memories, tasks, share links and
   sharing assistants (Code Arena then leaves memory out: no Memory view,
   `/memory` says it is off, and the model is not offered `remember` or
-  `recall`); `code.read` takes the Argus tool. What they already have stays
+  `recall`); `code.read` takes the Farzan Graph tool. What they already have stays
   theirs to read and delete.
 - **What a person may not use is hidden**, not only refused. Their pages
   leave the sidebar, the command palette and Home (Chat, Memory, Meetings,
@@ -165,9 +165,9 @@ What each person may do is decided in one place, from three things:
   `storage.manage` (read, cleanup, delete, quota) theirs; `settings.manage`
   one per group of settings (`settings.chat`, `settings.models`,
   `settings.safeguards`, `settings.tools`, `settings.integrations`,
-  `settings.data`, `settings.gateway`, `settings.argus`, `settings.branding`,
+  `settings.data`, `settings.gateway`, `settings.code-intel`, `settings.branding`,
   `settings.restart`); `signin.manage` the directory, company sign-in and
-  moves; `argus.manage` repos, index, packs and webhook; `logs.read` holds
+  moves; `code-intel.manage` repos, index, packs and webhook; `logs.read` holds
   `traces.read`. Holding any administrative permission of an area lets one
   read that area (who resets passwords sees the people). Features have more
   parts too: Python, the canvas, 3D models, plans, deep research, comparing
@@ -190,7 +190,7 @@ What each person may do is decided in one place, from three things:
   they may use.
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
-  (every `.read`, never a change), **Argus admin**, **Room moderator**,
+  (every `.read`, never a change), **Farzan Graph admin**, **Room moderator**,
   **Review admin**, **Team manager** (a group's people, their credit and
   limits, its spend; given over a group), **Supervisor** (dashboards, alerts,
   logs, usage and the audit log, read-only), **Operator** (takes alerts, loads
@@ -411,7 +411,7 @@ full the models kept loaded would make it.
   in its instructions as Python functions (`arena.calculator.calculate(expression)`)
   instead of every definition sent with each request: fewer tokens, many calls
   in one step ([chat.md](chat.md#what-it-does)). In Code Arena, the servers'
-  tools (Arena's, Argus's, the person's) go as code and its own files, search,
+  tools (Arena's, Farzan Graph's, the person's) go as code and its own files, search,
   git and shell stay direct. **Both**: every tool and `run_code`, a program for
   many calls and a direct call for one or two. **Automatic** (until an admin
   chooses) is direct for the model for small steps and for a model whose name
@@ -775,7 +775,7 @@ full the models kept loaded would make it.
   chosen; one that does not run here is listed disabled, and the field says why:
   its feature is off (`./arenactl repair --with chat-models`, `vllm` or `sglang`
   from the checkout turns it on, or
-  `sh argus-arena-VERSION-offline.run repair --with chat-models` with the
+  `sh arena-VERSION-offline.run repair --with chat-models` with the
   offline installer, see [deployment.md](deployment.md#features); vLLM's
   image, arena-vllm, is built on `VLLM_IMAGE`, under `arenactl config`), the stack has none (on
   Kubernetes, `llamacpp.enabled`, `vllm.enabled` or `sglang.enabled`), or it is
@@ -927,7 +927,7 @@ full the models kept loaded would make it.
   [Picture, video and speech models](#picture-video-and-speech-models). A text
   encoder or decoder is put in among a picture or video model's files by its
   role. Embedding models, rerankers, projectors, draft heads and adapters are
-  not added as models of their own (they belong to Argus or a model's own
+  not added as models of their own (they belong to Farzan Graph or a model's own
   settings): chosen, they say what they are for. A chat model needs the
   llama.cpp engine; a split model with a part missing is refused as
   incomplete. A saved model keeps its kind when edited.
@@ -1324,9 +1324,9 @@ containers.
 
 ### Network access
 
-**Settings → Network access** decides which network addresses reach Argus
-Arena at all: the web, the API, the gateway (API keys) and Argus. **Only these
-addresses may reach Argus Arena** is an allow list (empty: every address);
+**Settings → Network access** decides which network addresses reach Farzan Graph
+Arena at all: the web, the API, the gateway (API keys) and Farzan Graph. **Only these
+addresses may reach Farzan Arena** is an allow list (empty: every address);
 **Never these addresses** a block list, refused whatever the allow list says.
 Each is one address or range a line (`10.0.0.0/8`, `192.168.1.20`,
 `2001:db8::/32`; commas also separate, `#` starts a comment). Traefik asks the
@@ -1335,7 +1335,7 @@ it saw it, so a change applies to the next request; a refused one gets 403 and
 a sentence naming the setting. A list that would refuse the address of the
 admin saving it is refused, so nobody locks themselves out from the page.
 While the app is down (starting again, upgrading) Traefik cannot ask it, and
-refuses every request rather than let one in unchecked: the web and Argus too
+refuses every request rather than let one in unchecked: the web and Farzan Graph too
 answer 500 until the app is back. Behind another proxy or load balancer, the
 address Traefik sees is that proxy's.
 
@@ -1481,10 +1481,10 @@ it is full. Then what takes room:
 
 | What | Measured from |
 |---|---|
-| Each database on the stack's Postgres (`llmapp`, `litellm`, `argus`, `langfuse` where they are) and the largest tables of the app's and the gateway's | Postgres itself |
+| Each database on the stack's Postgres (`llmapp`, `litellm`, `code-intel`, `langfuse` where they are) and the largest tables of the app's and the gateway's | Postgres itself |
 | The chat's files (uploads, and the pictures, videos, speech and other files the tools made), by where they came from, whether a chat still has them, and by person | the app's database: the files are kept there, inside `llmapp` |
 | The model library (`MODELS_DIR`): each model file, which model of Admin → Models uses it (loaded or kept loaded), or which server reads it, and downloads not finished | the folder |
-| Argus: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Argus measures its own data folder (`GET /admin/storage`), at most every ten minutes |
+| Farzan Graph: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Farzan Graph measures its own data folder (`GET /admin/storage`), at most every ten minutes |
 | Backups (`BACKUP_DIR`, mounted in the app at `/backups`, read only): each backup, how it ended, and which is the latest | the folder |
 | Metrics: what Prometheus keeps and for how long (30 days or 20 GB) | Prometheus's own metrics and flags |
 | Logs: how long Loki keeps them (as shipped, forever), and what each container wrote over the last week | Loki's configuration and its volume API |
@@ -1612,7 +1612,7 @@ its own; take that line out on upgrade.
 **API access** switch, after a confirmation: the person's own deny of
 `feature.api_keys`, [Access](#access-roles-and-rules)). Off, their keys are blocked at the
 gateway and refused by the guardrail, none is shown to them or made (by them or
-an admin), and Arena's MCP endpoint, Argus and speech with a key refuse them;
+an admin), and Arena's MCP endpoint, Farzan Graph and speech with a key refuse them;
 the chat stays theirs. Given back, their keys work again (one is made if they had
 none). A block the gateway could not take at once is taken at the next check,
 within ten minutes, and so is a disabled person's.
@@ -1763,7 +1763,7 @@ them.
   go with the chat's key and are held by the deep research a day and the
   messages per minute (Settings → Safeguards) and the fair line, not by the
   key's limits; only its start counts here. Arena MCP's other built-in tools
-  (Argus, Python, the web, the calculator, the time) reach no model.
+  (Farzan Graph, Python, the web, the calculator, the time) reach no model.
 - **What people see**: their key's card (Your account, and Connect your tools)
   shows each limit and where it comes from, what the key used in the last
   minute, and what was refused in the last day. The minute is read from the
@@ -1972,7 +1972,7 @@ role can give one without the others (Admin → Access → Roles):
 
 | area | its dashboard | in detail | permission |
 |---|---|---|---|
-| the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the stack's throughput and a request's speed, and who uses what (per person, tokens, cost and speed, refused by rate limits) | LLM Overview, Stack Performance, Argus (Usage by person is on Usage) | `usage.read` |
+| the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the stack's throughput and a request's speed, and who uses what (per person, tokens, cost and speed, refused by rate limits) | LLM Overview, Stack Performance, Farzan Graph (Usage by person is on Usage) | `usage.read` |
 | the system | **System**: targets up and down, alerts firing, the line, each service's requests, server errors and response time (p95, through Traefik), the host | Stack Health & Alerts, Host & Containers, Logs, Indexing | `monitoring.read` |
 | the hardware | **Hardware**: GPU utilisation, memory, temperature, fan, power against its limit, clocks and throttling; **GPU time and what holds work back**: GPU time busy and idle (all GPUs added together), the busiest hour, the energy the GPUs used, the time people waited in line, the share of the window each limit held work back (GPUs saturated, someone waiting, context cache full, VRAM full, heat or power, CPU) and what to do about each, hour-by-hour busy, the busiest hours of the week and each hour of the day (from the gateway's requests, in the server's time); CPU by mode and per core, load, clock and temperature; memory, swap, disks, disk I/O, network, NVMe temperature | GPU Hardware, Resources | `hardware.read` |
 

@@ -21,10 +21,10 @@ and nothing reaches `power-limits`.
                                ┌───────▼───────┐
                                │   traefik     │  TLS and routes
                                └──┬────┬────┬──┘
-                DOMAIN            │    │    │     argus.DOMAIN
+                DOMAIN            │    │    │     code-intel.DOMAIN
           ┌───────────────────────┘    │    └──────────────────┐
      ┌────▼────┐ DOMAIN/api, /mcp ...  │                ┌──────▼───────┐
-     │   web   │ and every path of     │                │ argus        │
+     │   web   │ and every path of     │                │ code-intel        │
      └─────────┘ gateway.DOMAIN        │                │ scanners [s] │
                                ┌───────▼───────┐        │              │
                                │ app           ├───────▶│              │
@@ -49,12 +49,12 @@ and nothing reaches `power-limits`.
  the engines           and studio servers
 
  [n]  no network at all                [b]  out only through the app's proxy
- [l] [t]  a network with the app only  [s]  a network with Argus only
- [w]  the app, Argus and the internet  [ha] only with the ha feature or ha.yml
+ [l] [t]  a network with the app only  [s]  a network with Farzan Graph only
+ [w]  the app, Farzan Graph and the internet  [ha] only with the ha feature or ha.yml
 ```
 
-The app calls Argus as the chat's MCP server, and Argus asks the app whose an
-API key is. Argus also embeds through `embed`. The app's chat calls, and the
+The app calls Farzan Graph as the chat's MCP server, and Farzan Graph asks the app whose an
+API key is. Farzan Graph also embeds through `embed`. The app's chat calls, and the
 chat's pictures, speech and transcripts, go through the gateway. The app
 calls `embed` directly for embeddings, the picture, video and studio servers
 directly for the media studio, the chat's video and the meetings' speakers,
@@ -66,20 +66,20 @@ and the engines directly only to manage them (load, unload, slots, health).
 | the web and the app | `web`, `app` | the React app; the .NET app and API: sign-in, chat, tools, admin, dashboards, and the way in for every model request |
 | the stores | `postgres`, `valkey` | the app's database (`llmapp`: people, chats, settings, the ledger, the keys) and the gateway's (`litellm`); Valkey only with the `ha` feature or `ha.yml` |
 | the gateway and the engines | `litellm`; `llamacpp`, `vllm`, `sglang`, `lmdeploy`, `strata`; `imagegen`, `videogen`, `audio`, `embed` | the models: chat models on llama.cpp, vLLM or SGLang, pictures and video on stable-diffusion.cpp, speech on speaches, embeddings on the CPU; other GPU servers the app does not run are reached the same way |
-| Argus | `argus`, `scanners` | the code index of your GitLab (read only), knowledge packs and security advisories, over MCP; the scanners for its security reviews |
+| Farzan Graph | `code-intel`, `scanners` | the code index of your GitLab (read only), knowledge packs and security advisories, over MCP; the scanners for its security reviews |
 | the tools | `sandbox`, `blender`, `lean`, `browser`, `searxng`, `laya`, `studio`, `workspaces` | Python and commands, 3D, proofs, the browser agent, web search, typed decisions, the media studio's own models, Code Studio's workspaces |
 | monitoring | `prometheus`, `alertmanager`, `loki`, `promtail`, the exporters, `power-limits` | what the app's dashboards, logs and alerts read; power caps kept applied |
-| off the host | Code Arena, your GitLab, GitHub and Gitea, other GPU servers, Hugging Face, the company's knowledge sources | reached by the app or Argus, by LiteLLM (other GPU servers), by the speech server (Hugging Face) and by Code Studio's workspaces (the code hosts, package registries), or reaching in through Traefik |
+| off the host | Code Arena, your GitLab, GitHub and Gitea, other GPU servers, Hugging Face, the company's knowledge sources | reached by the app or Farzan Graph, by LiteLLM (other GPU servers), by the speech server (Hugging Face) and by Code Studio's workspaces (the code hosts, package registries), or reaching in through Traefik |
 
-A broken Traefik is a total outage. A broken Prometheus is not. Argus alone,
-without the platform, is a compose of its own in `deploy/argus-standalone`
-([argus/standalone/architecture.md](argus/standalone/architecture.md)): a
+A broken Traefik is a total outage. A broken Prometheus is not. Farzan Graph alone,
+without the platform, is a compose of its own in `deploy/code-intel-standalone`
+([code-intel/standalone/architecture.md](code-intel/standalone/architecture.md)): a
 host runs one or the other.
 
 ### Where LiteLLM sits today
 
 Every request to LiteLLM reaches the app first, an API key's too. Only
-Argus's embeddings go past the app, straight to `embed`. Behind the app,
+Farzan Graph's embeddings go past the app, straight to `embed`. Behind the app,
 LiteLLM is still the model gateway (`litellm`, port 4000 inside, its own
 database `litellm`, its settings in `config/litellm.yaml`). Today it:
 
@@ -117,7 +117,7 @@ app shows their data to admins.
 | `DOMAIN/api`, `/connect`, `/.well-known`, `/scim` | `app:8080` | the API, the OIDC issuer, discovery, SCIM |
 | `DOMAIN/mcp`, `/mcp/code` | `app:8080` | [Arena MCP](mcp.md): each person's chat tools for their agent |
 | `https://gateway.DOMAIN`, every path | `app:8080` | the model API for API keys (OpenAI and Anthropic protocols) |
-| `https://argus.DOMAIN` | `argus:7700` | Argus's MCP (`/mcp`) for coding agents |
+| `https://code-intel.DOMAIN` | `code-intel:7700` | Farzan Graph's MCP (`/mcp`) for coding agents |
 
 `gateway.DOMAIN` goes to the app alone, never straight to LiteLLM. While the
 app is down, it is down too. The app answers these paths there (each also
@@ -146,7 +146,7 @@ download once, at the app's first start.
 Certificates: with nothing set, Traefik serves its own. `ACME_EMAIL` gets one
 from Let's Encrypt for the three names. `make-cert.sh` makes a CA of the
 deployment's own and a certificate for `DOMAIN`, `gateway.DOMAIN`,
-`argus.DOMAIN` and `*.DOMAIN`, or installs a company's
+`code-intel.DOMAIN` and `*.DOMAIN`, or installs a company's
 ([deployment.md](deployment.md#certificates)). TLS is 1.2 or newer with
 forward-secret AEAD ciphers only. HSTS is `HSTS_SECONDS` when it is set.
 Otherwise it is a year with Let's Encrypt, and none with any other
@@ -181,7 +181,7 @@ features it requires.
 | `vllm`, `sglang` | no | `vllm`, `sglang` | the vLLM and SGLang engines, for many people at once |
 | `lmdeploy`, `strata` | no | `lmdeploy`, `strata` | the LMDeploy engine, and Strata for large MoE GGUF models with experts in RAM |
 | `knowledge` | yes | `embed` | company knowledge, and search by meaning |
-| `argus` | yes | `argus` | the code index of your GitLab, and knowledge packs |
+| `code-intel` | yes | `code-intel` | the code index of your GitLab, and knowledge packs |
 | `pictures`, `video` | yes | `imagegen`, `videogen` | pictures and video on the GPU |
 | `speech` | yes | `audio` | speech to text and text to speech |
 | `sandbox` | yes | `sandbox` | Python and commands for the chat's tools |
@@ -192,17 +192,17 @@ features it requires.
 | `studio` | no | `studio` | the media studio's own models: cutouts, voices, music (requires `media`) |
 | `workspaces` | no | `workspaces` | Code Studio's workspaces on this server (requires `code-studio`) |
 | `laya` | no | `laya` | typed decisions on the CPU |
-| `scanners` | no | `scanners` | security scanners for code reviews (requires `argus`) |
+| `scanners` | no | `scanners` | security scanners for code reviews (requires `code-intel`) |
 | `monitoring` | yes | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `cpu-temp-exporter` | dashboards, logs and alerts |
 | `gpu-monitoring`, `dcgm` | yes, no | `gpu-exporter`, `dcgm-exporter` | the GPUs' metrics; data-centre GPU detail on bare metal |
 | `power-limits` | yes | `power-limits` | GPU and CPU power caps kept applied |
 | `ha` | no | `valkey` | the store for the shared counts of LiteLLM's replicas under `ha.yml`, and for LMCache when `LMCACHE_REMOTE` names it |
 | `meetings`, `lab`, `apps`, `data`, `decks`, `media`, `agents`, `code-studio` | yes | nothing: parts of the app | meetings, the science lab, apps, ask your data, decks, the media studio, Agent Studio, Code Studio |
 
-`--cpu-only` turns the GPU features off. Argus cannot start without a GitLab.
+`--cpu-only` turns the GPU features off. Farzan Graph cannot start without a GitLab.
 Without `--gitlab-url` and a token, the installer leaves it out. To turn it
 on later, put `GITLAB_URL` and `GITLAB_TOKEN` in `.env` and run
-`./arenactl repair --with argus`.
+`./arenactl repair --with code-intel`.
 
 **Compose files on top.** Each is named after `docker-compose.yml` with `-f`:
 
@@ -226,12 +226,12 @@ other by service name (`http://app:8080`). Five are kept apart:
 | `laya` | the app, `laya` | none (internal) |
 | `studio` | the app, `studio` | none (internal) |
 | `browsing` | the app, `browser` | none of its own: the browser's only way out is the app's proxy on port 3128, which opens only the public sites an admin allows, on ports 80 and 443 |
-| `scanning` | `argus`, `scanners` | none (internal) |
-| `workspaces` | the app, `argus`, `workspaces` | the internet (a workspace clones, pushes and installs packages); no database, gateway, engine or browser is on it |
+| `scanning` | `code-intel`, `scanners` | none (internal) |
+| `workspaces` | the app, `code-intel`, `workspaces` | the internet (a workspace clones, pushes and installs packages); no database, gateway, engine or browser is on it |
 
 `sandbox`, `blender`, `lean` and `power-limits` have no network at all
 (`network_mode: none`): the app hands the first three their jobs through
-their volumes. `argus` also reaches the host (`host.docker.internal`), for a
+their volumes. `code-intel` also reaches the host (`host.docker.internal`), for a
 GitLab on the same machine. `cpu-temp-exporter` reads the host's sensors from
 `/sys` on Linux; on Windows it asks LibreHardwareMonitor at
 `http://host.docker.internal:8085/data.json`, the exporter's `LHM_URL`
@@ -248,12 +248,12 @@ installer makes the folders with their services' owners.
 |---|---|---|
 | `postgres` | Postgres | both databases |
 | `engine` | the app | the engines' presets and desired state, the media servers' control files, Prometheus's engine targets |
-| `directory` | the app | the people Argus reads (`users.yml`: user name, display name, email) |
+| `directory` | the app | the people Farzan Graph reads (`users.yml`: user name, display name, email) |
 | `audit` | the app | the audit log's daily anchors |
 | `code-arena-signature` | `sign-code-arena.sh` | the signature of the Code Arena builds the app hands out, and the Windows builds Authenticode-signed |
 | `sandbox`, `blender`, `lean` | the app and those services | jobs in and results out, and an admin's reset (`reset`, removed once done) |
 | `workspaces` | `workspaces` | each workspace's clone, its engine's home, what is not pushed yet |
-| `argus` | Argus | its index |
+| `code-intel` | Farzan Graph | its index |
 | `audio` | the speech server | its models |
 | `prometheus`, `alertmanager`, `loki` | those services | metrics (30 days or 20 GB), silences, logs (90 days) |
 | `acme` | Traefik | Let's Encrypt's certificates |
@@ -271,7 +271,7 @@ Folders of the host mounted as they are:
   conversation caches. vLLM's LMCache disk tier is `KVCACHE_DIR`
   (`./kvcache` by default).
 - **`BACKUP_DIR`**: read only to the app, for Admin → Storage.
-- **`ARGUS_PACK_LIBRARY_DIR`** (`../packs`): read only to Argus.
+- **`CODE_INTEL_PACK_LIBRARY_DIR`** (`../packs`): read only to Farzan Graph.
 
 `backup.sh` dumps the whole Postgres cluster (both databases) and archives
 the volumes, except `audio`, `acme`, `sandbox`, `blender`, `lean`,
@@ -376,7 +376,7 @@ One issuer, the app. More in [authentication.md](authentication.md).
   over any person's key LiteLLM holds that the app does not.
 - **Whose key is it?** `KeyBook` is the one answer, for every part that takes
   a key: the key's line, the answer cache, Arena MCP, Code Arena's sync,
-  speech, and Argus's key check. It reads `gateway.api_keys` with the
+  speech, and Farzan Graph's key check. It reads `gateway.api_keys` with the
   person's state, believes an answer for 10 seconds, and forgets it on every
   replica when a key changes.
 - **On each call LiteLLM still checks** the key (unknown, blocked, expired),
@@ -388,17 +388,17 @@ One issuer, the app. More in [authentication.md](authentication.md).
 - **Not moved yet**: the key lists on Account → API keys and Admin → People
   still read LiteLLM's, for its spend and block state.
 
-### Argus's key check
+### Farzan Graph's key check
 
-A coding agent connects to `argus.DOMAIN/mcp` with the person's API key.
-Argus takes nothing but an `sk-` key (no GitLab token in the platform) and
-asks the app whose it is (`/api/authz/key`, with `ARGUS_KEY`). The app
+A coding agent connects to `code-intel.DOMAIN/mcp` with the person's API key.
+Farzan Graph takes nothing but an `sk-` key (no GitLab token in the platform) and
+asks the app whose it is (`/api/authz/key`, with `CODE_INTEL_KEY`). The app
 refuses a request that came through a proxy, looks the key up in `KeyBook`,
 reads the person again (disabled or API access off is refused) and answers
-with their email and user name. `/api/authz/code` tells Argus which
-repositories the person may read, by the app's rules. Argus keeps a good
+with their email and user name. `/api/authz/code` tells Farzan Graph which
+repositories the person may read, by the app's rules. Farzan Graph keeps a good
 answer 5 minutes and a refusal 30 seconds, so a revoked key can still work at
-Argus for up to 5 minutes.
+Farzan Graph for up to 5 minutes.
 
 ### Inside the stack
 
@@ -407,13 +407,13 @@ Argus for up to 5 minutes.
 | `GATEWAY_KEY` | the app, LiteLLM (its master key) | the app's management calls to LiteLLM (models, keys, blocks); LiteLLM's guardrail calls to the app |
 | the chat key | the app (made at LiteLLM on the first model call that needs it, and again if LiteLLM loses it; kept encrypted in its settings) | the app's own model calls; the guardrail lets them pass |
 | `ENGINE_KEY` | the app, LiteLLM, `llamacpp`, `vllm`, `sglang`, Prometheus | the engines' API |
-| `ARGUS_KEY` | the app, Argus, Prometheus | the chat's calls to Argus (naming the person), the app's admin calls, Argus's key and repository checks, Argus's metrics |
+| `CODE_INTEL_KEY` | the app, Farzan Graph, Prometheus | the chat's calls to Farzan Graph (naming the person), the app's admin calls, Farzan Graph's key and repository checks, Farzan Graph's metrics |
 | `WORKSPACES_KEY` | the app, `workspaces` | starting and stopping workspaces; each workspace's engine has a key of its own, kept encrypted |
 | `DB_PASSWORD` | the app, LiteLLM, Postgres | the databases |
 | `APP_KEY` | the app | the key ring is encrypted under it, so it never changes |
 | `ADMIN_PASSWORD` | the app | the first admin, made only while there are no people |
 
-Argus takes the chat's credential only from inside the network: a request
+Farzan Graph takes the chat's credential only from inside the network: a request
 with forwarded headers is refused, and it must name the person.
 
 ## 7. Request flows
@@ -479,7 +479,7 @@ nothing left behind. The browser agent drives Chromium over DevTools
 Settings → Python and web → Search engine. With none named, it asks the
 `web-search` feature's own (`http://searxng:8080`) while that feature is on;
 with the feature off too, the Web tool only opens pages. Laya answers on
-`laya:8000`. Argus answers over MCP.
+`laya:8000`. Farzan Graph answers over MCP.
 
 ### An API key's request
 
@@ -536,18 +536,18 @@ speech and research call the models with the chat key, and video goes
 straight to `videogen`. So the app counts each such call against the
 person's requests a minute itself ([mcp.md](mcp.md)).
 
-### Argus
+### Farzan Graph
 
-- **From a coding agent**: `argus.DOMAIN/mcp` with the person's API key,
+- **From a coding agent**: `code-intel.DOMAIN/mcp` with the person's API key,
   checked with the app (section 6), answered within what that person may read.
-- **From the chat**: `argus:7700/mcp` with `ARGUS_KEY` and the person's email,
+- **From the chat**: `code-intel:7700/mcp` with `CODE_INTEL_KEY` and the person's email,
   and their own GitHub and Gitea tokens when they linked them.
-- **Argus itself** mirrors your GitLab with a read-only token (or a user name
+- **Farzan Graph itself** mirrors your GitLab with a read-only token (or a user name
   and password, LDAP too), reads the people the app writes into `directory`,
   embeds through `embed`, asks the scanners at `scanners:7800` on its own
   network, and renews its security advisories every 24 hours. Its own web,
   API and accounts are off in the platform. The app's admin calls carry
-  `ARGUS_KEY`.
+  `CODE_INTEL_KEY`.
 
 ### Code Arena and Code Studio
 
@@ -556,7 +556,7 @@ person's requests a minute itself ([mcp.md](mcp.md)).
   signs the web session out). Its model calls go to `https://gateway.DOMAIN/v1`
   (chat completions, the editor's completions, the model list and model
   info), so they take the API key's path above. With the same key it uses
-  Arena MCP at `DOMAIN/mcp` and Argus at `argus.DOMAIN/mcp`.
+  Arena MCP at `DOMAIN/mcp` and Farzan Graph at `code-intel.DOMAIN/mcp`.
 - **Its sessions follow the web chat** both ways through `/api/code-arena`
   (chats, messages, a turn's lease of 90 seconds), signed in by the key.
 - **`code-arena web --connect`** dials a WebSocket to
@@ -567,7 +567,7 @@ person's requests a minute itself ([mcp.md](mcp.md)).
   `WORKSPACES_KEY`) to start it. Each workspace runs Code Arena's engine as a
   user of its own. Its model calls go to `http://app:8080`, so they take the
   API key's path too (the key's line, the prompt log, the slot), and its tools
-  to the app's MCP and `argus:7700/mcp`. The IDE reaches the workspace's
+  to the app's MCP and `code-intel:7700/mcp`. The IDE reaches the workspace's
   engine through the app. The company CA the app trusts goes with each start
   (`ca`), as one bundle with the system's CAs in the workspace's home. No
   Docker socket is involved
@@ -583,7 +583,7 @@ hour. It cuts new or changed documents into passages, embeds them with
 (compared with pgvector when it is there). The chat's `search_knowledge` searches only what
 the asker may read ([knowledge.md](knowledge.md)). The wiki (`/api/wiki`) is
 search and browse with no model in between: knowledge by words and, when the
-embedder runs, by meaning; code through Argus, as the person; and the data
+embedder runs, by meaning; code through Farzan Graph, as the person; and the data
 tables the person may ask.
 
 ### The ledger of every model request
@@ -623,9 +623,9 @@ fallback that answered, which nothing fills yet.
 - **Prometheus** scrapes every 15 seconds: the engine's loaded models (the app
   writes the list into `engine`: one target per llama.cpp model, each vLLM or
   SGLang process), the exporters, Traefik, the app (the answers' line),
-  Alertmanager, Loki and Argus. It reaches the engines with `ENGINE_KEY` and
-  Argus with `ARGUS_KEY`, from token files it writes at start. Its rules
-  (`config/prometheus/rules/`) cover Argus, the engines, the hardware, the
+  Alertmanager, Loki and Farzan Graph. It reaches the engines with `ENGINE_KEY` and
+  Farzan Graph with `CODE_INTEL_KEY`, from token files it writes at start. Its rules
+  (`config/prometheus/rules/`) cover Farzan Graph, the engines, the hardware, the
   models, the SLOs and the stack.
 - **Promtail** is the one service with the Docker socket (read only, to find
   the containers). It ships the logs of the compose project `arena` to Loki,
@@ -637,7 +637,7 @@ fallback that answered, which nothing fills yet.
   nothing until a receiver is set up.
 - **Admin → Overview** probes the model gateway, Prometheus, Alertmanager,
   Loki, the engine, the picture, video and speech servers, web search and
-  Argus.
+  Farzan Graph.
 
 ## 8. Who prepares what
 
@@ -649,7 +649,7 @@ installer prepares the host.
 | the installer | `.env` with its secrets; `DATA_DIR`'s folders with their owners; the first `docker-compose.override.yml`; the certificate (`make-cert.sh`); Code Arena's signature (`sign-code-arena.sh`); the images of the features that are on, loaded into Docker or Podman. On an upgrade, a backup first, and a rollback if it fails |
 | `postgres` | the gateway's database (`POSTGRES_DB`, `litellm`) |
 | `litellm` | its tables: about 160 migrations on a first start, a minute or more. The app's first chat waits up to 90 seconds for it |
-| `app` | its own database (`llmapp`) and its migrations, one replica at a time; the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; the directory Argus reads; the OIDC clients; the chat key; the engines' presets and desired state; the media servers' on and off; Prometheus's targets; the models registered at LiteLLM; the keys at LiteLLM; the downloads, when asked (`DEFAULT_MODELS=download`, or an admin), and `MODEL` added once its files are in the library |
+| `app` | its own database (`llmapp`) and its migrations, one replica at a time; the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; the directory Farzan Graph reads; the OIDC clients; the chat key; the engines' presets and desired state; the media servers' on and off; Prometheus's targets; the models registered at LiteLLM; the keys at LiteLLM; the downloads, when asked (`DEFAULT_MODELS=download`, or an admin), and `MODEL` added once its files are in the library |
 | `llamacpp` | nothing: `router.sh` waits for the app's model list, starts llama-server in router mode, restarts it when the list changes or an admin asks, and prunes old caches |
 | `vllm`, `sglang` | nothing: the supervisor follows the app's desired state, and writes what it sees of the GPUs |
 | `imagegen`, `videogen`, `embed` | nothing: they wait for their files (`sd-serve.sh` also follows the app's on and off) |
@@ -670,7 +670,7 @@ or the Helm chart's `app.replicas`). What must happen once runs on one of them:
   (the models kept loaded, the presets, the models at LiteLLM, Prometheus's
   targets), the media servers' on and off, the downloads, the first model,
   the key access sync to LiteLLM, the ledger's import, the LDAP sync,
-  Argus's schedule, the storage watch, the alerts for the bell, the chat
+  Farzan Graph's schedule, the storage watch, the alerts for the bell, the chat
   digests, meeting reminders, the memory's upkeep, idle Code Studio
   workspaces, and the answers queued before a restart. A replica that stops
   lets go of the lock. One that dies loses it with its connection, and another
@@ -715,7 +715,7 @@ whether the one answering leads. The replica's id is only in the API's answer
 
 ## 10. Kubernetes
 
-`deploy/helm/argus-arena` runs the same services on Kubernetes, with the
+`deploy/helm/arena` runs the same services on Kubernetes, with the
 names the app reaches them by, one release per namespace. `./arenactl kube`
 (or `installer.sh --kubernetes`) installs, upgrades and removes it
 ([deployment.md](deployment.md#helm)).
@@ -758,8 +758,8 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 | "Replicas: the connection for the lead and the signals was lost" | it reconnects; another replica leads within seconds |
 | a feature's pages say it is not installed, or its API answers 404 | it is not in `COMPOSE_PROFILES`, or a feature it requires is not (`./arenactl repair --with FEATURE` brings both) |
 | a picture, video or embedding server waits for its files | the app is fetching them, or the default models were never asked for (Admin → Models → Default models) |
-| Argus pages say "not set up" | the app has no Argus address or key (`ARGUS_KEY`; compose does not start without it). With the `argus` feature off they say "… is not installed here" instead |
-| a revoked key still answers at Argus | Argus keeps a good answer for 5 minutes |
+| Farzan Graph pages say "not set up" | the app has no Farzan Graph address or key (`CODE_INTEL_KEY`; compose does not start without it). With the `code-intel` feature off they say "… is not installed here" instead |
+| a revoked key still answers at Farzan Graph | Farzan Graph keeps a good answer for 5 minutes |
 | dashboards are empty | Prometheus is down, or the engine has no model loaded to scrape |
 | the Logs page is empty | Loki or Promtail is down, or the compose project is not `arena` (Promtail keeps only that one) |
 | with `scale.yml`, the app's log levels are missing, or the line's metrics show one replica | Promtail parses the container named `app`, and Prometheus scrapes the one name `app:8080` |

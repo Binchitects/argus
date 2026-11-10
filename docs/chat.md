@@ -357,7 +357,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   `PUT /api/chat/conversations/{id}/messages/{messageId}/context` with
   `{"pinned": true}` or `{"leftOut": true}` sets them.
 - **Tools on demand.** Every tool's definition in every request is thousands of
-  tokens before the question (Argus alone is about 5,000). Past **Tool
+  tokens before the question (Farzan Graph alone is about 5,000). Past **Tool
   definitions sent whole up to**, a chat sends in full only the tools it has
   loaded, and a line for each other tool (its name, what it does, its
   functions); the model calls `load_tools` when a question needs one, and it
@@ -402,7 +402,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Tools.** **Tools** beside the paperclip lists the tools you may use and
   which of them this chat has on; a new chat starts with those an admin put
   on in new chats. The model calls a tool when a question needs it.
-  - **Argus**: the code you can read in GitLab (below).
+  - **Farzan Graph**: the code you can read in GitLab (below).
   - **Company knowledge**: the company's documents you may read (GitLab
     wikis and issues, GitHub, Confluence, Jira, Notion, SharePoint and
     OneDrive, WebDAV, S3, folders, websites, feeds and uploads an admin added
@@ -442,7 +442,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     result filling the model's window, the model writes a short Python program
     in the same sandbox that calls the chat's other tools as functions
     (`import arena`; `arena.tools.search("…")` finds them,
-    `help(arena.argus.find_symbol)` says one's parameters), loops, filters
+    `help(arena.code-intel.find_symbol)` says one's parameters), loops, filters
     and joins their results, and only what it prints comes back. For research
     over many results: every caller of a symbol and what each does, several
     searches joined. Each call goes through the runner's socket (the sandbox
@@ -572,18 +572,18 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - A tool set to **ask before each call** waits with **Allow** and **Don't
     allow**. A call you do not allow is not run, and the model is told so.
 - **Tool calls.** Each call is a card: the tool, what it was asked, whether it
-  ran, how many results, and how long it took. Opened, it shows Argus's answer
+  ran, how many results, and how long it took. Opened, it shows Farzan Graph's answer
   for what it is:
   - Symbols, references and search hits show as places in the code:
     repository, file and lines, linking to that line range in GitLab (on the
     branch asked about). Signatures and reference lines are highlighted. The
     words a search matched are marked.
-  - A file Argus read shows as code, and goes into the Files panel.
+  - A file Farzan Graph read shows as code, and goes into the Files panel.
   - Other answers show as a table (it sorts and filters) or a list of fields. **Raw answer** shows
     the JSON, and errors are shown as the tool's own words.
   - When something exists that you can't read, a notice names the repository
     and its maintainers. It stays outside the fold, so it is never missed.
-- **Long tool calls.** A call to Argus or an MCP server may run for an hour
+- **Long tool calls.** A call to Farzan Graph or an MCP server may run for an hour
   (**Settings → Chat → Longest tool call**); an MCP server can have its own
   limit, up to 24 hours (**Admin → Tools →** the server's **Edit** → **Longest
   call**).
@@ -604,7 +604,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - A block the model names (```` ```ts title="src/a.ts" ````, or a first line
     `// file: src/a.ts`) opens in the Files panel.
 - **Diagrams.** A `mermaid` block is drawn where it is written, as a diagram:
-  ask Argus for a repository's workflow, architecture or data flow and the
+  ask Farzan Graph for a repository's workflow, architecture or data flow and the
   answer shows it. **Code** shows its source, **Preview** opens it larger in
   the Files panel.
   - It is drawn by the preview runner (below), in a frame as tall as the
@@ -623,7 +623,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   by line: a Persian line under an English one reads right to left. Code, code
   blocks and formulas stay left to right. Code Arena's chat shows them the same
   way.
-- **Files panel.** Like Claude's: every attachment, every file Argus read (with
+- **Files panel.** Like Claude's: every attachment, every file Farzan Graph read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
   It keeps the newest version of each and has a viewer. Files made by a
   tool or a sub-agent show as soon as they exist. **Download all** (the
@@ -871,7 +871,7 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   message with its **Reply** button; `@Name` (a person's name, or its first
   word) tells them, and a reply tells the one replied to: both in the bell.
 - **No one's own things.** Answers in a room use no one's memory, code
-  (Argus), knowledge, or tools that act as the person (admins' MCP servers
+  (Farzan Graph), knowledge, or tools that act as the person (admins' MCP servers
   and plugins), as everyone reads them and another member's message could
   steer them.
 - **Live.** Who has the room open, who is typing, and whom the model is
@@ -994,7 +994,7 @@ What a project holds:
   project.
 - **Repositories**, by their path (`payments/api`) or any address of them. A
   Code Arena session in a clone of one goes in the project by itself, and the
-  changes merged there count to its progress (read through Argus, as you may
+  changes merged there count to its progress (read through Farzan Graph, as you may
   read them).
 - **Chats, rooms and Code Arena sessions.** A chat's menu (⋯ → **Project**)
   puts it in a project you may add to, or takes it out. A chat stays yours in
@@ -1075,7 +1075,7 @@ does Admin → Accounting. Each export is audited.
 
 Every report and dashboard page (Usage & cost, the admin's dashboards, Usage
 by group and its chargeback, a project's page, Traces, Logs, the Leaderboard,
-the Audit log, the Prompt log, Feedback, and Argus's own overview, people and
+the Audit log, the Prompt log, Feedback, and Farzan Graph's own overview, people and
 Settings) has the same **time window**: a preset (from the last hours to the
 last year, today, this week, this month, last month) or a **custom range**
 between two days, at most 400 days. Traces and Logs offer the live ones too
@@ -1170,7 +1170,7 @@ upload. **Settings → Meetings** sets the limits: the largest recording
 may use it: **Workspaces** (`code.studio`), **Review** (`review.run` starts
 reviews; `code.read` lists merge requests) and **Ask and explore**
 (`code.read`); **Security review** and **Fix it** are the buttons at the top.
-Reviews and questions read the code through Argus with **your own** GitLab
+Reviews and questions read the code through Farzan Graph with **your own** GitLab
 access (Reporter or above on the project, and the rules of Admin → Access),
 and write nothing to GitLab: no comments, no approvals.
 
@@ -1181,7 +1181,7 @@ repositories, and every review, filtered to **All**, **Changes**,
 **Repositories** or **Automatic** and found by a word.
 
 - **A whole repository** at a branch, tag or commit (its default branch when
-  none): its files listed (Argus's `files_at`), its product's code chosen
+  none): its files listed (Farzan Graph's `files_at`), its product's code chosen
   (tests, examples, vendored, generated and built code left out, only code
   languages, 200 bytes to 200 KB each; the entry points first, then the
   largest, at most 30), each read whole with its lines numbered and reviewed
@@ -1194,7 +1194,7 @@ repositories, and every review, filtered to **All**, **Changes**,
 - **Several repositories** (2 to 10, one a line, a name, the same branch in
   each or each one's default): each reviewed whole as above, one after the
   other (one review of several runs at a time), then, with **Look across
-  them** on, Argus's `dependency_path` is asked for each pair (at most 15) and
+  them** on, Farzan Graph's `dependency_path` is asked for each pair (at most 15) and
   the model, given each repository's summary and findings and those links,
   writes **How they fit together**, **Between the repositories** (contracts
   one side breaks, a shared package at different versions, logic done twice,
@@ -1202,8 +1202,8 @@ repositories, and every review, filtered to **All**, **Changes**,
   page has each repository's review, the links, the report, and every
   finding together, filtered by repository and severity. Deleting it deletes
   the repositories' reviews in it.
-- **Ask and explore**: **Ask about code**, and four of Argus's tools across
-  repositories, each asked in a chat with Argus: **What a change reaches**
+- **Ask and explore**: **Ask about code**, and four of Farzan Graph's tools across
+  repositories, each asked in a chat with Farzan Graph: **What a change reaches**
   (`change_impact`, with a symbol for the lines that use it), **How two
   repositories are linked** (`dependency_path`), **Where a change belongs**
   (`which_repo`) and **The estate's map** (`system_map`, for a group or the
@@ -1241,7 +1241,7 @@ For a merge request:
   choose (they are told in their bell). They find it under Reviews, "shared
   by" you, and read its summary and findings without changing them (no
   Resolved or Dismiss, no room, no review again). Each of them sees it only
-  while they may read its project themselves: Argus asks GitLab as them, so a
+  while they may read its project themselves: Farzan Graph asks GitLab as them, so a
   review never shows code to someone GitLab keeps it from. **Stop sharing**
   takes it back. Each change is audited as `review.share`; it needs the
   `feature.share_links` permission.
@@ -1249,8 +1249,8 @@ For a merge request:
   tagged `review`. Three of a person's reviews run at once at most. Who may
   review: the `review.run` permission; who may ask about code: `code.read`
   (Admin → Access).
-- **Ask about code** opens a chat with Argus on and the question in it, about
-  the project shown: Argus reads the code, the merge requests, CI and any
+- **Ask about code** opens a chat with Farzan Graph on and the question in it, about
+  the project shown: Farzan Graph reads the code, the merge requests, CI and any
   commit, as you may.
 - **The Code review tool** (Admin → Tools) lets a chat, a coding agent
   through Arena MCP, or Code Arena start a review: "review g/app !7" runs
@@ -1268,14 +1268,14 @@ page, to the review tool, in an automatic review's rule):
   hosts**: GitHub's fine-grained token with *Contents*, *Pull requests* and
   *Metadata* read (or a classic one with `repo` read), Gitea's with
   *repository: read*. It is checked as it is linked (the account it is
-  shows), kept encrypted, never shown again, and passed to Argus with your
-  requests only: what you may read there is what is read. Argus only reads.
+  shows), kept encrypted, never shown again, and passed to Farzan Graph with your
+  requests only: what you may read there is what is read. Farzan Graph only reads.
 - **What is read.** The pull request, its files and diff, its commits, its
   conversation and its CI (GitHub Actions runs and jobs; Gitea's commit
   statuses). A review again reads only what came after on GitHub; Gitea's
   API cannot compare two commits, so there it reads the whole diff again.
   Comparing two branches is GitHub's and GitLab's only; `grep_at` is
-  GitLab's only (Argus keeps copies of GitLab projects alone).
+  GitLab's only (Farzan Graph keeps copies of GitLab projects alone).
 - **Setting it up.** GitHub.com works as it is; a GitHub Enterprise API
   (`GITHUB_API_URL`, or `off`) and your Gitea (`GITEA_URL`) are set in
   `deploy/.env` (Helm: `codeHosts`).
@@ -1319,7 +1319,7 @@ as they open and get new commits, without anyone pressing Review:
 
 **Security review** (its own section in the menu, `/security`) reviews a
 repository's security at a branch, tag or commit, read with your own access
-(Argus, read-only); nothing is written to the code host. Starting one needs
+(Farzan Graph, read-only); nothing is written to the code host. Starting one needs
 `review.run`. The page opens with what is open across the latest review of
 each repository, by severity; then the form (one repository, or several at
 once); then the reviews of several repositories and each repository's
@@ -1332,12 +1332,12 @@ review, found by its name.
    the package comes in and the smallest upgrade that fixes it. Its bill of
    materials (CycloneDX) is kept to download. Without an advisories pack the
    review says so and goes on with the code; it warns when the advisories
-   are more than a week old. When Argus renews the advisories (each day), the
+   are more than a week old. When Farzan Graph renews the advisories (each day), the
    latest review of each repository from the last 90 days is checked again,
    at the commit it read and as its person. A vulnerability published since
    joins it, marked **new since the review**, and its person is told; its
    time to fix counts from then.
-2. **The scanners** (where the `scanners` feature is installed): Argus's
+2. **The scanners** (where the `scanners` feature is installed): Farzan Graph's
    `scan_at` sends the commit, with its history, to opengrep with Arena's own
    rules (106 of them, each tested on its weak and fixed examples), Bandit,
    gitleaks and Trivy's checks of configuration. They run on a network of
@@ -1383,7 +1383,7 @@ exploited and the fix. Mark it **Fixed**, **Accept the risk** (why, and by
 when to look again, within the year) or **Not a weakness** (why); each is
 audited as `security.finding.*`. A reviews admin sees everyone's. The
 `/security-review` skill does the same in a chat or Code Arena, with the
-Argus tools.
+Farzan Graph tools.
 
 A review of a repository says what is **new since the last review** of the
 same repository and ref (a badge on each new finding, and how many are new
@@ -1417,7 +1417,7 @@ say so.
 
 - **Your token.** **Code → Fix it** links your own GitLab personal access
   token, with the `api` scope. Fix it reads the branch and opens the merge
-  request with it, as you: never with the app's account or Argus's (which
+  request with it, as you: never with the app's account or Farzan Graph's (which
   only read). The token is checked with GitLab, kept encrypted, and never
   shown again.
 - **Starting one.** Press **Fix it** on a review's finding, or on a security
@@ -1476,7 +1476,7 @@ debugger and its agent), on a project of yours that the server keeps.
   config --global` in its terminal).
 - **Open** starts it and shows the IDE at `/code/w/…`, the whole window. Its
   engine runs as a user of its own, with limits; it has no Docker socket, and
-  its network reaches the app, the gateway, Argus (with your own key) and the
+  its network reaches the app, the gateway, Farzan Graph (with your own key) and the
   internet, not the stack's databases, engines or browser. What the engine
   says as it starts is kept beside the workspace, and its end is shown when
   it does not start. Its agent uses a gateway key of its own,
@@ -1545,11 +1545,11 @@ that holds each port, and the ports you forwarded by hand.
 ### The business map
 
 **Code Studio → Business map** keeps what each system does for the business,
-so Argus can explain the business, not only the code.
+so Farzan Graph can explain the business, not only the code.
 
 - **Mapping a project.** Type its path (group/project) and press **Map
   it**: a model, as you, with your default model and at your cost (tagged
-  `business`), reads the project with Argus's read-only tools: its README
+  `business`), reads the project with Farzan Graph's read-only tools: its README
   and documents, its code (the things it deals in, the rules it enforces, the
   processes across files and systems), the systems around it, and its GitLab
   issues and wiki (`issue_list`, `issue_get`, `wiki_list`, `wiki_get`). It
@@ -1559,16 +1559,16 @@ so Argus can explain the business, not only the code.
   where it was read (a file and line, a document, an issue, a merge request,
   a wiki page), and opens there in GitLab; an item with no source is left
   out. The bell says when it is ready. **Map again** reads it anew.
-- **Who sees it.** A map is shown to those Argus shows its project to (a
+- **Who sees it.** A map is shown to those Farzan Graph shows its project to (a
   member at Reporter or above), checked as they open it; nobody else sees
   it, or that it exists. An admin removes one (audited as `business.*`).
-- **In the chat.** With Argus on, and a map ready, Argus answers as the
+- **In the chat.** With Farzan Graph on, and a map ready, Farzan Graph answers as the
   company's senior technical expert: `business_map` lists the systems you
   may read and what each does, and `business_explain` finds the
   capabilities, rules, processes and terms that answer a question, with
   their sources, which it confirms in the code, the issues and the wiki
-  before it answers, in business words first. **Ask Argus** on a map starts
-  that chat. In Code Studio's IDE, its agent has the same Argus.
+  before it answers, in business words first. **Ask Farzan Graph** on a map starts
+  that chat. In Code Studio's IDE, its agent has the same Farzan Graph.
 
 ## 3D models
 
@@ -1672,7 +1672,7 @@ my details", "check our status page and the vendor's for an outage".
   **Close** (the X) on the bar.
 - **Who has it**: the `feature.browser` permission and the tool's own
   settings (Admin → Tools). It is off in rooms, as it acts as you. It needs
-  the `browser` feature (`./arenactl repair --with browser` from a checkout, `sh argus-arena-VERSION-offline.run repair --with browser` with the offline bundle, or `browser` in `COMPOSE_PROFILES`).
+  the `browser` feature (`./arenactl repair --with browser` from a checkout, `sh arena-VERSION-offline.run repair --with browser` with the offline bundle, or `browser` in `COMPOSE_PROFILES`).
 
 ## Apps
 
@@ -2195,7 +2195,7 @@ instructions) and the files beside it (references, templates, scripts).
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as
-you: a morning digest, a weekly report on a repository with Argus. Or, with
+you: a morning digest, a weekly report on a repository with Farzan Graph. Or, with
 **What it does**, a task starts a review as you instead of asking: **Review a
 whole repository**, **Review several repositories** (looked at across),
 **Security review of a repository** or **of several**, each of the
@@ -2257,9 +2257,9 @@ repository review**, **Weekly product review** (several repositories),
 - **Answer as a comment in GitLab**: the answer goes on the merge request,
   issue or commit. Reading the changes and logs and commenting use the **GitLab
   bot token** an admin sets (Settings → Scheduled tasks, a bot account's token
-  with scope `api`, Reporter in the projects), never Argus's read-only token;
+  with scope `api`, Reporter in the projects), never Farzan Graph's read-only token;
   each comment is in the audit log (`task.gitlab_comment`). Examples: review
-  every merge request with Argus for context; explain each failed pipeline;
+  every merge request with Farzan Graph for context; explain each failed pipeline;
   triage new issues. A team that wants the review and the explanation as jobs
   in its own pipeline instead uses the `arena` CLI and its GitLab CI template
   ([ci.md](ci.md)).
@@ -2483,11 +2483,11 @@ their turn:
   (Your account → Your data says how long), then deleted with their files. A
   person on legal hold keeps everything, and a chat they delete is only hidden
   until the hold ends ([admin.md](admin.md#retention-legal-hold-and-exports)).
-- **Argus answers as the person asking.** The app calls Argus inside the
-  network with `ARGUS_CHAT_CLIENT_TOKEN` and your email. Argus resolves the
+- **Farzan Graph answers as the person asking.** The app calls Farzan Graph inside the
+  network with `CODE_INTEL_CHAT_CLIENT_TOKEN` and your email. Farzan Graph resolves the
   email to a GitLab account and its access. Without a GitLab account for the
-  email, the answer carries "Argus is not available for this answer" with
-  Argus's reason, and the model answers without code search.
+  email, the answer carries "Farzan Graph is not available for this answer" with
+  Farzan Graph's reason, and the model answers without code search.
 - **Tools are for whom an admin says** (Admin → Tools): everyone, admins, or
   members of chosen groups (Admin → Groups: app groups, or groups from the
   company directory). A chat can only turn on tools its owner may use, and the
@@ -2505,7 +2505,7 @@ their turn:
   redirect points to: every connection is checked as it is made. Pages are
   data to the model, not instructions.
 - **Company knowledge is what each person may read.** A GitLab project's wiki
-  and issues are found only by its members (matched by username, as Argus
+  and issues are found only by its members (matched by username, as Farzan Graph
   does; admins too only when they are members); a Confluence page only by
   whom Confluence lets view it (its space and its restrictions), a SharePoint
   file only by whom it is shared with, and what they cannot tell by the groups
@@ -2573,9 +2573,9 @@ wait between two tool calls: measured on Qwen3.8-Flash-Next here, a round
 started 2.2 s after the tool's result and thought 3 s before it wrote. Everyone's language, voices, reading speed
 and reading aloud in Talk are under Settings → Speech, until each person
 chooses their own ([Your voice](#your-voice)).
-**GitLab address for links** (Settings → Argus, applies at once) is where
-browsers open GitLab from Argus's answers. Leave it empty to use the address
-Argus indexes. Set it when Argus reaches GitLab by an internal name.
+**GitLab address for links** (Settings → Farzan Graph, applies at once) is where
+browsers open GitLab from Farzan Graph's answers. Leave it empty to use the address
+Farzan Graph indexes. Set it when Farzan Graph reaches GitLab by an internal name.
 
 ## How a conversation is stored
 
@@ -2694,11 +2694,11 @@ use and edit one); a new chat takes `assistantId`.
 | "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
 | "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
 | An API call answers **429** | the key already has as many requests running as it may (`Limit type: max_parallel_requests`), or used its requests or tokens for this minute (`Limit type: requests` or `tokens`) | wait as long as `Retry-After` says, then send again; Your account → API key shows the limits and what was used. An admin sets them (Settings → API keys, a group's Policies, a person's Rate limits) |
-| "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |
+| "Farzan Graph is not available for this answer: …" | Farzan Graph's reason follows | usually no GitLab account matches the person's email; see [the code-intelligence service](code-intel/README.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |
 | No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `./arenactl check sandbox` says whether it is sound |
-| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `./arenactl repair --with laya` from a checkout, or `sh argus-arena-VERSION-offline.run repair --with laya` on an installed host (or `laya` added to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d laya`); Admin → Models shows the downloads |
+| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `./arenactl repair --with laya` from a checkout, or `sh arena-VERSION-offline.run repair --with laya` on an installed host (or `laya` added to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d laya`); Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | No **Deep research** in the chat's **Tools** | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
 | **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip, or a tap, says which) | choose a model that calls tools, or turn Compare off |
@@ -2707,7 +2707,7 @@ use and edit one); a new chat takes `assistantId`.
 
 ## How it is tested
 
-- **Backend (xUnit):** streaming, tool rounds (Argus's rows reach the model and
+- **Backend (xUnit):** streaming, tool rounds (Farzan Graph's rows reach the model and
   the page as one JSON list), each built-in tool, a chat's own tools and who may
   use them (off, groups, off in new chats), asking first (declined and allowed,
   and nobody else can answer), pictures kept as the person's files and deleted
@@ -2748,7 +2748,7 @@ use and edit one); a new chat takes `assistantId`.
   chat's model without it) and Auto (each kind of question routed, thinking
   by difficulty, the route kept, **Ask the big model**, deep research unasked,
   Auto as the default, and who may use the small model). Real Postgres, a fake
-  model and a fake Argus.
+  model and a fake Farzan Graph.
   Also Decide (Laya), against a fake Laya: offered only while the module runs
   and a checkpoint is loaded; the model's questions sent in Laya's own shape,
   its probabilities read back to three places, Persian sent to the
@@ -2824,9 +2824,9 @@ use and edit one); a new chat takes `assistantId`.
   - the branch tree
   - the live-stream reducer
   - file and fence parsing
-  - reading Argus's answers: each tool's rows, GitLab links on the branch
+  - reading Farzan Graph's answers: each tool's rows, GitLab links on the branch
     asked about, search matches without marking the code's own brackets, and
-    files Argus read in the Files panel
+    files Farzan Graph read in the Files panel
   - what previews (a fence's own language, a file name, an `<svg>` or a page
     in bare `xml`), the page rewrite (reporter first, Tailwind and Mermaid from
     the stack), compiling a component and refusing a library it lacks
@@ -2835,7 +2835,7 @@ use and edit one); a new chat takes `assistantId`.
     failed answer, a message given back, an edit and its version arrows,
     answering again with another thinking level, image previews and the "cannot
     see" note, settings validation, and hostile HTML and maths
-  - Argus's answers linking to GitLab, **Raw answer**, a failed tool in its
+  - Farzan Graph's answers linking to GitLab, **Raw answer**, a failed tool in its
     own words, and the image viewer (arrows, keys, actual size)
   - ↑ and ↓ in the box: this chat's messages newest first, then the person's
     other chats (asked for only then, each text once; a new chat's box goes
@@ -2899,7 +2899,7 @@ use and edit one); a new chat takes `assistantId`.
     canvas opening by itself on a wide screen, a save over the model's newer
     version, export, and a code canvas with line numbers
 - **Browser (Playwright), desktop and phone, both themes, with axe, in CI
-  too:** a chat with Argus's answers and two images, served by the browser
+  too:** a chat with Farzan Graph's answers and two images, served by the browser
   itself, from the links to the image viewer.
 - **Browser, against the real model:** the model calls the calculator and gets
   the exact product of two nine-digit numbers, and draws a picture with the

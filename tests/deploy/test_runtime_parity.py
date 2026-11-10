@@ -142,7 +142,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "sglang.enabled=true", "lmdeploy.enabled=true", "strata.enabled=true", "valkey.enabled=true", "code-intel.packLibraryClaim=packs", "gitlab.caCert=a-ca"]
+    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "sglang.enabled=true", "lmdeploy.enabled=true", "strata.enabled=true", "valkey.enabled=true", "codeIntel.packLibraryClaim=packs", "gitlab.caCert=a-ca"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

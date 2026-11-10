@@ -25,6 +25,7 @@ import { PersonDataRequests } from './data-requests'
 import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
 import { creditKinds, parseCredit, personQuery, type CreditKind, type Person, type PersonDetail, type Standing } from './people-api'
+import { codeIntelName } from '@/lib/brand'
 
 const sourceLabel: Record<Person['source'], string> = { local: 'Local account', ldap: 'Company directory', oidc: 'Company sign-in' }
 const signsInWith: Record<Person['source'], string> = {
@@ -377,7 +378,7 @@ function ApiKeyCard({ p, keys, onSecret, mayChange }: { p: Person; keys: PersonD
                 on ||
                 (await confirm({
                   title: `Take ${p.displayName}'s API access?`,
-                  description: 'Their keys are blocked at once, none is shown to them or made, and Arena MCP and Argus refuse them. The chat stays theirs.',
+                  description: `Their keys are blocked at once, none is shown to them or made, and Arena MCP and ${codeIntelName} refuse them. The chat stays theirs.`,
                   confirm: 'Take API access',
                   destructive: true,
                 }))

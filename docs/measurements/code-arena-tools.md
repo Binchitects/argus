@@ -1,6 +1,6 @@
 # Code Arena's tools, measured
 
-Code Arena's own tools (grep, read_file, run_shell, run_code) and Argus
+Code Arena's own tools (grep, read_file, run_shell, run_code) and Farzan Graph
 Arena's long attachments, on the tasks a model gives them, before and after
 v7.8's changes (2026-11-06). Asked for because grep and the shell were slow
 and failed, the Python tool did nothing useful, and large files filled the
@@ -13,7 +13,7 @@ Produced by the tests that hold the numbers, each printing its table:
   bundle, 200 binary files and 2,000 files `.gitignore` leaves out;
 - `tests/CodeArena.Tests/CodePythonTests.cs`: run_code through the whole
   agent (a fake gateway gives the model's calls), with Python 3 (skipped where there is none, as in the .NET SDK image: here the host's Python was mounted in);
-- `tests/Llm.Tests/FileOutlineTests.cs`: Argus Arena's attachments.
+- `tests/Llm.Tests/FileOutlineTests.cs`: Farzan Arena's attachments.
 
 The build host is shared with a live stack and power capped: times are a
 guide, within some tens of milliseconds.
@@ -85,7 +85,7 @@ has one interpreter, kept between calls. run_shell with `python -c` was the
 other choice; it has the same fault (nothing kept), so the tool was kept and
 made a notebook's kernel.
 
-## Argus Arena's long attachments
+## Farzan Arena's long attachments
 
 | task | before | after |
 |---|---|---|

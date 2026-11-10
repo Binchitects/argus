@@ -20,12 +20,12 @@ interface IndexSchedule {
   nextRuns: string[]
 }
 
-/** When Argus brings the index up to date by itself: a schedule in words (or cron), in a time zone, and the next passes. */
+/** When code-intel brings the index up to date by itself: a schedule in words (or cron), in a time zone, and the next passes. */
 export function ScheduleCard() {
   const queryClient = useQueryClient()
-  const current = useQuery({ queryKey: ['admin', 'argus', 'schedule'], queryFn: ({ signal }) => api<IndexSchedule>('/api/admin/argus/schedule', { signal }) })
+  const current = useQuery({ queryKey: ['admin', 'code-intel', 'schedule'], queryFn: ({ signal }) => api<IndexSchedule>('/api/admin/code-intel/schedule', { signal }) })
   if (!current.data) return null
-  return <ScheduleForm key={`${current.data.schedule}|${current.data.timeZone}`} saved={current.data} onSaved={() => queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'schedule'] })} />
+  return <ScheduleForm key={`${current.data.schedule}|${current.data.timeZone}`} saved={current.data} onSaved={() => queryClient.invalidateQueries({ queryKey: ['admin', 'code-intel', 'schedule'] })} />
 }
 
 function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () => Promise<unknown> }) {
@@ -35,7 +35,7 @@ function ScheduleForm({ saved, onSaved }: { saved: IndexSchedule; onSaved: () =>
   const [error, setError] = useState<string | null>(null)
   const set = (patch: Partial<Schedule>) => setSchedule({ ...schedule, ...patch })
   const save = useMutation({
-    mutationFn: () => api('/api/admin/argus/schedule', { method: 'PUT', body: { schedule: on ? cronOf(schedule) : '', timeZone } }),
+    mutationFn: () => api('/api/admin/code-intel/schedule', { method: 'PUT', body: { schedule: on ? cronOf(schedule) : '', timeZone } }),
     onSuccess: async () => {
       await onSaved()
       toast.success('Schedule saved', { description: on ? `${describe(cronOf(schedule))}.` : 'Only pushes and Index now update the index.' })

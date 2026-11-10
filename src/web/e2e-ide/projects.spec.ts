@@ -53,7 +53,7 @@ async function backend(page: Page) {
     '/api/chat/config': {
       model: 'model-a',
       models: [{ name: 'model-a', context: 262144, maxOutput: 32768, vision: false, tools: true, thinking: true, loaded: true, prices: { input: null, cachedInput: null, output: null } }],
-      auto: null, presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
+      auto: null, presets: [], defaultThinking: null, codeIntel: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
     },
     '/api/session': { id: 's1', messages: [], diffs: {}, busy: false },
     '/api/sessions': [],

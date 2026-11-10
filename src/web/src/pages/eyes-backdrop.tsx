@@ -4,8 +4,8 @@ import { useMedia } from '@/lib/use-media'
 import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, FADE, logoFrames, lookFrames, nextShown, placeEyes, type Box, type Shown } from './eyes'
 
 /**
- * Behind the sign-in form: the Argus logo, then its eyes (Argus Panoptes, the
- * hundred-eyed watcher) opening across the screen, blinking and looking about, then
+ * Behind the sign-in form: the logo, then its eyes (the owl's: the wise one, who sees what
+ * others miss) opening across the screen, blinking and looking about, then
  * closing back into the logo; over and over. It fills the element it is put in, sits
  * behind the rest and lets every click through; the eyes keep off whatever beside it
  * is marked `data-keep-clear` (the form, the words). They move by transform and
@@ -78,12 +78,12 @@ export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) 
         <defs>
           <linearGradient id="eyes-white" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#ffffff" />
-            <stop offset="1" stopColor="#d9e6fb" />
+            <stop offset="1" stopColor="#e3eef0" />
           </linearGradient>
-          <radialGradient id="eyes-iris" cx="0.45" cy="0.2" r="0.95">
-            <stop offset="0" stopColor="#2fd6ff" />
-            <stop offset="0.5" stopColor="#1673e8" />
-            <stop offset="1" stopColor="#0a3db5" />
+          <radialGradient id="eyes-iris" cx="0.42" cy="0.32" r="0.9">
+            <stop offset="0" stopColor="#fde68a" />
+            <stop offset="0.55" stopColor="#f59e0b" />
+            <stop offset="1" stopColor="#b45309" />
           </radialGradient>
         </defs>
       </svg>
@@ -139,7 +139,7 @@ function EyeView({ eye, clock, drop }: { eye: Shown; clock: () => number; drop: 
         <div ref={iris} className="watch-eye-iris">
           <svg viewBox={EYE_VIEW}>
             <circle cx="512" cy="528" r="96" fill="url(#eyes-iris)" />
-            <circle cx="512" cy="530" r="42" fill="#06102a" />
+            <circle cx="512" cy="530" r="42" fill="#0b1720" />
             <circle cx="545" cy="494" r="18" fill="#ffffff" />
           </svg>
         </div>

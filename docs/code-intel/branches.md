@@ -1,7 +1,7 @@
 # Indexing more than one branch
 
 A repository often has long-lived release branches alongside the trunk —
-`main` plus `v1`, `v2`, `v3`. Before this, Argus indexed exactly one ref per
+`main` plus `v1`, `v2`, `v3`. Before this, Farzan Graph indexed exactly one ref per
 project, whichever GitLab reported as the default, and a developer working on
 v2 received trunk answers **with nothing saying so**. That is worse than no
 answer: it is a confident answer about code they are not changing.
@@ -10,12 +10,12 @@ answer: it is a confident answer about code they are not changing.
 
 ```yaml
 index:
-  data_dir: /var/lib/argus
-  db_path:  /var/lib/argus/index.db
+  data_dir: /var/lib/code-intel
+  db_path:  /var/lib/code-intel/index.db
   branches: ["main", "v*"]      # glob patterns, fnmatch syntax
 ```
 
-Omit `branches` entirely and Argus indexes each project's default branch and
+Omit `branches` entirely and Farzan Graph indexes each project's default branch and
 nothing else — exactly what it did before, so an existing config is unchanged
 by upgrading.
 

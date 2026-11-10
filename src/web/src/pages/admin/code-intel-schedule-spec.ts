@@ -1,6 +1,6 @@
 import { weekdays } from '../tasks-schedule'
 
-/** How a repository is brought up to date by itself, as Argus stores it: "", pass, off, hours:N, daily:HH:MM, weekly:D:HH:MM. */
+/** How a repository is brought up to date by itself, as code-intel stores it: "", pass, off, hours:N, daily:HH:MM, weekly:D:HH:MM. */
 export type ScheduleKind = 'default' | 'pass' | 'off' | 'hours' | 'daily' | 'weekly'
 
 export interface RepoSchedule {
@@ -56,7 +56,7 @@ export function scheduleSpec(s: RepoSchedule): string {
   }
 }
 
-/** A schedule in words, as Argus says it: "Every 6 hours", "Mondays at 02:30". */
+/** A schedule in words, as code-intel says it: "Every 6 hours", "Mondays at 02:30". */
 export function scheduleWords(spec: string, defaultWords = 'the schedule for all'): string {
   const s = scheduleForm(spec)
   switch (s.kind) {

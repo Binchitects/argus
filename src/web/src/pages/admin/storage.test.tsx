@@ -49,7 +49,7 @@ const report: StorageReport = {
     },
     problem: null,
   },
-  argus: { configured: true, report: { data_dir: '/var/lib/argus', index_bytes: 5 * MB, mirrors_bytes: 20 * MB, trees_bytes: 3 * MB, packs_bytes: MB, other_bytes: 0, library_dir: null, library_bytes: null, disk: null } },
+  codeIntel: { configured: true, report: { data_dir: '/var/lib/code-intel', index_bytes: 5 * MB, mirrors_bytes: 20 * MB, trees_bytes: 3 * MB, packs_bytes: MB, other_bytes: 0, library_dir: null, library_bytes: null, disk: null } },
   backups: { dir: '/backups', state: 'missing', bytes: 0, otherBytes: 0, backups: [] },
   logs: { keeps: '14 days', week: [{ name: 'app', bytes: 50 * MB }], weekStored: 5 * MB, problem: null },
   metrics: { bytes: 2 * GB, keeps: '30 days', maxSize: null, oldest: null, problem: null },

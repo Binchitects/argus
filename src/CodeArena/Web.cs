@@ -864,7 +864,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["auto"] = null,
             ["presets"] = new JsonArray([.. presets]),
             ["defaultThinking"] = _rt.Model.DefaultLevel,
-            ["code-intel"] = false,
+            ["codeIntel"] = false,
             ["tools"] = new JsonArray(),
             ["gitlabUrl"] = arena?.Str("gitlabUrl"),
             // Files go to Arena (relayed with the key): as large as it takes; none without it, or for a person it lets attach none.

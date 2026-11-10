@@ -1,10 +1,11 @@
-/** What an Argus index run's exit code means (src/Argus/Cli/Commands.cs). */
+import { codeIntelName } from '@/lib/brand'
+/** What an code-intel index run's exit code means (src/code-intel/Cli/Commands.cs). */
 export const indexExit: Record<string, string> = {
   '0': 'completed',
   '1': 'ran, but at least one repository is unhealthy; the log names it',
   '3': 'could not reach GitLab, or the token cannot list every repository',
   '4': 'preflight failed: ctags is missing or not Universal Ctags, or the include graph could not be rebuilt',
-  '-1': 'Argus could not start the run at all',
+  '-1': `${codeIntelName} could not start the run at all`,
 }
 
 export interface Probe {

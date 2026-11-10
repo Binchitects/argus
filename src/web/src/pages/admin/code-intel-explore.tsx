@@ -19,7 +19,8 @@ import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/pages/chat/markdown'
-import { NotConfigured } from './argus'
+import { NotConfigured } from './code-intel'
+import { codeIntelName } from '@/lib/brand'
 
 interface Explore {
   configured?: boolean
@@ -57,8 +58,8 @@ export function ExplorePage() {
   const tab: Tab = tabs.includes(params.get('tab') as Tab) ? (params.get('tab') as Tab) : 'index'
   const [opened, setOpened] = useState<Opened | null>(null)
   const index = useQuery({
-    queryKey: ['admin', 'argus', 'explore', '', ''],
-    queryFn: ({ signal }) => api<Explore>('/api/admin/argus/explore?q=&repo=&limit=1', { signal }),
+    queryKey: ['admin', 'code-intel', 'explore', '', ''],
+    queryFn: ({ signal }) => api<Explore>('/api/admin/code-intel/explore?q=&repo=&limit=1', { signal }),
   })
   if (index.data?.configured === false)
     return (
@@ -72,7 +73,7 @@ export function ExplorePage() {
   const repoId = (path: string) => repos.find((r) => r.path_with_namespace === path)?.repo_id
   return (
     <>
-      <PageHeader title="Explore the index" description="Search what Argus holds: symbols and paths, where a name is used, words in the code, and the documentation packs." />
+      <PageHeader title="Explore the index" description={`Search what ${codeIntelName} holds: symbols and paths, where a name is used, words in the code, and the documentation packs.`} />
       <Tabs value={tab} onValueChange={(v) => setParams((p) => ({ ...Object.fromEntries(p), tab: v }), { replace: true })} className="grid grid-cols-[minmax(0,1fr)]">
         {/* Two by two on a phone: four tabs do not fit one row. */}
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-9 sm:w-fit">
@@ -170,8 +171,8 @@ function Hit({ onOpen, children }: { onOpen: () => void; children: ReactNode }) 
 function IndexTab({ repos, loading, error, onOpen }: { repos: Explore['repos']; loading: boolean; error: unknown; onOpen: (o: Opened) => void }) {
   const [search, setSearch] = useState({ q: '', repo: '' })
   const e = useQuery({
-    queryKey: ['admin', 'argus', 'explore', search.q, search.repo],
-    queryFn: ({ signal }) => api<Explore>(`/api/admin/argus/explore?${new URLSearchParams({ q: search.q, repo: search.repo, limit: '100' })}`, { signal }),
+    queryKey: ['admin', 'code-intel', 'explore', search.q, search.repo],
+    queryFn: ({ signal }) => api<Explore>(`/api/admin/code-intel/explore?${new URLSearchParams({ q: search.q, repo: search.repo, limit: '100' })}`, { signal }),
     enabled: search.q !== '',
   })
   return (
@@ -243,8 +244,8 @@ function IndexTab({ repos, loading, error, onOpen }: { repos: Explore['repos']; 
 
 function useSearch<T>(what: string, params: Record<string, string>, enabled: boolean) {
   return useQuery({
-    queryKey: ['admin', 'argus', 'explore', what, params],
-    queryFn: ({ signal }) => api<Page<T>>(`/api/admin/argus/explore/${what}?${new URLSearchParams({ ...params, limit: '200' })}`, { signal }),
+    queryKey: ['admin', 'code-intel', 'explore', what, params],
+    queryFn: ({ signal }) => api<Page<T>>(`/api/admin/code-intel/explore/${what}?${new URLSearchParams({ ...params, limit: '200' })}`, { signal }),
     enabled,
     retry: false,
   })
@@ -395,8 +396,8 @@ interface FileContent {
 /** A file of the index, its line numbered, the one asked for marked and in view. */
 function FileView({ repoId, path, line }: { repoId: number; path: string; line?: number }) {
   const f = useQuery({
-    queryKey: ['admin', 'argus', 'explore', 'file', repoId, path],
-    queryFn: ({ signal }) => api<FileContent>(`/api/admin/argus/explore/file?${new URLSearchParams({ repo_id: String(repoId), path })}`, { signal }),
+    queryKey: ['admin', 'code-intel', 'explore', 'file', repoId, path],
+    queryFn: ({ signal }) => api<FileContent>(`/api/admin/code-intel/explore/file?${new URLSearchParams({ repo_id: String(repoId), path })}`, { signal }),
   })
   const target = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -448,8 +449,8 @@ function withoutFrontMatter(text: string) {
 
 function DocView({ path, source }: { path: string; source: string }) {
   const d = useQuery({
-    queryKey: ['admin', 'argus', 'explore', 'doc', source, path],
-    queryFn: ({ signal }) => api<DocContent>(`/api/admin/argus/explore/doc?${new URLSearchParams({ path, source })}`, { signal }),
+    queryKey: ['admin', 'code-intel', 'explore', 'doc', source, path],
+    queryFn: ({ signal }) => api<DocContent>(`/api/admin/code-intel/explore/doc?${new URLSearchParams({ path, source })}`, { signal }),
   })
   return (
     <>

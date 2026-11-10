@@ -58,7 +58,7 @@ public static class PushEndpoints
         return Results.Json(new
         {
             id = "/", name, short_name = name.Length <= 12 ? name : name.Split(' ')[0], description = branding.CurrentValue.SignInHeadline,
-            start_url = "/", scope = "/", display = "standalone", background_color = "#070b1b", theme_color = "#141f45",
+            start_url = "/", scope = "/", display = "standalone", background_color = "#06131f", theme_color = "#12304a",
             icons = new object?[]
             {
                 chosen is { } icon ? new { src = icon.Url, sizes = "any", type = icon.Type, purpose = "any" } : null,

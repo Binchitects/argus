@@ -100,8 +100,8 @@ describe('the manual', () => {
 
   it('opens a page by its file\'s name too', async () => {
     fakeApi(admin)
-    renderApp('/help/argus/README.md')
-    expect(await screen.findByRole('article', { name: 'Argus in the platform' })).toBeInTheDocument()
+    renderApp('/help/code-intel/README.md')
+    expect(await screen.findByRole('article', { name: 'Farzan Graph in the platform' })).toBeInTheDocument()
   })
 
   it('says when a page is not in the manual', async () => {

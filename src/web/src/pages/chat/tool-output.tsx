@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button'
 import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { cn } from '@/lib/utils'
 import { configQuery } from './api'
-import { gitlabLink, isRow, snippetParts, toHits, type CodeHit, type Row } from './argus'
+import { gitlabLink, isRow, snippetParts, toHits, type CodeHit, type Row } from './code-intel'
 import { CodeBlock } from './code-block'
 import { seconds } from './format'
 import { highlight } from './highlight'
 import { Markdown } from './markdown'
 import { agentResults, runOutput, type RunOutput } from './tool-args'
+import { codeIntelName } from '@/lib/brand'
 
 const extension = (path: string) => (path.includes('.') ? path.split('.').pop()! : path.split('/').pop()!)
 
@@ -188,7 +189,7 @@ export function ToolOutput({ text, value, args, failed }: { text: string; value:
       <div className="grid gap-2">
         <Location hit={file} href={href(file)} />
         <CodeBlock code={file.content!} lang={extension(file.path)} name={file.path} />
-        {file.truncated && <p className="text-xs text-muted-foreground">Argus sent the start of this file only.</p>}
+        {file.truncated && <p className="text-xs text-muted-foreground">{codeIntelName} sent the start of this file only.</p>}
       </div>
     )
   } else if (hits) {

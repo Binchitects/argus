@@ -5,7 +5,7 @@ import { DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/di
 import { api, errorMessage } from '@/lib/api'
 import { when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { isWorking, progressPercent, progressWords, type RepoProgress } from './argus-progress'
+import { isWorking, progressPercent, progressWords, type RepoProgress } from './code-intel-progress'
 
 export interface LogLine {
   /** The run it belongs to: when the run started, in unix milliseconds. */
@@ -33,8 +33,8 @@ const levels = {
 /** A repository's log: its last runs, newest first, each line a sentence with its time; live while it is indexed. */
 export function RepoLogView({ gitlabId, repo }: { gitlabId: number; repo: string }) {
   const log = useQuery({
-    queryKey: ['admin', 'argus', 'repo-log', gitlabId],
-    queryFn: ({ signal }) => api<RepoLog>(`/api/admin/argus/repos/${gitlabId}/log?runs=5`, { signal }),
+    queryKey: ['admin', 'code-intel', 'repo-log', gitlabId],
+    queryFn: ({ signal }) => api<RepoLog>(`/api/admin/code-intel/repos/${gitlabId}/log?runs=5`, { signal }),
     refetchInterval: (q) => (q.state.data?.progress && q.state.data.progress.state !== 'done' && q.state.data.progress.state !== 'failed' ? 2000 : false),
   })
   const runs = new Map<number, LogLine[]>()

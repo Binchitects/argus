@@ -1,7 +1,7 @@
 /**
- * Argus's answers, read for what they are. Its tools return rows of code
+ * code-intel's answers, read for what they are. Its tools return rows of code
  * locations (find_symbol, find_references, search_code, semantic_search) or a
- * file (get_file); the app stores them as JSON (src/Argus/Store/Queries.cs).
+ * file (get_file); the app stores them as JSON (src/code-intel/Store/Queries.cs).
  */
 
 /** One place in the code: where it is, and what to show of it. */

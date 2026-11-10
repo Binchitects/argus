@@ -34,7 +34,7 @@ and the gateway use them inside the stack's network, and they never leave it.
 code for people who turned on two-factor sign-in; or **Sign in with ...**, the
 company's identity provider, when it is set up ([below](#company-sign-in-oidc)).
 The session cookie is scoped to the domain, so it covers every `*.DOMAIN`
-service at once. Behind the form the Argus logo gives way to its hundred eyes,
+service at once. Behind the form the Farzan Graph logo gives way to its hundred eyes,
 which open across the screen, look about and close back into it, over and over
 (a still logo when the device asks for reduced motion).
 
@@ -54,7 +54,7 @@ Issuer: `https://DOMAIN/`; discovery at
 Nothing without a sign-in of its own is published. Prometheus, Alertmanager,
 Loki, the exporters and the engines are reached only inside the stack's
 network; the app shows their data, to admins. Traefik routes three names:
-`DOMAIN` (the app), `gateway.DOMAIN` and `argus.DOMAIN`.
+`DOMAIN` (the app), `gateway.DOMAIN` and `code-intel.DOMAIN`.
 
 ### 4. The gateway authenticates itself
 
@@ -63,14 +63,14 @@ gets no credential injection. LiteLLM checks each person's own key, which is
 what ties spend to the person; injecting the master key would put every
 request under one identity. It is still reachable only through Traefik over TLS.
 
-### 5. Argus takes the same API key
+### 5. Farzan Graph takes the same API key
 
-`argus.DOMAIN/mcp` is not behind forwardAuth either. A coding agent sends the
-person's API key; Argus asks the app whose it is (`POST /api/authz/key`, inside
-the network with `ARGUS_KEY`; refused through the proxy) and answers as that
+`code-intel.DOMAIN/mcp` is not behind forwardAuth either. A coding agent sends the
+person's API key; Farzan Graph asks the app whose it is (`POST /api/authz/key`, inside
+the network with `CODE_INTEL_KEY`; refused through the proxy) and answers as that
 person's GitLab account. The app refuses a key that is unknown, blocked or
 expired, or whose person is disabled. It never logs the key. GitLab tokens are
-not accepted: nobody hands one out for Argus.
+not accepted: nobody hands one out for Farzan Graph.
 
 ---
 
@@ -83,8 +83,8 @@ Open `https://DOMAIN`. The first admin is `admin`, with the password in
 account** afterwards).
 
 Your account page has your API key, for your tools and for coding agents at
-Argus (make a new one there, up to five an hour; the old one stops at once, at
-Argus within six minutes), its rate limits (what it may use a minute, what it used, what was
+Farzan Graph (make a new one there, up to five an hour; the old one stops at once, at
+Farzan Graph within six minutes), its rate limits (what it may use a minute, what it used, what was
 refused), your spend and credit, two-factor sign-in (scan a QR code; you get
 ten one-time recovery codes), and your password. Changing your password or
 turning two-factor sign-in on or off signs you out on every other device; this
@@ -116,7 +116,7 @@ You cannot remove the last admin, or disable, demote or delete yourself.
 Every sign-in and every change is in **Admin → Audit log**, with who, whom and
 from which address.
 
-The username must equal the person's GitLab username: Argus uses it to answer
+The username must equal the person's GitLab username: Farzan Graph uses it to answer
 with their own repository access, in the chat and for coding agents with their
 API key.
 
@@ -348,7 +348,7 @@ the admin group. A changed email gets a new API key (the gateway knows people
 by email).
 
 The username comes from the username claim and must equal the person's GitLab
-username (Argus). An email-like value (`alice@example.com`, as Entra ID sends
+username (Farzan Graph). An email-like value (`alice@example.com`, as Entra ID sends
 it) gives the part before the @.
 
 The groups claim's values are kept like a directory's: a directory group in
@@ -557,7 +557,7 @@ to bypass authentication from outside the Docker network.
 |---|---|
 | People, roles, 2FA, audit log, OIDC clients and keys | the app's `llmapp` database on the shared Postgres |
 | OIDC client secrets | `.env` (`*_OIDC_CLIENT_SECRET`); the app registers the clients from them on every start |
-| Who is who for Argus (username → email, no passwords) | `config/directory/users.yml`, written by the app |
+| Who is who for Farzan Graph (username → email, no passwords) | `config/directory/users.yml`, written by the app |
 | Company sign-in settings (the client secret encrypted), the SCIM token's SHA-256 | the `settings` table of `llmapp` |
 | SAML assertions already used, until they expire | the `saml_assertions` table of `llmapp` |
 

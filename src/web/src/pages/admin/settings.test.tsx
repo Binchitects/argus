@@ -42,11 +42,11 @@ function data(over: Partial<SettingsData> = {}): SettingsData {
 
 describe('settings', () => {
   it("an admin chooses the app's icon beside its name, sees it at once, and can go back to the app's own", async () => {
-    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Argus Arena', default: 'Argus Arena' })] }] })
+    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Farzan Arena', default: 'Farzan Arena' })] }] })
     let icon: string | null = null
     const calls = fakeApi(admin, {
       'GET /api/admin/config': () => ({ json: d }),
-      'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '8.0.0', icon } }),
+      'GET /api/info': () => ({ json: { name: 'Farzan Arena', version: '8.0.0', icon } }),
       'PUT /api/admin/branding/icon': () => {
         icon = '/api/branding/icon?v=abc123'
         return { json: { url: icon, type: 'image/png', size: 70 } }
@@ -65,13 +65,13 @@ describe('settings', () => {
     expect(calls.some((c) => c.method === 'PUT' && c.path === '/api/admin/branding/icon' && c.body instanceof FormData)).toBe(true)
     // The sidebar's icon follows, beside the name.
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' })
-    await waitFor(() => expect(within(sidebar).getByRole('link', { name: /Argus Arena/ }).querySelector('img')).toHaveAttribute('src', '/api/branding/icon?v=abc123'))
+    await waitFor(() => expect(within(sidebar).getByRole('link', { name: /Farzan Arena/ }).querySelector('img')).toHaveAttribute('src', '/api/branding/icon?v=abc123'))
     await userEvent.click(within(panel).getByRole('button', { name: "Use the app's own" }))
     expect(await within(panel).findByRole('img', { name: "The app's own icon" })).toHaveAttribute('src', '/favicon.svg')
   })
 
   it('a picture too big for an icon is refused before it is sent', async () => {
-    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Argus Arena', default: 'Argus Arena' })] }] })
+    const d = data({ groups: [{ title: 'Branding', settings: [s({ key: 'Branding:ProductName', group: 'Branding', label: 'Product name', type: 'text', value: 'Farzan Arena', default: 'Farzan Arena' })] }] })
     const calls = fakeApi(admin, { 'GET /api/admin/config': () => ({ json: d }) })
     renderApp('/admin/settings')
     const panel = await screen.findByRole('region', { name: 'Icon' })

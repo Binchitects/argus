@@ -115,7 +115,7 @@ describe('the help panel', () => {
   })
 
   it('helps on the sign-in page too, with whom to ask instead of the manual', async () => {
-    fakeApi(null, { 'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '1.2.3', supportContact: 'help@example.test' } }) })
+    fakeApi(null, { 'GET /api/info': () => ({ json: { name: 'Farzan Arena', version: '1.2.3', supportContact: 'help@example.test' } }) })
     renderApp('/login')
     const panel = await openHelp()
     expect(await within(panel).findByRole('heading', { name: 'Signing in' })).toBeInTheDocument()

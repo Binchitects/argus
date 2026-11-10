@@ -13,6 +13,7 @@ import { ago, when } from '@/lib/format'
 import { allTime, reportPresets } from '@/lib/time'
 import { useTimeWindow } from '@/lib/use-time-window'
 import { toCsv } from './audit-csv'
+import { codeIntelName } from '@/lib/brand'
 
 export interface AuditEvent {
   id: number
@@ -28,11 +29,11 @@ export interface AuditEvent {
 const PAGE = 500
 
 /** What kind of event, for the filter. */
-function kind(action: string): 'sign-in' | 'people' | 'settings' | 'argus' | 'operations' | 'other' {
+function kind(action: string): 'sign-in' | 'people' | 'settings' | 'code-intel' | 'operations' | 'other' {
   if (action.startsWith('sign_') || action.startsWith('account.')) return 'sign-in'
   if (action.startsWith('person.') || action === 'ldap.sync' || action.startsWith('scim.')) return 'people'
   if (action.startsWith('settings.')) return 'settings'
-  if (action.startsWith('argus.')) return 'argus'
+  if (action.startsWith('code-intel.')) return 'code-intel'
   if (action.startsWith('runtime.')) return 'operations'
   return 'other'
 }
@@ -66,7 +67,7 @@ const columns: ColumnDef<AuditEvent>[] = [
 ]
 
 export function AuditPage() {
-  const [filter, setFilter] = useState<'all' | 'failed' | 'sign-in' | 'people' | 'settings' | 'argus' | 'operations'>('all')
+  const [filter, setFilter] = useState<'all' | 'failed' | 'sign-in' | 'people' | 'settings' | 'code-intel' | 'operations'>('all')
   // What happened in a window, in the address; every event until one is chosen.
   const time = useTimeWindow({ from: allTime.from, to: 'now' })
   const events = useInfiniteQuery({
@@ -126,7 +127,7 @@ export function AuditPage() {
                 { value: 'sign-in', label: 'Sign-ins' },
                 { value: 'people', label: 'People' },
                 { value: 'settings', label: 'Settings' },
-                { value: 'argus', label: 'Argus' },
+                { value: 'code-intel', label: `${codeIntelName}` },
                 { value: 'operations', label: 'Restarts' },
               ]}
             />

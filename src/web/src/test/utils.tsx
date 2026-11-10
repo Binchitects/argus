@@ -6,6 +6,7 @@ import { vi } from 'vitest'
 import { makeQueryClient, Providers } from '@/app/providers'
 import { routes } from '@/app/routes'
 import type { Me } from '@/lib/api'
+import { productName } from '@/lib/brand'
 
 /** The whole app at `path`, with its own query cache so tests never share data. */
 export function renderApp(path: string) {
@@ -51,7 +52,7 @@ export function fakeApi(me: Me | null, routes: Record<string, Handler> = {}) {
   const calls: Call[] = []
   let current = me
   const all: Record<string, Handler> = {
-    'GET /api/info': () => ({ json: { name: 'Argus Arena', version: '1.2.3' } }),
+    'GET /api/info': () => ({ json: { name: `${productName}`, version: '1.2.3' } }),
     'GET /api/auth/me': () => (current ? { json: current } : { status: 401, json: { status: 'unauthorized' } }),
     'POST /api/auth/logout': () => {
       current = null

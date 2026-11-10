@@ -1,4 +1,4 @@
-import { isRow, type Row } from './argus'
+import { isRow, type Row } from './code-intel'
 import { languageOf } from './highlight'
 
 /** An argument that is code (a program, a command, a query): shown as a code block in its language. */

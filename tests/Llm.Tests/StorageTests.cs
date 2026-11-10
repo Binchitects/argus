@@ -842,7 +842,7 @@ public sealed class StorageTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_page_shows_databases_tables_argus_logs_and_metrics_and_the_daily_samples_make_its_trends()
+    public async Task The_page_shows_databases_tables_code_intel_logs_and_metrics_and_the_daily_samples_make_its_trends()
     {
         app.Observe.Reset();
         try
@@ -879,8 +879,8 @@ public sealed class StorageTests(AppFixture app)
             var files = page.GetProperty("files");
             Assert.Equal(1, files.GetProperty("total").GetProperty("count").GetInt64());
             Assert.Equal("upload", files.GetProperty("groups")[0].GetProperty("origin").GetString());
-            Assert.Equal(5_000_000, page.GetProperty("code-intel").GetProperty("report").GetProperty("index_bytes").GetInt64());
-            Assert.Equal("dotnet-docs", page.GetProperty("code-intel").GetProperty("packs")[0].GetProperty("name").GetString());
+            Assert.Equal(5_000_000, page.GetProperty("codeIntel").GetProperty("report").GetProperty("index_bytes").GetInt64());
+            Assert.Equal("dotnet-docs", page.GetProperty("codeIntel").GetProperty("packs")[0].GetProperty("name").GetString());
             var metrics = page.GetProperty("metrics");
             Assert.Equal(1_250_000, metrics.GetProperty("bytes").GetInt64());
             Assert.Equal("30 days", metrics.GetProperty("keeps").GetString());

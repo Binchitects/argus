@@ -76,7 +76,7 @@ export interface Backup {
   latest: boolean
 }
 
-export interface ArgusStorage {
+export interface CodeIntelStorage {
   data_dir: string
   index_bytes: number
   mirrors_bytes: number
@@ -88,7 +88,7 @@ export interface ArgusStorage {
   disk: { size_bytes: number; free_bytes: number } | null
 }
 
-export interface ArgusPack {
+export interface CodeIntelPack {
   name: string
   version: string
   size_bytes: number
@@ -106,7 +106,7 @@ export interface StorageReport {
   }
   files: { total: Amount | null; groups: FileGroup[] | null; people: PersonFiles[] | null; problem: string | null }
   library: { report: LibraryReport | null; problem: string | null }
-  argus: { configured: boolean; report?: ArgusStorage | null; problem?: string; packs?: ArgusPack[] | null; library?: (ArgusPack & { file: string; loaded: boolean })[] | null; packsProblem?: string }
+  codeIntel: { configured: boolean; report?: CodeIntelStorage | null; problem?: string; packs?: CodeIntelPack[] | null; library?: (CodeIntelPack & { file: string; loaded: boolean })[] | null; packsProblem?: string }
   backups: { dir: string; state: 'ok' | 'missing' | 'unreadable'; bytes: number; otherBytes: number; backups: Backup[] }
   logs: { keeps: string | null; week: { name: string; bytes: number }[]; weekStored: number | null; problem: string | null }
   metrics: { bytes: number | null; keeps: string | null; maxSize: string | null; oldest: string | null; problem: string | null }

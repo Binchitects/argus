@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Argus Arena: your team's private AI, on your hardware, that knows your code" width="100%">
+  <img src="docs/assets/hero.svg" alt="Farzan Arena: your team's private AI, on your hardware, that knows your code" width="100%">
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#code-arena">Code Arena</a> ·
-  <a href="docs/argus/README.md">Argus</a> ·
+  <a href="docs/code-intel/README.md">Farzan Graph</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="CHANGELOG.md">What's new</a>
 </p>
@@ -29,7 +29,7 @@ Most teams end up with a chat subscription, a coding assistant, an image tool, a
 meeting bot and a few scripts in between. Every one of them is another account,
 another bill, and another place your code and conversations go.
 
-**Argus Arena is all of it in one stack you run yourself.** One sign-in, one set of
+**Farzan Arena is all of it in one stack you run yourself.** One sign-in, one set of
 permissions, one budget per person, and models you choose, on hardware you own.
 Nothing leaves your network, and it installs on a machine that never touches the
 internet.
@@ -42,7 +42,7 @@ internet.
 
 ### 💬 A chat that does the work
 Your models, with thinking levels, branches and files. Tools run on the
-server: Python in a sandbox, the web you allow, your code through Argus. Pages,
+server: Python in a sandbox, the web you allow, your code through Farzan Graph. Pages,
 diagrams and React components it writes run live beside the answer. Rooms bring
 people in, with calls captioned live in each reader's language.
 
@@ -61,7 +61,7 @@ Every Arena tool works as you, and every session is synced with the web chat.
 <tr>
 <td valign="top">
 
-### 🔎 Argus, your code's index
+### 🔎 Farzan Graph, your code's index
 It mirrors your GitLab: symbols, references, issues, wikis and documentation
 packs. It answers over MCP, and each developer sees **exactly** what their own
 GitLab account can read, enforced in SQL.
@@ -175,7 +175,7 @@ Windows users run `irm https://your-arena/api/downloads/code-arena/install.ps1 |
 
 ## How it compares
 
-| | Argus Arena | Cloud AI assistants | A do-it-yourself stack |
+| | Farzan Arena | Cloud AI assistants | A do-it-yourself stack |
 |---|:---:|:---:|:---:|
 | Code and conversations stay on your network | ✅ | ❌ | ✅ |
 | Knows your codebase, within each person's GitLab rights | ✅ | some, through their cloud | you build it |
@@ -190,7 +190,7 @@ Windows users run `irm https://your-arena/api/downloads/code-arena/install.ps1 |
 On a Linux host with Docker (or rootless Podman) and an NVIDIA GPU:
 
 ```bash
-git clone https://github.com/Binchitects/argus && cd argus/deploy
+git clone https://github.com/Binchitects/argus && cd code-intel/deploy
 cp .env.example .env      # your domain, the models folder, the first model, six secrets
 docker compose up -d
 ```
@@ -201,26 +201,26 @@ offline host, one `.run` file carries everything. The
 [deployment guide](docs/deployment.md) covers Podman, GPUs across servers and
 upgrades. For a large team or for availability, `./arenactl kube install`
 checks a cluster first and installs the
-[Helm chart](docs/deployment.md#helm). **Argus alone**, without the platform, is in
-[deploy/argus-standalone/](deploy/argus-standalone/README.md).
+[Helm chart](docs/deployment.md#helm). **Farzan Graph alone**, without the platform, is in
+[deploy/code-intel-standalone/](deploy/code-intel-standalone/README.md).
 
 ## Under the hood
 
 ```mermaid
 flowchart LR
   people([People, their tools and Code Arena]) --> traefik[Traefik]
-  traefik --> web[Web app] & app[.NET app and API] & argus[Argus]
+  traefik --> web[Web app] & app[.NET app and API] & code-intel[Farzan Graph]
   app --> gateway[Model gateway] --> engines[llama.cpp, vLLM or SGLang on your GPUs]
-  app --> argus --> gitlab[(Your GitLab, read only)]
+  app --> code-intel --> gitlab[(Your GitLab, read only)]
   app --> tools[Sandboxes, browser, studio servers] & pg[(Postgres)]
 ```
 
 A .NET 10 app and API with a React web app. Traefik is the only way in: the
-pages go to the web app, coding agents' Argus to Argus, and the API to the
+pages go to the web app, coding agents' Farzan Graph to Farzan Graph, and the API to the
 app, an API key's model requests too. The app checks the key, keeps its own
 ledger of every model request, and sends the call on to llama.cpp, vLLM or
 SGLang on your GPUs, or to another server, through a LiteLLM gateway that its
-own gateway is replacing step by step. Argus mirrors your GitLab with a
+own gateway is replacing step by step. Farzan Graph mirrors your GitLab with a
 read-only token. Prometheus, Loki and Alertmanager watch it all.
 [The architecture →](docs/architecture.md)
 
@@ -228,7 +228,7 @@ read-only token. Prometheus, Loki and Alertmanager watch it all.
 
 [Documentation](docs/README.md) · [The chat](docs/chat.md) ·
 [Administration](docs/admin.md) · [Deployment](docs/deployment.md) ·
-[Argus](docs/argus/README.md) · [Compliance](docs/compliance/README.md) ·
+[Farzan Graph](docs/code-intel/README.md) · [Compliance](docs/compliance/README.md) ·
 [Development](docs/development.md) ·
 [The plan](docs/plan.md)
 

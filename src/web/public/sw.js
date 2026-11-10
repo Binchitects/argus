@@ -112,7 +112,7 @@ self.addEventListener('push', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       // A page in front shows it in the bell already (and as a toast).
       if (windows.some((w) => w.visibilityState === 'visible' && w.focused)) return
-      return self.registration.showNotification(news.title || 'Argus Arena', {
+      return self.registration.showNotification(news.title || 'News', {
         body: news.body || undefined,
         tag: news.tag || undefined,
         icon: '/icons/icon-192.png',

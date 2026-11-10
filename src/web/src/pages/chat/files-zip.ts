@@ -2,7 +2,7 @@ import { makeZip, uniqueNames } from '@/lib/zip'
 import { downloadUrl } from './api'
 import type { FileItem } from './files'
 
-/** A file's path in the zip: a file Argus read under its repository, the rest by name. */
+/** A file's path in the zip: a file code-intel read under its repository, the rest by name. */
 function pathOf(f: FileItem): string {
   const name = f.kind === 'repo' ? `${f.repo ?? 'repository'}/${f.path}` : f.name
   // No way out of the zip's folder, and no empty names.
@@ -11,7 +11,7 @@ function pathOf(f: FileItem): string {
 
 /**
  * Every file of the chat in one zip, as the Files panel lists them: attachments and
- * what tools made (their own bytes), code the model wrote, files Argus read.
+ * what tools made (their own bytes), code the model wrote, files code-intel read.
  */
 export async function zipFiles(files: FileItem[], signal?: AbortSignal): Promise<{ zip: Blob; missing: string[] }> {
   const encoder = new TextEncoder()

@@ -13,7 +13,7 @@ Three places, each with one job:
 
 | name | what |
 |---|---|
-| `DOMAIN` | the address: `https://DOMAIN`, `gateway.DOMAIN`, `argus.DOMAIN` |
+| `DOMAIN` | the address: `https://DOMAIN`, `gateway.DOMAIN`, `code-intel.DOMAIN` |
 | `ADMIN_EMAIL` | the first admin's email |
 | `MODELS_DIR` | where models live (a fast disk, writable by uid 1000); one that holds models already is used as it is |
 | `DATA_DIR` | where the stack's data lives: an absolute folder on the host, a folder in it per volume (the database, indexes, the speech server's models, metrics, logs) |
@@ -24,16 +24,16 @@ Three places, each with one job:
 | `DB_PASSWORD` | Postgres (the app and the gateway) |
 | `APP_KEY` | encrypts the app's key ring and saved secrets. **Never change it**: sessions, two-factor and saved secrets are lost |
 | `ENGINE_KEY` | the engine's key (the gateway and Prometheus use it) |
-| `ARGUS_KEY` | Argus's admin and chat credential, the app's only |
+| `CODE_INTEL_KEY` | Farzan Graph's admin and chat credential, the app's only |
 | `GATEWAY_KEY` | the gateway's master key (`sk-...`). Changing it invalidates nothing stored, but the app and the gateway must agree |
 | `HF_TOKEN` | optional: gated Hugging Face models |
 | `ACME_EMAIL` | optional: certificates from Let's Encrypt |
 | `HSTS_SECONDS` | optional: Strict-Transport-Security's max-age, sent by Traefik and the app; empty: a year with `ACME_EMAIL`, none with your own CA (set it once every browser trusts your CA) |
-| `GITLAB_URL`, `GITLAB_TOKEN` | optional: the GitLab Argus indexes, and a read-only token |
-| `GITLAB_USERNAME`, `GITLAB_PASSWORD` | optional, only where no token can be made for the account: Argus signs in once and makes its own read-only token ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)). A username wins over a token |
-| `GITLAB_LDAP` | optional, for a GitLab account checked against LDAP: empty tries GitLab's own sign-in and then each LDAP sign-in GitLab offers; a provider's name (`ldapmain`) goes straight there; `off` never tries LDAP ([details](argus/README.md#when-no-token-can-be-issued-for-the-account)) |
+| `GITLAB_URL`, `GITLAB_TOKEN` | optional: the GitLab Farzan Graph indexes, and a read-only token |
+| `GITLAB_USERNAME`, `GITLAB_PASSWORD` | optional, only where no token can be made for the account: Farzan Graph signs in once and makes its own read-only token ([details](code-intel/README.md#when-no-token-can-be-issued-for-the-account)). A username wins over a token |
+| `GITLAB_LDAP` | optional, for a GitLab account checked against LDAP: empty tries GitLab's own sign-in and then each LDAP sign-in GitLab offers; a provider's name (`ldapmain`) goes straight there; `off` never tries LDAP ([details](code-intel/README.md#when-no-token-can-be-issued-for-the-account)) |
 | `GITLAB_VERIFY_TLS` | optional, testing only: `false` accepts any certificate from GitLab. For a private CA, use `GITLAB_CA_FILE` |
-| `GITLAB_CA_FILE` | optional: GitLab's CA when it is your company's own, or GitLab's self-signed certificate (a PEM file, absolute or relative to `deploy/`). The app, Argus and Code Studio's workspaces trust it besides the public CAs ([deployment.md](deployment.md#gitlab-on-a-company-ca)); **Settings → Argus (GitLab) → GitLab's CA** adds one without a restart |
+| `GITLAB_CA_FILE` | optional: GitLab's CA when it is your company's own, or GitLab's self-signed certificate (a PEM file, absolute or relative to `deploy/`). The app, Farzan Graph and Code Studio's workspaces trust it besides the public CAs ([deployment.md](deployment.md#gitlab-on-a-company-ca)); **Settings → Farzan Graph (GitLab) → GitLab's CA** adds one without a restart |
 | `BACKUP_DIR`, `BACKUP_COPY_DIR`, `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS`, `BACKUP_TIME`, `BACKUP_KEY_FILE` | optional, for `scripts/backup.sh`: where backups go (`./backups`), a verified second copy on another disk, how many to keep (14), whether Loki and Prometheus data go too (1), when the daily timer runs (03:30), and the key file each backup is encrypted with (none; kept apart from `deploy/` and the backups: [deployment.md](deployment.md#backups-and-restore)). The app mounts `BACKUP_DIR` read only for Admin → Storage, and reads `BACKUP_KEEP` for its preview of old backups. A folder is an absolute path or one relative to `deploy/` (`backups`, `./backups` and `../backups` all work); not `~` |
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_SSL_MODE` | optional: an external Postgres instead of the stack's (`postgres`, 5432, `arena`, `prefer`); `DB_SSL_MODE` is `disable`, `prefer` or `require` ([deployment.md](deployment.md#external-postgres)) |
@@ -56,7 +56,7 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 | `traefik/routes.yml` | Traefik's routes (with `APP_REPLICAS` above 1, the app's replicas and the sticky cookie); `traefik/README.md` for a certificate of your own |
 | `traefik/certificate.yml` | written by `scripts/make-cert.sh`: the certificate Traefik serves, from `deploy/certs/` (not committed) |
 | `litellm.yaml` | the gateway: retries, how long it waits for an answer (16 minutes, longer than Code Arena's 15 for an answer to start), and how a model on several servers is shared (the least busy copy). The models are registered by the app |
-| `argus.yaml` | Argus's paths; the GitLab comes from `.env` |
+| `code-intel.yaml` | Farzan Graph's paths; the GitLab comes from `.env` |
 | `prometheus/` | what is scraped, and the alert rules |
 | `alertmanager.yml` | where alerts go (nowhere by default: the app shows them) |
 | `loki.yml`, `promtail.yml` | the logs |
@@ -67,9 +67,9 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 | volume | holds |
 |---|---|
 | `postgres` | the app's database (people, chats, settings, files) and the gateway's (keys, spend) |
-| `argus` | the code index, installed packs, the audit log |
+| `code-intel` | the code index, installed packs, the audit log |
 | `engine` | what the app writes for the engine and the media servers: the model presets, the models kept loaded, how many at once, the picture and video servers' on/off |
-| `directory` | who is who for Argus (emails and usernames, no passwords) |
+| `directory` | who is who for Farzan Graph (emails and usernames, no passwords) |
 | `audio` | the speech server's models |
 | `sandbox` | Python jobs in flight |
 | `prometheus`, `loki`, `alertmanager` | metrics, logs, alert state |
