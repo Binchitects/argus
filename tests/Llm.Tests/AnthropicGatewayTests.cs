@@ -60,7 +60,7 @@ public sealed class AnthropicGatewayTests(AppFixture app)
             "content_block_start", "content_block_delta", "content_block_delta", "content_block_stop", "message_delta", "message_stop"], events);
         Assert.Contains("\"stop_reason\":\"tool_use\"", said, StringComparison.Ordinal);
         Assert.Contains("\"type\":\"input_json_delta\"", said, StringComparison.Ordinal);
-        Assert.Equal("", stream.End());
+        Assert.Equal("", stream.Close());
     }
 
     [Fact]

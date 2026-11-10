@@ -799,6 +799,13 @@ tool_use blocks, input_json_delta, the stop reason, usage with cache_read_input_
 `count_tokens` is counted by llama.cpp's template and tokenizer, vLLM's or SGLang's tokenizer, else estimated.
 AnthropicGatewayTests. Claude Code itself is checked live with clients-check.py at commit 17.
 
+Commit 15 (2026-11-11): with Mode own, `/v1/responses` becomes one chat completion (`Protocols/OpenAiResponses`:
+instructions, input messages, function calls and their outputs, reasoning items dropped, function tools, tool_choice,
+max_output_tokens, reasoning.effort; previous_response_id and built-in tools get a 400) and its answer a response, or
+its events (output_item, content_part, output_text and function_call_arguments deltas and done, then
+response.completed, incomplete or failed). `/v1/completions` goes to the engine as it came, metered. The meter reads a
+non-streamed answer (one JSON body) by its usage too, and a completion's `text`. ResponsesGatewayTests.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed

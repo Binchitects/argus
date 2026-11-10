@@ -4,6 +4,14 @@ using System.Text.Json.Nodes;
 
 namespace Llm.Api.Gateway.Protocols;
 
+/// <summary>A chat completion's stream turned into another protocol's events as it comes: what to write for each piece, and at its end.</summary>
+public interface IEventsOut
+{
+    string Feed(ReadOnlySpan<byte> bytes);
+
+    string Close();
+}
+
 /// <summary>A request one protocol cannot be turned into a chat completion for: its status and the words the caller gets.</summary>
 public sealed class AdapterException(int status, string message) : Exception(message)
 {
@@ -225,7 +233,7 @@ public static class AnthropicMessages
     /// words and each tool call (its arguments as input_json_delta), message_delta with the stop reason and usage, then
     /// message_stop. Fed the upstream's bytes; what to write goes back from each.
     /// </summary>
-    public sealed class Events(string model)
+    public sealed class Events(string model) : IEventsOut
     {
         private readonly StringBuilder _line = new();
         private readonly Decoder _utf8 = Encoding.UTF8.GetDecoder();
@@ -265,7 +273,7 @@ public static class AnthropicMessages
         }
 
         /// <summary>The stream's end: the open block closed, the stop reason and usage, message_stop (once).</summary>
-        public string End()
+        public string Close()
         {
             if (_ended)
             {
@@ -328,7 +336,7 @@ public static class AnthropicMessages
             var data = line[5..].Trim();
             if (data == "[DONE]")
             {
-                out_.Append(End());
+                out_.Append(Close());
                 return;
             }
             JsonNode? chunk;

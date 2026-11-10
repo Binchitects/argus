@@ -526,7 +526,11 @@ public static class AnswerCacheEndpoints
         }
         // Anthropic's Messages API, turned into a chat completion here and its answer back into Anthropic's shapes.
         var anthropic = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/messages" or "/messages";
-        var ownMode = (completions || anthropic) && own.ForApi;
+        // OpenAI's Responses API (Codex) likewise; the legacy completions (Code Arena's editor) passed to the engine as they are.
+        var responses = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/responses" or "/responses";
+        var legacy = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/completions" or "/completions";
+        var translated = anthropic || responses;
+        var ownMode = (completions || translated || legacy) && own.ForApi;
         if (ownMode)
         {
             http.Response.Headers.AccessControlAllowOrigin = "*";
@@ -562,11 +566,11 @@ public static class AnswerCacheEndpoints
                 await FailAsync(400, "invalid_request_error", "The request is not a JSON object.");
                 return;
             }
-            if (anthropic)
+            if (translated || legacy)
             {
                 try
                 {
-                    json = Protocols.AnthropicMessages.ToChat(json);
+                    json = anthropic ? Protocols.AnthropicMessages.ToChat(json) : responses ? Protocols.OpenAiResponses.ToChat(json) : json;
                 }
                 catch (Protocols.AdapterException ex)
                 {
@@ -593,7 +597,7 @@ public static class AnswerCacheEndpoints
             admitted = letIn;
             // A text the safeguards masked goes masked.
             body = Encoding.UTF8.GetBytes(json.ToJsonString());
-            if (!anthropic && cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
+            if (!translated && !legacy && cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
             {
                 lookup = await cache.LookupAsync(key!, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
             }
@@ -823,7 +827,7 @@ public static class AnswerCacheEndpoints
         {
             res = ownMode && admitted is not null
                 ? await own.ChatAsync(json!, OwnCaller(admitted, json!, http.RequestServices.GetRequiredService<IServiceScopeFactory>()),
-                    route.FallbackOf(json!["model"]?.ToString()) is { } fb ? [fb] : [], work, passErrors: true)
+                    route.FallbackOf(json!["model"]?.ToString()) is { } fb ? [fb] : [], work, passErrors: true, endpoint: legacy ? "/completions" : "/chat/completions")
                 : await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, work);
         }
         catch (Chat.ChatGatewayException ex) when (ownMode)
@@ -862,10 +866,11 @@ public static class AnswerCacheEndpoints
             }
             http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
             // Anthropic's caller: its events as the chat completion's stream comes, or its message (or error) at the end.
-            var claude = anthropic ? new Protocols.AnthropicMessages.Events(json!["model"]?.ToString() ?? "") : null;
-            var claudeStreams = anthropic && res.IsSuccessStatusCode && streamed;
-            using var claudeWhole = anthropic && !claudeStreams ? new MemoryStream() : null;
-            if (anthropic)
+            var asked = json?["model"]?.ToString() ?? "";
+            Protocols.IEventsOut? claude = anthropic ? new Protocols.AnthropicMessages.Events(asked) : responses ? new Protocols.OpenAiResponses.Events(asked) : null;
+            var claudeStreams = translated && res.IsSuccessStatusCode && streamed;
+            using var claudeWhole = translated && !claudeStreams ? new MemoryStream() : null;
+            if (translated)
             {
                 http.Response.ContentType = claudeStreams ? "text/event-stream" : "application/json";
                 http.Response.Headers.ContentLength = null;
@@ -928,7 +933,7 @@ public static class AnswerCacheEndpoints
             }
             if (claudeStreams)
             {
-                await http.Response.WriteAsync(claude!.End(), ct);
+                await http.Response.WriteAsync(claude!.Close(), ct);
             }
             else if (claudeWhole is not null)
             {
@@ -936,11 +941,12 @@ public static class AnswerCacheEndpoints
                 string message;
                 if (res.IsSuccessStatusCode && (sse ? AnswerCache.Assemble(said, true) : JsonNode.Parse(said) as JsonObject) is { } completion)
                 {
-                    message = Protocols.AnthropicMessages.FromChat(completion, json!["model"]?.ToString() ?? "").ToJsonString();
+                    message = (anthropic ? Protocols.AnthropicMessages.FromChat(completion, asked) : Protocols.OpenAiResponses.FromChat(completion, asked)).ToJsonString();
                 }
                 else
                 {
-                    message = Protocols.AnthropicMessages.Error((int)res.StatusCode, PromptLogWriter.ErrorOf(said) ?? $"The model answered {(int)res.StatusCode}.");
+                    var why = PromptLogWriter.ErrorOf(said) ?? $"The model answered {(int)res.StatusCode}.";
+                    message = anthropic ? Protocols.AnthropicMessages.Error((int)res.StatusCode, why) : Protocols.OpenAiResponses.Error((int)res.StatusCode, why);
                 }
                 await http.Response.WriteAsync(message, ct);
             }

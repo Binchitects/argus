@@ -135,6 +135,15 @@ public sealed class FakeModel : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"What is the capital of France?","duration":4.5,"segments":[{"start":0.0,"end":4.5,"text":" What is the capital of France?"}]}""", Encoding.UTF8, "application/json") };
         }
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
+        // The legacy completions (Code Arena's editor): the prompt carried on.
+        if (request.RequestUri!.AbsolutePath.EndsWith("/completions", StringComparison.Ordinal) && !request.RequestUri.AbsolutePath.EndsWith("/chat/completions", StringComparison.Ordinal))
+        {
+            Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"object":"text_completion","choices":[{"index":0,"text":" world();","finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}""", Encoding.UTF8, "application/json"),
+            };
+        }
         // Text to speech answers with an MP3.
         if (request.RequestUri!.AbsolutePath.EndsWith("/audio/speech", StringComparison.Ordinal))
         {

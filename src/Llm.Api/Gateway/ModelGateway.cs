@@ -250,7 +250,8 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     /// response returned as it comes, booked when its stream ends or it is disposed. A refusal throws
     /// <see cref="ChatGatewayException"/> with the engine's words, after it is booked.
     /// </summary>
-    public async Task<HttpResponseMessage> ChatAsync(JsonObject body, GatewayCaller caller, IReadOnlyList<string> fallbacks, CancellationToken ct, bool passErrors = false)
+    public async Task<HttpResponseMessage> ChatAsync(JsonObject body, GatewayCaller caller, IReadOnlyList<string> fallbacks, CancellationToken ct, bool passErrors = false,
+        string endpoint = "/chat/completions")
     {
         EnsureWriter();
         var asked = body["model"]?.GetValue<string>() ?? throw new ChatGatewayException("The request names no model.", 400);
@@ -285,7 +286,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             HttpResponseMessage res;
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + "/chat/completions")
+                using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + endpoint)
                 {
                     Content = new StringContent(Shape(body, d).ToJsonString(), Encoding.UTF8, "application/json"),
                 };
@@ -312,6 +313,10 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             {
                 var meter = new SseMeter(clock);
                 var row = Row(caller, name, d, name == asked ? null : asked, attempts, started);
+                if (endpoint != "/chat/completions")
+                {
+                    row.Call = "completion";
+                }
                 var inner = await res.Content.ReadAsStreamAsync(ct);
                 var metered = new MeteredStream(inner, meter, ended =>
                 {
@@ -596,6 +601,55 @@ public sealed class SseMeter(TimeProvider clock)
     public DateTimeOffset? FirstToken { get; private set; }
     public string? Error { get; private set; }
 
+    // A body that is not a stream (one JSON answer): kept, up to 4 MB, and read at its end.
+    private readonly StringBuilder _whole = new();
+    private bool _lines;
+
+    /// <summary>The body's end: a whole JSON answer (no stream) is read for its usage and words.</summary>
+    public void Finish()
+    {
+        if (_line.Length > 0)
+        {
+            Line(_line.ToString().TrimEnd('\r'));
+            _line.Clear();
+        }
+        if (_lines || _whole.Length == 0)
+        {
+            return;
+        }
+        try
+        {
+            if (JsonNode.Parse(_whole.ToString()) is JsonObject answer)
+            {
+                Usage_(answer["usage"] as JsonObject);
+                if (answer["error"] is JsonObject err)
+                {
+                    Error = err.ToJsonString();
+                }
+                var choice = answer["choices"]?[0];
+                Characters += (choice?["message"]?["content"] as JsonValue)?.ToString().Length ?? 0;
+                Characters += (choice?["text"] as JsonValue)?.ToString().Length ?? 0;
+                Done = true;
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON: nothing to read.
+        }
+    }
+
+    private void Usage_(JsonObject? u)
+    {
+        if (u?["prompt_tokens"] is null)
+        {
+            return;
+        }
+        Usage = true;
+        Prompt = Int(u["prompt_tokens"]);
+        Completion = Int(u["completion_tokens"]);
+        Cached = Int(u["prompt_tokens_details"]?["cached_tokens"]);
+    }
+
     public void Read(ReadOnlySpan<byte> bytes)
     {
         Span<char> chars = stackalloc char[Math.Max(1, Encoding.UTF8.GetMaxCharCount(Math.Min(bytes.Length, 4096)))];
@@ -604,6 +658,10 @@ public sealed class SseMeter(TimeProvider clock)
             var take = Math.Min(bytes.Length, 4096);
             var n = _utf8.GetChars(bytes[..take], chars, flush: false);
             bytes = bytes[take..];
+            if (!_lines && _whole.Length < 4_000_000)
+            {
+                _whole.Append(chars[..n]);
+            }
             foreach (var c in chars[..n])
             {
                 if (c == '\n')
@@ -625,6 +683,11 @@ public sealed class SseMeter(TimeProvider clock)
         {
             return;
         }
+        if (!_lines)
+        {
+            _lines = true;
+            _whole.Clear();
+        }
         var data = line[5..].Trim();
         if (data == "[DONE]")
         {
@@ -645,16 +708,15 @@ public sealed class SseMeter(TimeProvider clock)
             Error = err.ToJsonString();
             return;
         }
-        if (chunk?["usage"] is JsonObject u && u["prompt_tokens"] is not null)
-        {
-            Usage = true;
-            Prompt = Int(u["prompt_tokens"]);
-            Completion = Int(u["completion_tokens"]);
-            Cached = Int(u["prompt_tokens_details"]?["cached_tokens"]);
-        }
+        Usage_(chunk?["usage"] as JsonObject);
         if (chunk?["timings"] is JsonObject tm && Cached == 0 && tm["cache_n"] is { } cacheN)
         {
             Cached = Int(cacheN);
+        }
+        if (chunk?["choices"] is JsonArray { Count: > 0 } legacy && legacy[0]?["text"] is JsonValue words && words.ToString().Length > 0)
+        {
+            FirstToken ??= clock.GetUtcNow();
+            Characters += words.ToString().Length;
         }
         if (chunk?["choices"] is JsonArray { Count: > 0 } choices && choices[0]?["delta"] is JsonObject delta)
         {
@@ -715,6 +777,7 @@ internal sealed class MeteredStream(Stream inner, SseMeter meter, Action<bool> e
     {
         if (Interlocked.Exchange(ref _ended, 1) == 0)
         {
+            meter.Finish();
             ended(whole || meter.Done);
         }
     }
