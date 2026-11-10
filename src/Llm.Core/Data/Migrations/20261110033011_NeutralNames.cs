@@ -33,6 +33,7 @@ UPDATE access_roles SET "Permissions" = ARRAY(
   WHERE EXISTS (SELECT 1 FROM unnest("Permissions") p WHERE p LIKE 'argus.%' OR p = 'settings.argus');
 UPDATE settings SET "key" = replace("key", 'config:ArgusIndex:', 'config:CodeIntelIndex:') WHERE "key" LIKE 'config:ArgusIndex:%';
 UPDATE settings SET "key" = replace("key", 'config:Argus:', 'config:CodeIntel:') WHERE "key" LIKE 'config:Argus:%';
+UPDATE access_roles SET "Key" = 'code-intel-admin' WHERE "Key" = 'argus-admin' AND "BuiltIn";
 """");
         }
 
@@ -62,6 +63,7 @@ UPDATE access_roles SET "Permissions" = ARRAY(
   WHERE EXISTS (SELECT 1 FROM unnest("Permissions") p WHERE p LIKE 'code-intel.%' OR p = 'settings.code-intel');
 UPDATE settings SET "key" = replace("key", 'config:CodeIntelIndex:', 'config:ArgusIndex:') WHERE "key" LIKE 'config:CodeIntelIndex:%';
 UPDATE settings SET "key" = replace("key", 'config:CodeIntel:', 'config:Argus:') WHERE "key" LIKE 'config:CodeIntel:%';
+UPDATE access_roles SET "Key" = 'argus-admin' WHERE "Key" = 'code-intel-admin' AND "BuiltIn";
 """");
         }
     }

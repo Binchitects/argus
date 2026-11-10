@@ -26,7 +26,7 @@ public sealed class V80MigrationTests(AppFixture app)
         var before = all[all.FindIndex(m => m.EndsWith("_NeutralNames", StringComparison.Ordinal)) - 1];
         await migrator.MigrateAsync(before);
 
-        var (chat, role, task, rule) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (chat, role, task, rule, builtIn) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         await using (var conn = new NpgsqlConnection(cs))
         {
             await conn.OpenAsync();
@@ -41,6 +41,11 @@ public sealed class V80MigrationTests(AppFixture app)
                 ["Id"] = role, ["Key"] = "code-readers", ["Name"] = "Code readers",
                 ["Permissions"] = new[] { "chat.use", "argus.read", "argus.manage", "settings.argus", "settings.branding" },
             });
+            // The built-in role for the service, as the releases before left it (its grants name it by its id).
+            await using (var seeded = new NpgsqlCommand("select \"Id\" from access_roles where \"Key\" = 'argus-admin' and \"BuiltIn\"", conn))
+            {
+                builtIn = (Guid)(await seeded.ExecuteScalarAsync())!;
+            }
             await V61MigrationTests.InsertAsync(conn, "access_rules", new() { ["Id"] = rule, ["ResourceKind"] = "tool", ["Resource"] = "argus" });
             await V61MigrationTests.InsertAsync(conn, "settings", new() { ["key"] = "config:ArgusIndex:Schedule", ["value"] = "0 3 * * *" });
             await V61MigrationTests.InsertAsync(conn, "settings", new() { ["key"] = "config:Chat:MaxToolRounds", ["value"] = "8" });
@@ -54,6 +59,8 @@ public sealed class V80MigrationTests(AppFixture app)
         // In their order, the rest as they were.
         Assert.Equal(["chat.use", "code-intel.read", "code-intel.manage", "settings.code-intel", "settings.branding"],
             (await db.AccessRoles.AsNoTracking().SingleAsync(r => r.Id == role)).Permissions);
+        var admin = await db.AccessRoles.AsNoTracking().SingleAsync(r => r.Id == builtIn);
+        Assert.Equal(Llm.Core.Access.BuiltInRoles.CodeIntelAdmin, admin.Key);
         Assert.Equal("code-intel", (await db.AccessRules.AsNoTracking().SingleAsync(r => r.Id == rule)).Resource);
         Assert.Equal(["config:Chat:MaxToolRounds", "config:CodeIntelIndex:Schedule"],
             (await db.Settings.AsNoTracking().Where(s => s.Key.StartsWith("config:")).OrderBy(s => s.Key).ToListAsync()).Select(s => s.Key));
@@ -65,5 +72,8 @@ public sealed class V80MigrationTests(AppFixture app)
         await using var read = new NpgsqlCommand("select \"Tools\" from conversations where \"Id\" = @id", again);
         read.Parameters.AddWithValue("id", chat);
         Assert.Equal(["argus", "web", "argus-like"], (string[])(await read.ExecuteScalarAsync())!);
+        await using var key = new NpgsqlCommand("select \"Key\" from access_roles where \"Id\" = @id", again);
+        key.Parameters.AddWithValue("id", builtIn);
+        Assert.Equal("argus-admin", (string?)await key.ExecuteScalarAsync());
     }
 }

@@ -326,7 +326,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Equal(["expression"], found[0]!["parameters"]!["required"]!.AsArray().Select(r => r!.GetValue<string>()));
         Assert.DoesNotContain(found, x => x!["call"]!.GetValue<string>().EndsWith(".current_time", StringComparison.Ordinal));
         (text, _) = await session.CallAsync("search_tools", new JsonObject(), null, CancellationToken.None);
-        Assert.Contains("arena.code-intel.find_symbol: ", text, StringComparison.Ordinal);
+        Assert.Contains("arena.code_intel.find_symbol: ", text, StringComparison.Ordinal);
 
         // The program calls them, each as the person: what it may call, the result, a refusal for the one that asks first.
         (text, isError) = await session.CallAsync("run_code", new JsonObject

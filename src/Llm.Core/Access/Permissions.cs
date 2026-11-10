@@ -389,7 +389,7 @@ public static class BuiltInRoles
         new(Billing, "Billing", "Credit, spend and usage; scoped to some groups, only theirs.", [Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Auditor, "Auditor", "Reads everything an admin can see, and changes nothing.",
             [.. Permissions.All.Where(p => p.Admin && p.Key.EndsWith(".read", StringComparison.Ordinal)).Select(p => p.Key)]),
-        new(CodeIntelAdmin, $"{Brand.CodeIntel} admin", "CodeIntel: its repositories, indexing, packs and webhook; scoped to some repositories, only those.",
+        new(CodeIntelAdmin, $"{Brand.CodeIntel} admin", $"{Brand.CodeIntel}: its repositories, indexing, packs and webhook; scoped to some repositories, only those.",
             [Permissions.CodeIntelRead, Permissions.CodeIntelManage, Permissions.CodeIntelExplore]),
         new(RoomModerator, "Room moderator", "Lists rooms, removes members and deletes rooms, without reading them.", [Permissions.RoomsModerate]),
         new(ReviewAdmin, "Review admin", "Every project's reviews and automatic reviews.", [Permissions.ReviewsAdmin, Permissions.ReviewPolicy]),

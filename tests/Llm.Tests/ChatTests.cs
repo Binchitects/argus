@@ -106,7 +106,7 @@ public sealed class ChatTests(AppFixture app)
         var c = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
         Assert.Equal("Qwen3.8-Flash-Next", c.GetProperty("model").GetString());
         Assert.Equal(["xhigh", "low", "off"], c.GetProperty("presets").EnumerateArray().Select(p => p.GetProperty("level").GetString()));
-        Assert.True(c.GetProperty("code-intel").GetBoolean());
+        Assert.True(c.GetProperty("codeIntel").GetBoolean());
     }
 
     [Fact]
