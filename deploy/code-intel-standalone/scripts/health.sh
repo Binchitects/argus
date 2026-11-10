@@ -2,10 +2,10 @@
 # Is every part of the stack up and answering? Exit status = number of failures.
 source "$(dirname "$0")/lib.sh"
 
-port=$(envget ARGUS_HTTP_PORT 8080)
+port=$(envget CODE_INTEL_HTTP_PORT 8080)
 gw=$(envget GATEWAY_PORT 4000)
 echo "containers"
-for svc in llamacpp llamacpp-embed postgres litellm argus; do
+for svc in llamacpp llamacpp-embed postgres litellm code-intel; do
   state=$(docker inspect -f '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "$svc" 2>/dev/null || echo missing)
   case "$state" in running/healthy|running) ok "$svc ($state)" ;; *) bad "$svc ($state)" ;; esac
 done

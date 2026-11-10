@@ -1,7 +1,7 @@
-"""The security scanners (compose profile "scanners"): a commit Argus sends, scanned by opengrep's engine with Arena's
+"""The security scanners (compose profile "scanners"): a commit code-intel sends, scanned by opengrep's engine with Arena's
 own rules (rules/), Bandit, gitleaks and Trivy's checks of configuration, and what they found merged.
 
-Only Argus reaches it (an internal network with no way out), and it reaches nothing: no scanner fetches anything, so
+Only code-intel reaches it (an internal network with no way out), and it reaches nothing: no scanner fetches anything, so
 the rules, Bandit's checks, gitleaks' patterns and Trivy's checks are those built into the image. Nothing it is sent is
 run: the scanners read the code, and git only checks it out (no hooks, symbolic links as plain files).
 

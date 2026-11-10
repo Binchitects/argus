@@ -48,7 +48,7 @@ public readonly record struct Condensed(int Summarised, int Outlined, int Droppe
 }
 
 /// <summary>
-/// Tool results the model has used, made small: shared by Code Arena's agent and Argus Arena's web chat. A result two
+/// Tool results the model has used, made small: shared by Code Arena's agent and Arena's web chat. A result two
 /// answers or more behind (the model answered after it, then stepped on) goes as a summary: what was asked, its key lines
 /// (paths, line numbers, errors, the figures), and a handle to read it whole again. A file read goes as its outline and
 /// the lines the model cited, once the latest steps no longer touch that file. A file read again after it was edited, or

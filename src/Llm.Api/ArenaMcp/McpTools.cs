@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.ArenaMcp;
 
 /// <summary>
@@ -26,7 +27,7 @@ public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyD
 /// <summary>
 /// The person's chat tools, served to outside agents: exactly those they may use in the chat
 /// (the admins' choices, their groups), with the same function names and schemas, run as them
-/// (Argus with their GitLab access, a plugin with their own account, the gateway on their
+/// (code-intel with their GitLab access, a plugin with their own account, the gateway on their
 /// credit). Each call is audited (mcp.call) at the time it started. A tool set to ask first cannot
 /// show the app's approval card here: it is marked destructive, and its description tells the
 /// client to ask. A tool that reaches a model counts against the person's requests a minute, in
@@ -66,11 +67,11 @@ public sealed partial class McpTools(
         [.. (await registry.ForAsync(await access.MembershipAsync(user, ct), ct)).Where(t => !ChatOnly.Contains(t.Tool.Id))];
 
     /// <summary>
-    /// A tool whose start is only a network round trip, which may be slow or down (Argus, an admin's
+    /// A tool whose start is only a network round trip, which may be slow or down (code-intel, an admin's
     /// MCP server without a per-person sign-in): started beside the others, not after them. The rest
     /// start one after another, as they share the request's database context.
     /// </summary>
-    private static bool Remote(IChatTool tool) => tool is ArgusTool or McpServerTool { Server.PersonAuth: null };
+    private static bool Remote(IChatTool tool) => tool is CodeIntelTool or McpServerTool { Server.PersonAuth: null };
 
     /// <summary>
     /// A plugin with a sign-in of each person's own: reading it uses the request's database context
@@ -191,7 +192,7 @@ public sealed partial class McpTools(
             Tools = tools,
             Instructions =
                 $"Tools as code: only a few tools are listed. {SearchFunction} finds the others by what they do, with their parameters; {CodeTool.Function} runs a " +
-                "Python program that calls them as functions (arena.argus.find_symbol(name=...)), so many calls, loops and filtering stay in the program and only " +
+                "Python program that calls them as functions (arena.code-intel.find_symbol(name=...)), so many calls, loops and filtering stay in the program and only " +
                 "what it prints comes back to you. The tools that ask the person first, and those a program cannot call, are listed as they are.\n\n" + all.Instructions,
         };
     }
@@ -349,7 +350,7 @@ public sealed partial class McpTools(
 
     /// <summary>
     /// The tool with the function, started. As listed when the list is still kept; otherwise an
-    /// admin's server or API by its prefix, else the built-in tools, Argus last (it is a network
+    /// admin's server or API by its prefix, else the built-in tools, code-intel last (it is a network
     /// round trip, they are not). Deep research has one function: only a call of it may hear why
     /// it cannot run, not a name it does not have.
     /// </summary>
@@ -361,8 +362,8 @@ public sealed partial class McpTools(
             :
             [
                 .. served.Where(t => t.Tool is IServerTool s && function.StartsWith(s.Slug + "__", StringComparison.Ordinal)),
-                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "argus" && (t.Tool.Id != ResearchTool.ToolId || function == ResearchTool.Function)),
-                .. served.Where(t => t.Tool.Id == "argus"),
+                .. served.Where(t => t.Tool is not IServerTool && t.Tool.Id != "code-intel" && (t.Tool.Id != ResearchTool.ToolId || function == ResearchTool.Function)),
+                .. served.Where(t => t.Tool.Id == "code-intel"),
             ];
         string? failure = null;
         foreach (var choice in candidates)
@@ -485,7 +486,7 @@ public sealed partial class McpTools(
     { CallId = "mcp" };
 
     /// <summary>
-    /// A function as MCP lists it. Its _meta says which of the chat's tools it is a function of (arena/tool: argus, python,
+    /// A function as MCP lists it. Its _meta says which of the chat's tools it is a function of (arena/tool: code-intel, python,
     /// web...): Code Arena groups them so, in its Tools menu and its tools on demand, as the chat does.
     /// </summary>
     private static JsonObject Definition(JsonObject function, string name, string toolId, bool asksFirst)
@@ -514,7 +515,7 @@ public sealed partial class McpTools(
         var product = string.IsNullOrWhiteSpace(branding.CurrentValue.ProductName) ? AppInfo.Current.Name : branding.CurrentValue.ProductName;
         var text = new StringBuilder(
             $"These are the tools of {product}'s chat, run as {user.DisplayName} ({user.Email}): they reach only what this person may " +
-            "(Argus searches only the code they can read in GitLab), what costs is paid from their credit, and every call is audited. " +
+            $"({Brand.CodeIntel} searches only the code they can read in GitLab), what costs is paid from their credit, and every call is audited. " +
             "A tool marked destructiveHint asks the person first in the chat: ask them before each call, as this server cannot. " +
             "Files the tools make come back as links: read one with resources/read, or the person opens it signed in. " +
             "Where a note below says the person sees a file under the answer, here it comes back to you instead: pass it on.");

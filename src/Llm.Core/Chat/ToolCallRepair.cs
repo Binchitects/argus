@@ -12,7 +12,7 @@ namespace Llm.Core.Chat;
 /// missing, the object sent as a string, the call's own name and arguments around them), a tool named as another harness
 /// names it (Bash, Read, str_replace, functions.read_file), and arguments named or typed not as the schema says
 /// (file_path for path, "12" for 12). What cannot be mended is said with the tool's parameters, so the next call is right.
-/// Shared by Code Arena's agent and Argus Arena's web chat.
+/// Shared by Code Arena's agent and Arena's web chat.
 /// </summary>
 public static partial class ToolCallRepair
 {

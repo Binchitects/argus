@@ -14,12 +14,12 @@ namespace Llm.Api.Code;
 /// A reviewed repository's packages checked again when the advisories are renewed, so a vulnerability published after the
 /// review is found in the code it read without a push: each repository's latest security review (of the last
 /// <see cref="RecentDays"/> days), checked against advisories newer than its own, at the commit it read, as the person who
-/// ran it (Argus's deps_check, within their GitLab rights; no model). What is new joins that review, found now, and the
+/// ran it (code-intel's deps_check, within their GitLab rights; no model). What is new joins that review, found now, and the
 /// person is told.
 /// </summary>
 public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger<SecurityRecheck> logger) : BackgroundService
 {
-    /// <summary>How often the advisories' day is asked of Argus.</summary>
+    /// <summary>How often the advisories' day is asked of code-intel.</summary>
     public static readonly TimeSpan Every = TimeSpan.FromHours(1);
     /// <summary>Reviews older than this are not checked again: review the repository again instead.</summary>
     public const int RecentDays = 90;
@@ -37,14 +37,14 @@ public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger
             {
                 return;
             }
-            catch (Exception ex) when (ex is ArgusException or HttpRequestException or DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+            catch (Exception ex) when (ex is CodeIntelException or HttpRequestException or DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
             {
                 LogFailed(logger, ex);
             }
         }
     }
 
-    /// <summary>The day of the advisories Argus has installed (its pack's version), or null when it has none.</summary>
+    /// <summary>The day of the advisories code-intel has installed (its pack's version), or null when it has none.</summary>
     public static DateOnly? AdvisoriesDay(JsonNode? packs) =>
         (packs?["packs"] as JsonArray ?? []).OfType<JsonObject>().Where(p => p["name"]?.ToString() == "advisories")
             .Select(p => DateOnly.TryParseExact(p["version"]?.ToString(), "yyyy.MM.dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : (DateOnly?)null)
@@ -55,9 +55,9 @@ public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger
     {
         await using var scope = scopes.CreateAsyncScope();
         var services = scope.ServiceProvider;
-        var argusAdmin = services.GetRequiredService<ArgusAdmin>();
-        var argus = services.GetRequiredService<ArgusMcp>();
-        if (!argusAdmin.Enabled || !argus.Enabled || AdvisoriesDay(await argusAdmin.GetAsync("packs", ct)) is not { } day)
+        var codeIntelAdmin = services.GetRequiredService<CodeIntelAdmin>();
+        var codeIntel = services.GetRequiredService<CodeIntelMcp>();
+        if (!codeIntelAdmin.Enabled || !codeIntel.Enabled || AdvisoriesDay(await codeIntelAdmin.GetAsync("packs", ct)) is not { } day)
         {
             return 0;
         }
@@ -71,12 +71,12 @@ public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger
         var made = 0;
         foreach (var id in due)
         {
-            made += await RecheckOneAsync(services, db, argus, id, ct);
+            made += await RecheckOneAsync(services, db, codeIntel, id, ct);
         }
         return made;
     }
 
-    private static async Task<int> RecheckOneAsync(IServiceProvider services, AppDbContext db, ArgusMcp argus, Guid id, CancellationToken ct)
+    private static async Task<int> RecheckOneAsync(IServiceProvider services, AppDbContext db, CodeIntelMcp codeIntel, Guid id, CancellationToken ct)
     {
         var scan = await db.SecurityScans.Include(s => s.Findings).SingleAsync(s => s.Id == id, ct);
         var user = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(scan.UserId.ToString());
@@ -87,7 +87,7 @@ public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger
         JsonObject check;
         try
         {
-            var session = await argus.ConnectAsync(user.Id, user.Email, ct);
+            var session = await codeIntel.ConnectAsync(user.Id, user.Email, ct);
             var args = new JsonObject { ["project"] = scan.Project, ["ref"] = scan.Commit ?? scan.Ref };
             if (args["ref"] is null)
             {

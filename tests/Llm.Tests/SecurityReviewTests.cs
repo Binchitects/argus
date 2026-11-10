@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Llm.Tests;
 
 /// <summary>
-/// The security review: sinks found by git grep through Argus as the person, traced to their callers, judged by the model,
+/// The security review: sinks found by git grep through code-intel as the person, traced to their callers, judged by the model,
 /// kept only when the sink's line is cited as the file has it and the CWE is one the security pack knows, then refuted or
 /// not by a second pass; each finding fixed, accepted (why, until when) or marked wrong.
 /// </summary>
@@ -45,9 +45,9 @@ public sealed class SecurityReviewTests(AppFixture app)
          "more": 0}
         """;
 
-    private void Argus()
+    private void CodeIntel()
     {
-        app.Argus.Handlers["grep_at"] = args =>
+        app.CodeIntel.Handlers["grep_at"] = args =>
         {
             var pattern = args.GetProperty("pattern").GetString()!;
             var glob = args.TryGetProperty("path", out var g) ? g.GetString() : null;
@@ -57,21 +57,21 @@ public sealed class SecurityReviewTests(AppFixture app)
                 : pattern.Contains("Find", StringComparison.Ordinal) ? [new { path = "src/Controller.cs", line = 9, text = Files["src/Controller.cs"][8] }] : [];
             return JsonSerializer.Serialize(new { project = "g/shop", @ref = "main", matches, more = false });
         };
-        app.Argus.Handlers["file_at"] = args =>
+        app.CodeIntel.Handlers["file_at"] = args =>
         {
             var lines = Files[args.GetProperty("path").GetString()!];
             var start = Math.Max(1, args.TryGetProperty("start_line", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt32() : 1);
             var end = Math.Min(lines.Length, args.TryGetProperty("end_line", out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt32() : lines.Length);
             return JsonSerializer.Serialize(new { start_line = start, end_line = end, total_lines = lines.Length, content = string.Join('\n', lines[(start - 1)..end]) + "\n" });
         };
-        app.Argus.Handlers["docs_lookup"] = args => args.GetProperty("name").GetString() == "CWE-89"
+        app.CodeIntel.Handlers["docs_lookup"] = args => args.GetProperty("name").GetString() == "CWE-89"
             ? """{"result": [{"name": "CWE-89", "kind": "weakness", "namespace": "CWE", "signature": "CWE-89: SQL Injection (Base)", "doc_path": "cwe/top25/CWE-89.md", "url": "https://cwe.mitre.org/data/definitions/89.html"}]}"""
             : """{"result": []}""";
-        app.Argus.Handlers["docs_search"] = args => args.GetProperty("lang").GetString() == "cheatsheets"
+        app.CodeIntel.Handlers["docs_search"] = args => args.GetProperty("lang").GetString() == "cheatsheets"
             ? """{"result": [{"title": "SQL Injection Prevention Cheat Sheet", "doc_path": "cheatsheets/SQL.md", "url": "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"}]}"""
             : """{"result": [{"title": "CodeQL cs/sql-injection: SQL query built from user-controlled sources", "doc_path": "codeql/csharp/cs__sql-injection.md", "url": "https://codeql.github.com/codeql-query-help/csharp/cs-sql-injection/"}]}""";
-        app.Argus.Handlers["docs_get"] = _ => """{"result": {"title": "CWE-89", "text": "Use prepared statements and parameters."}}""";
-        app.Argus.Handlers["deps_check"] = _ => """
+        app.CodeIntel.Handlers["docs_get"] = _ => """{"result": {"title": "CWE-89", "text": "Use prepared statements and parameters."}}""";
+        app.CodeIntel.Handlers["deps_check"] = _ => """
             {"project": "g/shop", "ref": "main", "sha": "abc", "dependencies": 42, "pinned": 40, "versions_not_compared": 0,
              "advisories": [{"pack": "advisories", "as_of": "2026-10-27", "days_old": 0}],
              "findings": [{"ecosystem": "NuGet", "package": "Newtonsoft.Json", "version": "12.0.3", "direct": false, "via": "Some.Lib", "file": "api/packages.lock.json", "line": 7,
@@ -79,8 +79,8 @@ public sealed class SecurityReviewTests(AppFixture app)
                            "summary": "Improper Handling of Exceptional Conditions in Newtonsoft.Json", "fixed_in": "13.0.1", "upgrade_to": "13.0.1",
                            "url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr"}]}
             """;
-        app.Argus.Handlers["sbom"] = _ => """{"bomFormat": "CycloneDX", "specVersion": "1.5", "components": [{"type": "library", "name": "Newtonsoft.Json", "version": "12.0.3", "purl": "pkg:nuget/Newtonsoft.Json@12.0.3"}]}""";
-        app.Argus.Handlers["scan_at"] = _ => Scanned;
+        app.CodeIntel.Handlers["sbom"] = _ => """{"bomFormat": "CycloneDX", "specVersion": "1.5", "components": [{"type": "library", "name": "Newtonsoft.Json", "version": "12.0.3", "purl": "pkg:nuget/Newtonsoft.Json@12.0.3"}]}""";
+        app.CodeIntel.Handlers["scan_at"] = _ => Scanned;
     }
 
     private static async Task<JsonElement> DoneAsync(TestBrowser b, Guid id)
@@ -101,7 +101,7 @@ public sealed class SecurityReviewTests(AppFixture app)
     [Trait("Control", "VUL-01")]
     public async Task A_repository_is_reviewed_as_its_person_and_only_cited_weaknesses_the_pack_knows_are_kept()
     {
-        Argus();
+        CodeIntel();
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var user = "sr" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Sam" }));
@@ -166,11 +166,11 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal(("abc", 4), (scan.GetProperty("commit").GetString(), scan.GetProperty("scanners").GetProperty("tools").GetArrayLength()));
         Assert.Contains("Scanners (opengrep, bandit, gitleaks, trivy): 6 finding(s), 1 traced by the model too, 1 the model read and doubts (kept, with what to check), 1 secret(s), 1 in configuration.",
             done.GetProperty("summary").GetString(), StringComparison.Ordinal);
-        var scanCall = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == $"{user}@example.test");
+        var scanCall = app.CodeIntel.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == $"{user}@example.test");
         Assert.True(scanCall.Params!.Value.GetProperty("arguments").GetProperty("history").GetBoolean());
 
         // Read as the person, and asked as them, tagged security.
-        Assert.All(app.Argus.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "grep_at"
+        Assert.All(app.CodeIntel.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "grep_at"
             && c.Params?.GetProperty("arguments").GetProperty("project").GetString() == "g/shop" && c.Email == $"{user}@example.test"), c => Assert.Equal("main", c.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString()));
         var asked = app.Model.Requests.Skip(before).Select(r => r.Body).Where(r => r["messages"]![0]!["content"]!.ToString().StartsWith("You are an application security engineer", StringComparison.Ordinal)).ToList();
         Assert.Equal(5, asked.Count);
@@ -265,7 +265,7 @@ public sealed class SecurityReviewTests(AppFixture app)
     [Trait("Control", "VUL-01")]
     public async Task What_people_decided_is_remembered_for_the_repositorys_next_review_and_a_fixed_one_found_again_is_open()
     {
-        Argus();
+        CodeIntel();
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var user = "rm" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Ola" }));
@@ -308,7 +308,7 @@ public sealed class SecurityReviewTests(AppFixture app)
     [Trait("Control", "VUL-01")]
     public async Task Several_repositories_are_reviewed_one_after_the_other_then_looked_at_across_for_what_they_share()
     {
-        Argus();
+        CodeIntel();
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var user = "sb" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Bea" }));
@@ -370,8 +370,8 @@ public sealed class SecurityReviewTests(AppFixture app)
     [Trait("Control", "VUL-01")]
     public async Task When_the_advisories_are_renewed_a_reviews_packages_are_checked_again_at_the_commit_it_read()
     {
-        Argus();
-        app.Argus.PacksAnswer = null;
+        CodeIntel();
+        app.CodeIntel.PacksAnswer = null;
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var user = "rc" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Rae" }));
@@ -385,14 +385,14 @@ public sealed class SecurityReviewTests(AppFixture app)
         try
         {
             // The advisories of the review's day: nothing to check again.
-            app.Argus.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.27"}], "job": {"state": "idle"}}""";
-            var calls = app.Argus.McpCalls.Count;
+            app.CodeIntel.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.27"}], "job": {"state": "idle"}}""";
+            var calls = app.CodeIntel.McpCalls.Count;
             await recheck.RecheckAsync(CancellationToken.None);
-            Assert.DoesNotContain(app.Argus.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
+            Assert.DoesNotContain(app.CodeIntel.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
 
             // Renewed two days on, with an advisory for a package the review saw as clean.
-            app.Argus.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.29"}], "job": {"state": "idle"}}""";
-            app.Argus.Handlers["deps_check"] = _ => """
+            app.CodeIntel.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.29"}], "job": {"state": "idle"}}""";
+            app.CodeIntel.Handlers["deps_check"] = _ => """
                 {"project": "g/shop", "ref": "abc", "sha": "abc", "dependencies": 42, "advisories": [{"pack": "advisories", "as_of": "2026-10-29", "days_old": 0}],
                  "findings": [{"ecosystem": "NuGet", "package": "Newtonsoft.Json", "version": "12.0.3", "direct": false, "via": "Some.Lib", "file": "api/packages.lock.json", "line": 7,
                                "advisory": "GHSA-5crp-9r3c-p9vr", "aliases": ["CVE-2024-21907"], "severity": "high", "cwes": ["CWE-755"], "exploited": true,
@@ -402,7 +402,7 @@ public sealed class SecurityReviewTests(AppFixture app)
                                "summary": "qs vulnerable to Prototype Pollution", "fixed_in": "6.10.3", "upgrade_to": "6.10.3", "url": "https://github.com/advisories/GHSA-hrpp-h998-j3pp"}]}
                 """;
             Assert.True(await recheck.RecheckAsync(CancellationToken.None) >= 1);
-            var call = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "deps_check"
+            var call = app.CodeIntel.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "deps_check"
                 && c.Params?.GetProperty("arguments").GetProperty("project").GetString() == project);
             // At the commit the review read, as its person.
             Assert.Equal(("abc", $"{user}@example.test"), (call.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString(), call.Email));
@@ -417,13 +417,13 @@ public sealed class SecurityReviewTests(AppFixture app)
             Assert.Contains(news, n => n.GetProperty("title").GetString() == $"New known vulnerabilities in {project}" && n.GetProperty("link").GetString() == $"/code/security/{id}");
 
             // Checked again once: the next look finds nothing due.
-            calls = app.Argus.McpCalls.Count;
+            calls = app.CodeIntel.McpCalls.Count;
             await recheck.RecheckAsync(CancellationToken.None);
-            Assert.DoesNotContain(app.Argus.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
+            Assert.DoesNotContain(app.CodeIntel.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
         }
         finally
         {
-            app.Argus.PacksAnswer = null;
+            app.CodeIntel.PacksAnswer = null;
         }
     }
 

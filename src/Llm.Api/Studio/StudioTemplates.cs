@@ -107,7 +107,7 @@ public static class StudioTemplates
                 new FlowStep { Id = "docs", Kind = "knowledge", Name = "Look it up", Prompt = "{{input.gitlab.title}} {{input.text}}" },
                 new FlowStep
                 {
-                    Id = "answer", Kind = "agent", Name = "Answer it", Tools = ["argus"],
+                    Id = "answer", Kind = "agent", Name = "Answer it", Tools = ["code-intel"],
                     Prompt = "Answer the question in this comment, short and with links, from the code and these documents.\n\n{{input.text}}\n\nDocuments:\n{{docs.text}}",
                 },
                 new FlowStep { Id = "reply", Kind = "gitlab", Name = "Answer in GitLab", Action = "comment", Text = "{{answer.text}}" },

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>
@@ -188,11 +189,11 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         FormUrlEncodedContent Form(params (string, string)[] fields) => new(fields.ToDictionary(x => x.Item1, x => x.Item2));
 
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await client.PostAsync(new Uri("/api/bots/mattermost", UriKind.Relative),
-            Form(("token", "nope"), ("channel_id", "ch1"), ("user_id", "mm-u1"), ("text", "@argus hi"))));
+            Form(("token", "nope"), ("channel_id", "ch1"), ("user_id", "mm-u1"), ("text", "@code-intel hi"))));
 
         // An outgoing webhook: a reply in a thread, answered in that thread (its first post).
         await StatusAssert.Is(HttpStatusCode.OK, await client.PostAsync(new Uri("/api/bots/mattermost", UriKind.Relative), Form(("token", "hook-token"), ("channel_id", "ch1"),
-            ("channel_name", "dev"), ("user_id", "mm-u1"), ("user_name", "dana"), ("post_id", "reply-post"), ("trigger_word", "@argus"), ("text", "@argus how is the build doing?"))));
+            ("channel_name", "dev"), ("user_id", "mm-u1"), ("user_name", "dana"), ("post_id", "reply-post"), ("trigger_word", "@code-intel"), ("text", "@code-intel how is the build doing?"))));
         var post = await _platforms.WaitAsync("mattermost.test", "/api/v4/posts");
         var sent = JsonNode.Parse(post.Body)!;
         Assert.Equal("ch1", sent["channel_id"]!.GetValue<string>());
@@ -225,7 +226,7 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         {
             ["type"] = "message", ["id"] = "1700", ["channelId"] = "msteams", ["serviceUrl"] = serviceUrl, ["text"] = text,
             ["from"] = new JsonObject { ["id"] = "29:dana", ["name"] = "Dana", ["aadObjectId"] = "aad-1" },
-            ["recipient"] = new JsonObject { ["id"] = "28:" + TeamsApp, ["name"] = "Argus" },
+            ["recipient"] = new JsonObject { ["id"] = "28:" + TeamsApp, ["name"] = $"{Brand.CodeIntel}" },
             ["conversation"] = new JsonObject { ["id"] = conversation, ["conversationType"] = "channel", ["isGroup"] = true },
             ["channelData"] = new JsonObject { ["channel"] = new JsonObject { ["id"] = "19:abc@thread.tacv2" }, ["team"] = new JsonObject { ["id"] = "19:team@thread.tacv2" } },
         };
@@ -250,7 +251,7 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await Send(unendorsed, _platforms.BotConnectorToken(TeamsApp, serviceUrl)));
         Assert.Empty(_platforms.To("smba.test", $"/emea/v3/conversations/{conversation}/activities/1700"));
 
-        await StatusAssert.Is(HttpStatusCode.OK, await Send(Activity("<at>Argus</at> Summarize the incident"), _platforms.BotConnectorToken(TeamsApp, serviceUrl)));
+        await StatusAssert.Is(HttpStatusCode.OK, await Send(Activity($"<at>{Brand.CodeIntel}</at> Summarize the incident"), _platforms.BotConnectorToken(TeamsApp, serviceUrl)));
         var reply = await _platforms.WaitAsync("smba.test", "/emea/v3/conversations/19:abc@thread.tacv2;messageid=1700/activities/1700");
         var sent = JsonNode.Parse(reply.Body)!;
         Assert.Equal("Answer to: Summarize the incide", sent["text"]!.GetValue<string>());
@@ -268,7 +269,7 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         await using var f = NewApp(new()
         {
             ["Bots:Email:Secret"] = "mail-secret",
-            ["Mail:Host"] = "127.0.0.1", ["Mail:Port"] = smtp.Port.ToString(CultureInfo.InvariantCulture), ["Mail:StartTls"] = "false", ["Mail:From"] = "Argus Arena <llm@example.test>",
+            ["Mail:Host"] = "127.0.0.1", ["Mail:Port"] = smtp.Port.ToString(CultureInfo.InvariantCulture), ["Mail:StartTls"] = "false", ["Mail:From"] = $"{Brand.Product} <llm@example.test>",
         });
         var (b, email) = await PersonAsync(f);
         var client = f.CreateClient();
@@ -366,7 +367,7 @@ public sealed class BotTextTests
     public void Mentions_and_reply_prefixes_are_taken_out()
     {
         Assert.Equal("What is <this> & that?", BotText.SlackQuestion("<@U0123ABC> What is &lt;this&gt; &amp; that?"));
-        Assert.Equal("Summarize it", BotText.TeamsQuestion("<at>Argus Arena</at> Summarize it"));
+        Assert.Equal("Summarize it", BotText.TeamsQuestion($"<at>{Brand.Product}</at> Summarize it"));
         Assert.Equal("quarterly numbers", BotText.Subject("RE: Fwd: AW:  Quarterly   Numbers"));
         Assert.Equal("", BotText.Subject(null));
     }
@@ -374,12 +375,12 @@ public sealed class BotTextTests
     [Fact]
     public void A_platforms_channel_list_and_tools_read_as_meant()
     {
-        var o = new SlackOptions { Channels = "C1, #dev", Tools = "argus, web" };
+        var o = new SlackOptions { Channels = "C1, #dev", Tools = "code-intel, web" };
         Assert.True(o.Allows("C1"));
         Assert.True(o.Allows("C9", "dev"));
         Assert.False(o.Allows("C2"));
         Assert.True(new SlackOptions().Allows("anything"));
-        Assert.Equal(["argus", "web"], o.ToolList());
+        Assert.Equal(["code-intel", "web"], o.ToolList());
         Assert.Null(new SlackOptions().ToolList());
         Assert.Empty(new MailInOptions().ToolList()!);
     }

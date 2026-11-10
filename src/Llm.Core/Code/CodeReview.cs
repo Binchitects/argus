@@ -2,7 +2,7 @@ namespace Llm.Core.Code;
 
 /// <summary>
 /// A review of a merge request (or of what a branch has over another) by the model, run by a person with their own
-/// read access to the code (Argus, read-only): findings on lines, each checked by a second pass that tried to refute
+/// read access to the code (code-intel, read-only): findings on lines, each checked by a second pass that tried to refute
 /// it, and a summary with a verdict. Nothing is posted back to the code host.
 /// </summary>
 public sealed class CodeReview
@@ -87,7 +87,7 @@ public sealed class CodeReviewBatch
     public string? Model { get; set; }
     /// <summary>The model's look across the repositories, as Markdown.</summary>
     public string? Report { get; set; }
-    /// <summary>How the repositories depend on each other, as Argus resolved it: one line a link.</summary>
+    /// <summary>How the repositories depend on each other, as code-intel resolved it: one line a link.</summary>
     public string? Links { get; set; }
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }

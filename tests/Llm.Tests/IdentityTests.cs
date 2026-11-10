@@ -285,7 +285,7 @@ public sealed class IdentityTests(AppFixture app)
         Assert.Contains("API access is off", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
         Assert.True((await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("apiOff").GetBoolean());
         // The chat goes on: it is not an API key.
-        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.OK, await person.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "still here?" }));
 
         // Given back: the keys work again.
@@ -481,7 +481,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_directory_for_argus_lists_people_without_passwords()
+    public async Task The_directory_for_code_intel_lists_people_without_passwords()
     {
         var admin = await Admin();
         var (id, _, _, email) = await CreatePersonAsync(admin);

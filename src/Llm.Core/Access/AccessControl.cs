@@ -67,7 +67,7 @@ public sealed class AccessRole
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-/// <summary>Narrows what a role gives: a people admin or billing role to people in some groups, an Argus admin to some repositories.</summary>
+/// <summary>Narrows what a role gives: a people admin or billing role to people in some groups, an code-intel admin to some repositories.</summary>
 public sealed class AccessScope
 {
     /// <summary>The groups whose members (and the groups themselves) the role covers; empty: no narrowing by group.</summary>

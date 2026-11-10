@@ -17,7 +17,7 @@ namespace Llm.Api.Wiki;
 
 /// <summary>
 /// The wiki: what the company knows, found and read by people themselves, with no model in between. One search over the
-/// knowledge sources' documents (by their words, and by meaning when the embedder runs), the code (Argus's full-text,
+/// knowledge sources' documents (by their words, and by meaning when the embedder runs), the code (code-intel's full-text,
 /// symbol and meaning searches, as the person, so only what they may read in GitLab), and the data (the tables and
 /// columns of the databases they may ask); and to browse: the sources and their documents, a document whole, the
 /// repositories and a file of one. Every answer is what this person may read, nothing more.
@@ -47,7 +47,7 @@ public static partial class WikiEndpoints
 
     /// <summary>What there is: the knowledge sources with the documents this person may read in each, and whether code and data can be searched.</summary>
     private static async Task<IResult> HomeAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, KnowledgeSearch search, KnowledgeStore store,
-        ArgusMcp argus, Embedder embedder, AccessService access, Operations.Features features, CancellationToken ct)
+        CodeIntelMcp codeIntel, Embedder embedder, AccessService access, Operations.Features features, CancellationToken ct)
     {
         var me = await Me(p, users);
         var counts = await store.CountsAsync(await search.ReadersAsync(me, ct), ct);
@@ -57,21 +57,21 @@ public static partial class WikiEndpoints
         {
             sources = sources.Select(s => new { s.Id, s.Name, s.Kind, s.SyncedAt, documents = counts[s.Id] }),
             meaning = await embedder.ReadyAsync(ct),
-            code = argus.Enabled,
+            code = codeIntel.Enabled,
             data = features.Runs("data") && (await access.MembershipAsync(me, ct)).Has(Core.Access.Permissions.Data),
         });
     }
 
     /// <summary>
     /// One search: in=all (default), knowledge, code or data. Knowledge: the passages that hold the words, then those nearest in
-    /// meaning; code: Argus's ranked search (the symbol a name means, the file, then the files that hold the words), a page
+    /// meaning; code: code-intel's ranked search (the symbol a name means, the file, then the files that hold the words), a page
     /// at a time and narrowed by repo, lang, path, kind (symbol, code, doc) and branch, with what is near in meaning beside
     /// it only when the words find less than a page; data: the tables and columns whose names or comments hold the words.
     /// Each part says why it could not answer rather than failing the rest.
     /// </summary>
     private static async Task<IResult> SearchAsync(string? q, string? @in, string? repo, string? lang, string? path, string? kind, string? branch, int? page,
         ClaimsPrincipal p, UserManager<AppUser> users, KnowledgeSearch search, KnowledgeStore store,
-        Embedder embedder, ArgusMcp argus, DataQuestions data, AccessService access, Operations.Features features, CancellationToken ct)
+        Embedder embedder, CodeIntelMcp codeIntel, DataQuestions data, AccessService access, Operations.Features features, CancellationToken ct)
     {
         var words = q?.Trim() ?? "";
         if (words.Length is 0 or > 300)
@@ -108,11 +108,11 @@ public static partial class WikiEndpoints
                 .Select(f => new { f.DocumentId, f.Title, f.Url, f.Source, f.Heading, f.Line, snippet = Snippet(f.Text, words), score = Math.Round(f.Score, 3) }));
         }
 
-        if (where is "all" or "code" && argus.Enabled)
+        if (where is "all" or "code" && codeIntel.Enabled)
         {
             try
             {
-                var (found, problem) = await argus.SearchAsync(me.Email ?? "", new Dictionary<string, string?>
+                var (found, problem) = await codeIntel.SearchAsync(me.Email ?? "", new Dictionary<string, string?>
                 {
                     ["q"] = words, ["repo"] = repo, ["lang"] = lang, ["path"] = path, ["kind"] = kind, ["branch"] = branch,
                     ["page"] = Math.Max(1, page ?? 1).ToString(CultureInfo.InvariantCulture), ["per_page"] = CodePerPage.ToString(CultureInfo.InvariantCulture),
@@ -136,7 +136,7 @@ public static partial class WikiEndpoints
                     {
                         try
                         {
-                            var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
+                            var session = await codeIntel.ConnectAsync(me.Id, me.Email ?? "", ct);
                             meaning.AddRange(Rows(await session.CallAsync("semantic_search", new JsonObject { ["query"] = words, ["branch"] = branch, ["limit"] = 10 }, null, ct))
                                 .Where(r => r["score"]?.GetValue<double>() is not { } score || score >= MeaningFloor).Take(10).Select(Meaning));
                         }
@@ -172,7 +172,7 @@ public static partial class WikiEndpoints
         return Results.Ok(new { query = words, knowledge, code, codePage, meaning, data = tables.Take(Most), problems });
     }
 
-    /// <summary>Argus's answer to a tool call: its result rows.</summary>
+    /// <summary>code-intel's answer to a tool call: its result rows.</summary>
     private static IEnumerable<JsonObject> Rows((string Text, bool IsError) answer)
     {
         if (answer.IsError)
@@ -194,7 +194,7 @@ public static partial class WikiEndpoints
         }
     }
 
-    /// <summary>One of Argus's ranked matches: a symbol, a file of code or a document, and how it matched.</summary>
+    /// <summary>One of code-intel's ranked matches: a symbol, a file of code or a document, and how it matched.</summary>
     private static object Code(JsonObject r) => new
     {
         kind = r["kind"]?.ToString(),
@@ -212,7 +212,7 @@ public static partial class WikiEndpoints
         snippet = r["snippet"]?.ToString(),
     };
 
-    /// <summary>A symbol near the words in meaning (Argus's semantic_search), with how near.</summary>
+    /// <summary>A symbol near the words in meaning (code-intel's semantic_search), with how near.</summary>
     private static object Meaning(JsonObject r) => new
     {
         repoId = r["repo_id"]?.GetValue<long>(),
@@ -269,17 +269,17 @@ public static partial class WikiEndpoints
         });
     }
 
-    /// <summary>The repositories this person may read, as Argus indexed them.</summary>
-    private static async Task<IResult> ReposAsync(ClaimsPrincipal p, UserManager<AppUser> users, ArgusMcp argus, CancellationToken ct)
+    /// <summary>The repositories this person may read, as code-intel indexed them.</summary>
+    private static async Task<IResult> ReposAsync(ClaimsPrincipal p, UserManager<AppUser> users, CodeIntelMcp codeIntel, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
             return Results.Ok(Array.Empty<object>());
         }
         var me = await Me(p, users);
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email ?? "", ct);
             // index_status has a row per repository and branch: a repository is one row, its default branch first.
             return Results.Ok(Rows(await session.CallAsync("index_status", [], null, ct))
                 .GroupBy(r => r["path_with_namespace"]?.ToString() ?? "")
@@ -297,21 +297,21 @@ public static partial class WikiEndpoints
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            return AuthEndpoints.Problem(502, "argus", $"The code could not be read: {ex.Message}");
+            return AuthEndpoints.Problem(502, "code-intel", $"The code could not be read: {ex.Message}");
         }
     }
 
-    /// <summary>A file of a repository this person may read (Argus's get_file: 64 KB at most).</summary>
-    private static async Task<IResult> FileAsync(long repo, string path, ClaimsPrincipal p, UserManager<AppUser> users, ArgusMcp argus, CancellationToken ct)
+    /// <summary>A file of a repository this person may read (code-intel's get_file: 64 KB at most).</summary>
+    private static async Task<IResult> FileAsync(long repo, string path, ClaimsPrincipal p, UserManager<AppUser> users, CodeIntelMcp codeIntel, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
             return Results.NotFound();
         }
         var me = await Me(p, users);
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email ?? "", ct);
             var (text, error) = await session.CallAsync("get_file", new JsonObject { ["repo_id"] = repo, ["path"] = path }, null, ct);
             if (error || JsonNode.Parse(text) is not JsonObject file)
             {
@@ -324,7 +324,7 @@ public static partial class WikiEndpoints
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            return AuthEndpoints.Problem(502, "argus", $"The code could not be read: {ex.Message}");
+            return AuthEndpoints.Problem(502, "code-intel", $"The code could not be read: {ex.Message}");
         }
         catch (JsonException)
         {

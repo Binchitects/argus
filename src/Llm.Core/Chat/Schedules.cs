@@ -52,7 +52,7 @@ public sealed class ScheduledTask
     public string? TriggerSecretHash { get; set; }
     /// <summary>The GitLab events it takes: merge_request, pipeline_failed, issue.</summary>
     public List<string> Events { get; set; } = [];
-    /// <summary>Its answer goes back to GitLab as a comment on the merge request, issue or commit (by the GitLab bot, never Argus's token).</summary>
+    /// <summary>Its answer goes back to GitLab as a comment on the merge request, issue or commit (by the GitLab bot, never code-intel's token).</summary>
     public bool ReplyInGitLab { get; set; }
     public bool Enabled { get; set; } = true;
     public DateTimeOffset? NextRunAt { get; set; }

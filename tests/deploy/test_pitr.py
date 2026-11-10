@@ -52,7 +52,7 @@ class PitrComposeTests(unittest.TestCase):
             self.skipTest("no docker here")
         deploy = REPO / "deploy"
         env = (deploy / ".env.example").read_text()
-        env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|ARGUS_KEY|GATEWAY_KEY)=$", r"\1=x", env)
+        env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY|GATEWAY_KEY)=$", r"\1=x", env)
         env = re.sub(r"(?m)^DATA_DIR=$", "DATA_DIR=/srv/arena/data", env)
 
         with tempfile.NamedTemporaryFile("w", suffix=".env") as f:

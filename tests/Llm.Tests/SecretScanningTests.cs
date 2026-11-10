@@ -26,7 +26,7 @@ public sealed class SecretScanningTests(AppFixture app)
     }
 
     private static async Task<Guid> ChatAsync(TestBrowser b) =>
-        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
 
     private static Task<HttpResponseMessage> SendAsync(TestBrowser b, Guid chat, string text) =>
         b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = text });

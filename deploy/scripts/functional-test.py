@@ -157,7 +157,7 @@ def chat(key, text="Reply with the single word: pong", max_tokens=400):
 
 def app_chat(browser, text="Reply with the single word: pong"):
     """One question in the app's chat, as the signed-in person: ("answered" | the error sentence, conversation id)."""
-    code, conv = browser.app("POST", "/api/chat/conversations", {"thinking": "off", "useArgus": False})
+    code, conv = browser.app("POST", "/api/chat/conversations", {"thinking": "off", "useCodeIntel": False})
     if code != 201:
         return f"HTTP {code}", None
     code, body, _, _ = browser.req(u("", f"/api/chat/conversations/{conv['id']}/messages"), {"content": text},
@@ -272,7 +272,7 @@ def main():
     rec("person", "the app knows them as a member", me.get("isAdmin") is False, f"HTTP {code}")
     code = person.app("GET", "/api/admin/people")[0]
     rec("person", "the people list is refused", code == 403, f"HTTP {code}")
-    for path in ("/api/admin/overview", "/api/admin/models", "/api/admin/config", "/api/admin/alerts", "/api/admin/argus/status",
+    for path in ("/api/admin/overview", "/api/admin/models", "/api/admin/config", "/api/admin/alerts", "/api/admin/code-intel/status",
                  "/api/dashboards/usage-by-user"):
         code = person.app("GET", path)[0]
         rec("person", f"GET {path} is refused", code == 403, f"HTTP {code}")
@@ -281,7 +281,7 @@ def main():
                                ("PUT", f"/api/admin/people/{pid}/credits", {"chat": 1000, "api": 1000}),
                                ("PUT", f"/api/admin/people/{pid}/api", {"on": True}),
                                ("PATCH", f"/api/admin/people/{pid}", {"admin": True}),
-                               ("POST", "/api/admin/argus/index", {"branches": []})):
+                               ("POST", "/api/admin/code-intel/index", {"branches": []})):
         code = person.app(method, path, body)[0]
         rec("person", f"{method} {path.replace(str(pid), '<self>')} is refused", code == 403, f"HTTP {code}")
     # Metrics and alerts are in the app now (Admin -> Observe, Alerts): open to an admin.

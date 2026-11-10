@@ -47,7 +47,7 @@ import time
 
 # The services' users, as installer.sh expects them on their volumes.
 OWNERS = {"engine": "1000:1000", "directory": "1000:1000", "sandbox": "1000:1000", "audio": "1000:1000",
-          "argus": "10001:10001", "loki": "10001:10001", "prometheus": "65534:65534", "alertmanager": "65534:65534"}
+          "code-intel": "10001:10001", "loki": "10001:10001", "prometheus": "65534:65534", "alertmanager": "65534:65534"}
 
 
 def lines(name: str) -> list[str]:
@@ -314,10 +314,10 @@ def stateful(args: list[str]) -> int | None:
         joined = " ".join(args)
         if "python3 -c" in joined and args[-1].startswith("http://"):
             url = args[-1]
-            v = running_version(s, "app" if url.endswith("/api/info") else "argus")
+            v = running_version(s, "app" if url.endswith("/api/info") else "code-intel")
             if v is None:
                 return 1
-            print(json.dumps({"name": "Argus Arena", "version": v}) if url.endswith("/api/info") else f'argus_index_build_info{{version="{v}"}} 1')
+            print(json.dumps({"name": "Arena", "version": v}) if url.endswith("/api/info") else f'code_intel_index_build_info{{version="{v}"}} 1')
             return 0
         if "stat -c %u:%g" in joined:
             vol = (mount(args, "/v") or "").split("_", 1)[-1]

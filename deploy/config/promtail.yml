@@ -52,9 +52,9 @@ scrape_configs:
           stages:
             - json: { expressions: { level: LogLevel } }
             - labels: { level: "" }
-      # Argus: one JSON object per tool call or refused request.
+      # code-intel: one JSON object per tool call or refused request.
       - match:
-          selector: '{container="argus"} |~ "^[{]\"ts\""'
+          selector: '{container="code-intel"} |~ "^[{]\"ts\""'
           stages:
             - json: { expressions: { event: event, outcome: outcome, tool: tool } }
             - labels: { event: "", outcome: "", tool: "" }

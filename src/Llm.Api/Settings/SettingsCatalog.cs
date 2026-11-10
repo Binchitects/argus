@@ -1,4 +1,5 @@
 using Llm.Core.Access;
+using Branding;
 namespace Llm.Api.Settings;
 
 /// <summary>
@@ -16,7 +17,7 @@ public static class SettingsCatalog
     private const string PricesGroup = "Prices";
     private const string CostsGroup = "Costs";
     private const string Speech = "Speech";
-    private const string Argus = "Argus (GitLab)";
+    private const string CodeIntel = "Code intelligence (GitLab)";
     private const string Tools = "Python and web";
     private const string PluginsGroup = "Plugins";
     private const string ArenaMcp = "Arena MCP";
@@ -49,7 +50,7 @@ public static class SettingsCatalog
     [
         // ---------------------------------------------------------------- app, live --
         new("Branding:ProductName", Branding, "Product name", "Shown in the sidebar, on the sign-in page and in the browser tab.", SettingType.Text, SettingScope.Live)
-            { Default = "Argus Arena", Optional = false, Max = 60 },
+            { Default = $"{Brand.Product}", Optional = false, Max = 60 },
         new("Branding:SignInHeadline", Branding, "Sign-in headline", "The sentence beside the sign-in form.", SettingType.Text, SettingScope.Live)
             { Default = "Your organisation's model, code search and usage, in one place.", Max = 160 },
         new("Branding:SupportContact", Branding, "Where to get help", "An email address or a link, shown on the sign-in page and in the account menu. Empty hides it.", SettingType.Text, SettingScope.Live)
@@ -141,7 +142,7 @@ public static class SettingsCatalog
         new("CompanySignIn:ButtonLabel", CompanySignIn, "Button label", "The sign-in page says \"Sign in with\" and this: Microsoft, Okta, GitLab, your company account.", SettingType.Text, SettingScope.Live)
             { Default = "your company account", Optional = false, Max = 60 },
 
-        new("Chat:MaxToolRounds", Chat, "Tool calls per answer", "How many rounds of tool use (Argus searches) one answer may take before it must answer.", SettingType.WholeNumber, SettingScope.Live)
+        new("Chat:MaxToolRounds", Chat, "Tool calls per answer", $"How many rounds of tool use ({Brand.CodeIntel} searches) one answer may take before it must answer.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "8", Min = 1, Max = 32, Optional = false },
         new("Tools:DisableAfterFailures", Chat, "Turn off a failing tool", "Failed calls in a row after which a server's, a plugin's or an admin's own tool is turned off, and the admins hear of it (Admin → Tools turns it back on). 0: never.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "25", Min = 0, Max = 10_000 },
@@ -180,7 +181,7 @@ public static class SettingsCatalog
             { Max = 1000 },
         new("Mcp:Enabled", ArenaMcp, "Arena MCP", "Outside agents (Code Arena, Claude Code, Qwen Code, Continue) get each person's chat tools at https://DOMAIN/mcp, signed in with that person's API key: the tools they may use in the chat, run as them, each call audited (mcp.call).", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
-        new("Mcp:ListWaitSeconds", ArenaMcp, "Wait for a slow tool server", "Connecting an agent starts Argus and the MCP servers here together and waits this long at most: one slower is listed as not available now, with the reason, and asked again on the next list, so a slow or dead server never holds an agent.", SettingType.WholeNumber, SettingScope.Live)
+        new("Mcp:ListWaitSeconds", ArenaMcp, "Wait for a slow tool server", $"Connecting an agent starts {Brand.CodeIntel} and the MCP servers here together and waits this long at most: one slower is listed as not available now, with the reason, and asked again on the next list, so a slow or dead server never holds an agent.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "10", Min = 1, Max = 120, Unit = "seconds", Optional = false },
         new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the web-search feature's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
@@ -207,7 +208,7 @@ public static class SettingsCatalog
             { Default = "0", Min = 0, Max = Gateway.RateLimits.MaxTokens, Optional = false },
         new("Chat:AgentsAtOnce", Chat, "Sub-agents at once", "How many sub-agents of one answer run side by side (the Sub-agents tool); the rest wait their turn. Each is a request to the model like an answer of its own, inside the answer's place in line: 1 runs them one after another.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "3", Min = 1, Max = 8, Optional = false },
-        new("Chat:ToolCallTimeout", Chat, "Longest tool call", "A call to Argus or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)
+        new("Chat:ToolCallTimeout", Chat, "Longest tool call", $"A call to {Brand.CodeIntel} or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)
             { Default = "01:00:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
         new("Quality:PublicLeaderboard", Chat, "Arena leaderboard for everyone", "Everyone sees the leaderboard of the company's models on its own questions, made from the votes of Compare in the chat. Off: admins only (Admin → Quality).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
@@ -324,8 +325,8 @@ public static class SettingsCatalog
             { Default = "6", Unit = "years", Min = 0, Max = 100, Optional = false },
         new("Retention:GatewayLogDays", Retention, "Keep the gateway's request log for", "Each request through the gateway (who, which model, tokens, cost): usage, credit and the dashboards read it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "400", Unit = "days", Min = 0, Max = 36500, Optional = false },
-        new(global::Llm.Api.Oidc.AddressFilter.AllowKey, Network, "Only these addresses may reach Argus Arena",
-            "One address or range a line (10.0.0.0/8, 192.168.1.20, 2001:db8::/32; # starts a comment): the web, the API, the gateway and Argus answer only these, "
+        new(global::Llm.Api.Oidc.AddressFilter.AllowKey, Network, $"Only these addresses may reach {Brand.Product}",
+            $"One address or range a line (10.0.0.0/8, 192.168.1.20, 2001:db8::/32; # starts a comment): the web, the API, the gateway and {Brand.CodeIntel} answer only these, "
             + "as Traefik sees the caller (behind another proxy, its address). Empty: every address. A list that would leave out your own address is refused.",
             SettingType.Text, SettingScope.Live)
             { Max = 20_000, Lines = 5, Dangerous = true, Impact = "Every request from another address is refused at once (403), sign-in and API keys included." },
@@ -357,8 +358,8 @@ public static class SettingsCatalog
             { Default = "10", Min = 1, Max = 100, Optional = false },
         new("Schedules:MinInterval", Schedules, "Most often", "A task may not run more often than this, so nobody fills the model's day.", SettingType.Duration, SettingScope.Live)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
-        new("GitLab:Url", Schedules, "GitLab address for tasks", "Where tasks run by GitLab's events read details (a merge request's changes, a failed job's log) and comment. Empty: Argus's (GITLAB_URL).", SettingType.Url, SettingScope.Live),
-        new("GitLab:BotToken", Schedules, "GitLab bot token", "A bot account's token (scope api, Reporter in the projects): reads what an event leaves out and writes the comments of tasks that reply in GitLab. Never Argus's read-only token; each comment is audited.", SettingType.Secret, SettingScope.Live),
+        new("GitLab:Url", Schedules, "GitLab address for tasks", $"Where tasks run by GitLab's events read details (a merge request's changes, a failed job's log) and comment. Empty: {Brand.CodeIntel}'s (GITLAB_URL).", SettingType.Url, SettingScope.Live),
+        new("GitLab:BotToken", Schedules, "GitLab bot token", $"A bot account's token (scope api, Reporter in the projects): reads what an event leaves out and writes the comments of tasks that reply in GitLab. Never {Brand.CodeIntel}'s read-only token; each comment is audited.", SettingType.Secret, SettingScope.Live),
         new("Schedules:WebhookHosts", Schedules, "Webhook hosts", "Hosts a task's answer may be posted to, comma separated; *.example.com for a domain and its subdomains. Add your Mattermost or chat server here. Empty: no webhooks.", SettingType.Text, SettingScope.Live)
             { Default = "hooks.slack.com, *.webhook.office.com, *.logic.azure.com, discord.com" },
         new("Knowledge:SyncEvery", Knowledge, "Read sources again every", "How often each knowledge source (Admin → Knowledge) is read again. Only what changed is embedded again; a GitLab project with no new activity is not read at all. Members of GitLab projects are read every 15 minutes whatever this is.", SettingType.Duration, SettingScope.Live)
@@ -383,7 +384,7 @@ public static class SettingsCatalog
             { Default = "true" },
         new("Mail:User", Mail, "SMTP user", "For servers that need a sign-in; empty for a relay that does not.", SettingType.Text, SettingScope.Live),
         new("Mail:Password", Mail, "SMTP password", "From your mail team.", SettingType.Secret, SettingScope.Live),
-        new("Mail:From", Mail, "Sender", "The address email comes from, e.g. Argus Arena <llm@example.com>.", SettingType.Text, SettingScope.Live),
+        new("Mail:From", Mail, "Sender", $"The address email comes from, e.g. {Brand.Product} <llm@example.com>.", SettingType.Text, SettingScope.Live),
         new("Notifications:Email", NotificationsGroup, "Email the credit and alert news", "Besides the bell: a person at 80% of their credit and with it used up, and the admins of alerts that start firing and of credit used up, by email (once each). Needs email set up (Email).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
         new("Audit:Syslog", AuditGroup, "Send it to syslog", "Every entry of the audit log, as it is written and in order, to the company's SIEM or log collector by syslog (RFC 5424, facility log audit, the entry as JSON with its hash): udp://host:514, tcp://host:514 or tls://host:6514 (the collector's certificate is checked). A collector that does not answer is tried again, later each time, and nothing is skipped. Empty: none.", SettingType.Text, SettingScope.Live)
@@ -422,7 +423,7 @@ public static class SettingsCatalog
         new("Bots:Mattermost:Url", BotsGroup, "Mattermost: server", "https://chat.example.com. With the bot token and a webhook or command token, it turns the Mattermost bot on.", SettingType.Url, SettingScope.Live)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
         new("Bots:Mattermost:BotToken", BotsGroup, "Mattermost: bot token", "A bot account's access token (Integrations → Bot accounts). It reads who asked (their email: the server must let it see addresses) and posts the answers; add the bot to the channels.", SettingType.Secret, SettingScope.Live),
-        new("Bots:Mattermost:Tokens", BotsGroup, "Mattermost: webhook and command tokens", "The tokens of the outgoing webhooks (a trigger word such as @argus) and slash commands (/ask) that call the address below, comma separated.", SettingType.Secret, SettingScope.Live),
+        new("Bots:Mattermost:Tokens", BotsGroup, "Mattermost: webhook and command tokens", "The tokens of the outgoing webhooks (a trigger word such as @code-intel) and slash commands (/ask) that call the address below, comma separated.", SettingType.Secret, SettingScope.Live),
         new("Bots:Mattermost:Channels", BotsGroup, "Mattermost: channels", "Channel ids or names it answers in, comma separated. Empty: every channel its webhooks and commands reach.", SettingType.Text, SettingScope.Live)
             { Max = 2000 },
         new("Bots:Mattermost:Model", BotsGroup, "Mattermost: model", "Empty: the one a new chat of the person would use.", SettingType.Text, SettingScope.Live)
@@ -446,17 +447,17 @@ public static class SettingsCatalog
         new("Bots:Email:Tools", BotsGroup, "Email in: tools", "Tool ids, comma separated; none: no tools. A sender's address can be forged: add tools only if your mail gateway checks senders (SPF, DKIM, DMARC). Empty: the tools on in new chats.", SettingType.Text, SettingScope.Live)
             { Default = "none", Max = 1000 },
 
-        // ---------------------------------------------------------------- Argus --
+        // ---------------------------------------------------------------- code-intel --
 
 
 
-        new("ArgusIndex:Schedule", Argus, "Reindex on schedule", "When Argus brings the index up to date by itself, as cron (minute hour day month weekday), e.g. */15 * * * * for every 15 minutes. Empty: only GitLab pushes and Index now. Easier set under Indexing.", SettingType.Text, SettingScope.Live)
+        new("CodeIntelIndex:Schedule", CodeIntel, "Reindex on schedule", $"When {Brand.CodeIntel} brings the index up to date by itself, as cron (minute hour day month weekday), e.g. */15 * * * * for every 15 minutes. Empty: only GitLab pushes and Index now. Easier set under Indexing.", SettingType.Text, SettingScope.Live)
             { Default = "*/15 * * * *" },
-        new("ArgusIndex:TimeZone", Argus, "Time zone of the index schedule", "An IANA name such as Europe/Berlin.", SettingType.Text, SettingScope.Live)
+        new("CodeIntelIndex:TimeZone", CodeIntel, "Time zone of the index schedule", "An IANA name such as Europe/Berlin.", SettingType.Text, SettingScope.Live)
             { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
-        new("Tls:CompanyCa", Argus, "GitLab's CA (a company CA)", "When GitLab's certificate comes from your company's own CA (or is self-signed): that CA's certificate (PEM, -----BEGIN CERTIFICATE-----; a bundle for an issuing CA with its root). Trusted besides the public CAs by everything that reaches GitLab: sign-in with it, people's GitLab tokens and apps linked, Fix it, scheduled tasks, knowledge sources, Argus's index and reviews, and Code Studio's workspaces (git clone and push). A certificate must still be for GitLab's name and within its dates. At install: GITLAB_CA_FILE.", SettingType.Text, SettingScope.Live)
+        new("Tls:CompanyCa", CodeIntel, "GitLab's CA (a company CA)", $"When GitLab's certificate comes from your company's own CA (or is self-signed): that CA's certificate (PEM, -----BEGIN CERTIFICATE-----; a bundle for an issuing CA with its root). Trusted besides the public CAs by everything that reaches GitLab: sign-in with it, people's GitLab tokens and apps linked, Fix it, scheduled tasks, knowledge sources, {Brand.CodeIntel}'s index and reviews, and Code Studio's workspaces (git clone and push). A certificate must still be for GitLab's name and within its dates. At install: GITLAB_CA_FILE.", SettingType.Text, SettingScope.Live)
             { Max = global::Llm.Api.Chat.Tools.ServerTls.MaxCaChars, Lines = 6 },
-        new("Chat:GitlabLinkUrl", Argus, "GitLab address for links", "Where people's browsers open GitLab, for the files and lines in Argus's answers. Empty: the GitLab address above. Set it when Argus reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)
+        new("Chat:GitlabLinkUrl", CodeIntel, "GitLab address for links", $"Where people's browsers open GitLab, for the files and lines in {Brand.CodeIntel}'s answers. Empty: the GitLab address above. Set it when {Brand.CodeIntel} reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
 
         // ------------------------------------------- what was set only by configuration before --
@@ -602,7 +603,7 @@ public static class SettingsCatalog
         CompanySignIn or Oidc or Saml => Permissions.SignInSso,
         Chat => Permissions.SettingsChat,
         Model or PricesGroup or Speech => Permissions.SettingsModels,
-        Argus => Permissions.SettingsArgus,
+        CodeIntel => Permissions.SettingsCodeIntel,
         Tools or PluginsGroup or ArenaMcp => Permissions.SettingsTools,
         Schedules or Mail or NotificationsGroup or BotsGroup => Permissions.SettingsIntegrations,
         Safeguards or SecurityGroup => Permissions.SettingsSafeguards,

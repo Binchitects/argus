@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
 Clients against the stack, as a developer points them: the API (OpenAI- and
-Anthropic-compatible, through the gateway's TLS with the stack's CA) and Argus
+Anthropic-compatible, through the gateway's TLS with the stack's CA) and code-intel
 over MCP, directly and through Qwen Code and DeepSeek Harness.
 
     python3 scripts/clients-check.py
     python3 scripts/clients-check.py --qwen ~/.local/lib/qwen-code/bin/qwen --dsh /path/to/node_modules/.bin/dsh
 
 It signs in as the admin (ADMIN_PASSWORD in .env), makes a test person with an
-API key (removed at the end unless --keep-person), and for Argus a second person
+API key (removed at the end unless --keep-person), and for code-intel a second person
 named after the test GitLab's dev_alpha (tools/test-gitlab/seeded.json), whose
-API key Argus takes as that GitLab account. Each client runs with
+API key code-intel takes as that GitLab account. Each client runs with
 a throwaway home, so your own ~/.qwen and DeepSeek Harness settings are never
 read or changed. Secrets are never printed. Exit code 0 only if every check that
 ran passed; a check that cannot apply here says SKIP.
@@ -126,7 +126,7 @@ def main() -> int:
     args = ap.parse_args()
 
     domain = env("DOMAIN", "llm.localhost") or "llm.localhost"
-    app, base, argus = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://argus.{domain}/mcp"
+    app, base, code-intel = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://code-intel.{domain}/mcp"
     xhr = {"X-Requested-With": "fetch"}
     print(f"Clients against {domain} (TLS {'checked against the system roots' if env('ACME_EMAIL') else 'with Traefik’s own certificate, not checked'})")
 
@@ -147,7 +147,7 @@ def main() -> int:
     key = secrets.get("apiKey") or ""
     check("the person gets an API key", key.startswith("sk-"), "key not shown")
     auth = {"Authorization": f"Bearer {key}"}
-    argus_pid = None
+    code_intel_pid = None
 
     try:
         print("API")
@@ -195,20 +195,20 @@ def main() -> int:
         else:
             record("the requests are the person's spend", "SKIP", "the model has no price")
 
-        print("Argus over MCP")
+        print("code-intel over MCP")
         seeded = REPO / "tools" / "test-gitlab" / "seeded.json"
         gitlab_token = json.loads(seeded.read_text())["users"]["dev_alpha"]["token"] if seeded.exists() else ""
         token = ""
         if gitlab_token:
-            # Argus takes a person's API key and answers as their GitLab account (their username).
-            status, _, dev = call(f"{app}/api/admin/people", {"userName": "dev_alpha", "email": f"dev_alpha.{name}@example.test", "displayName": "Clients check (Argus)"}, xhr)
+            # code-intel takes a person's API key and answers as their GitLab account (their username).
+            status, _, dev = call(f"{app}/api/admin/people", {"userName": "dev_alpha", "email": f"dev_alpha.{name}@example.test", "displayName": "Clients check (code-intel)"}, xhr)
             if status in (200, 201):
-                argus_pid = dev.get("id")
+                code_intel_pid = dev.get("id")
                 token = dev.get("apiKey") or ""
         if not token:
-            record("Argus MCP", "SKIP", "no test GitLab (tools/test-gitlab/run.sh), or the app already has a dev_alpha")
+            record("code-intel MCP", "SKIP", "no test GitLab (tools/test-gitlab/run.sh), or the app already has a dev_alpha")
         else:
-            rpc = mcp_session(argus, token)
+            rpc = mcp_session(code-intel, token)
             status, init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "clients-check", "version": "1"}})
             check("MCP initialize, with the person's API key", status == 200 and "result" in init, f"{status}")
             rpc("notifications/initialized", notify=True)
@@ -221,9 +221,9 @@ def main() -> int:
             if docs:
                 _, hit = rpc("tools/call", {"name": docs, "arguments": {"query": "CreateFileW", "name": "CreateFileW"}})
                 check(f"the Windows packs answer ({docs} CreateFileW)", "CreateFile" in json.dumps(hit), json.dumps(hit)[:160])
-            status, _, _ = call(argus, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer sk-wrong", "Accept": "application/json, text/event-stream"})
+            status, _, _ = call(code-intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer sk-wrong", "Accept": "application/json, text/event-stream"})
             check("a wrong API key is refused", status in (401, 403), str(status))
-            status, _, _ = call(argus, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": f"Bearer {gitlab_token}", "Accept": "application/json, text/event-stream"})
+            status, _, _ = call(code-intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": f"Bearer {gitlab_token}", "Accept": "application/json, text/event-stream"})
             check("a GitLab token is refused, even a good one", status == 401, str(status))
 
         work = Path(tempfile.mkdtemp(prefix="clients-"))
@@ -241,10 +241,10 @@ def main() -> int:
             check("Qwen Code uses its tools (writes a file)", wrote == "42", f"exit {code}; answer.txt: {wrote!r}")
             if token:
                 (q / ".qwen").mkdir(exist_ok=True)
-                (q / ".qwen" / "settings.json").write_text(json.dumps({"mcpServers": {"argus": {
-                    "httpUrl": argus, "headers": {"Authorization": f"Bearer {token}"}, "trust": True}}}))
-                code, out = run_client([args.qwen, "--yolo", "-p", "Use the argus find_symbol tool to find the symbol DecodeFrame. Reply with the repository path it is in, only."], openai, q)
-                check("Qwen Code calls Argus over MCP", "root/eal-core" in out, out.strip()[-160:])
+                (q / ".qwen" / "settings.json").write_text(json.dumps({"mcpServers": {"code-intel": {
+                    "httpUrl": code-intel, "headers": {"Authorization": f"Bearer {token}"}, "trust": True}}}))
+                code, out = run_client([args.qwen, "--yolo", "-p", "Use the code-intel find_symbol tool to find the symbol DecodeFrame. Reply with the repository path it is in, only."], openai, q)
+                check("Qwen Code calls code-intel over MCP", "root/eal-core" in out, out.strip()[-160:])
 
         print("DeepSeek Harness")
         if not args.dsh or not Path(args.dsh).exists():
@@ -274,25 +274,25 @@ def main() -> int:
 - insert:
   - name: '@deepseek-ai/dsh-mcp-client'
     config:
-      serverName: argus
+      serverName: code-intel
       transport: streamable-http
-      url: {argus}
+      url: {code-intel}
       headers:
-        Authorization: !!js '`Bearer ${{process.env.ARGUS_TOKEN}}`'
+        Authorization: !!js '`Bearer ${{process.env.CODE_INTEL_TOKEN}}`'
 """)
-            dsh_env = {"LLM_API_KEY": key, "ARGUS_TOKEN": token, "DSH_HOME": str(d / ".dsh")}
+            dsh_env = {"LLM_API_KEY": key, "CODE_INTEL_TOKEN": token, "DSH_HOME": str(d / ".dsh")}
             code, out = run_client([args.dsh, "--profile", "headless", "--patch", str(patch), "Reply with the single word PONG."], dsh_env, d)
             check("DeepSeek Harness answers through the gateway", code == 0 and "PONG" in out.upper(), out.strip()[-200:])
             if token:
                 code, out = run_client([args.dsh, "--profile", "headless", "--patch", str(patch),
-                                        "Use the mcp__argus__find_symbol tool with name=DecodeFrame. Reply with the repository path it is in, only."], dsh_env, d)
-                check("DeepSeek Harness calls Argus over MCP", "root/eal-core" in out, out.strip()[-200:])
+                                        "Use the mcp__code-intel__find_symbol tool with name=DecodeFrame. Reply with the repository path it is in, only."], dsh_env, d)
+                check("DeepSeek Harness calls code-intel over MCP", "root/eal-core" in out, out.strip()[-200:])
         shutil.rmtree(work, ignore_errors=True)
     finally:
         if pid and not args.keep_person:
             call(f"{app}/api/admin/people/{pid}", method="DELETE", headers=xhr)
-        if argus_pid and not args.keep_person:
-            call(f"{app}/api/admin/people/{argus_pid}", method="DELETE", headers=xhr)
+        if code_intel_pid and not args.keep_person:
+            call(f"{app}/api/admin/people/{code_intel_pid}", method="DELETE", headers=xhr)
 
     failed = [n for n, s in results if s == "FAIL"]
     print(f"\n{sum(1 for _, s in results if s == 'PASS')} passed, {len(failed)} failed, {sum(1 for _, s in results if s == 'SKIP')} skipped")

@@ -24,7 +24,7 @@ public static class SecurityOverview
 
     private static int Rank(string severity) => severity switch { "critical" => 0, "high" => 1, "medium" => 2, "low" => 3, _ => 4 };
 
-    private static async Task<IResult> OverviewAsync(AppDbContext db, ArgusAdmin argus, TimeProvider clock, CancellationToken ct)
+    private static async Task<IResult> OverviewAsync(AppDbContext db, CodeIntelAdmin codeIntel, TimeProvider clock, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var week = now.AddDays(-WeekDays);
@@ -56,7 +56,7 @@ public static class SecurityOverview
             };
         }).OrderBy(r => r.exploited > 0 ? 0 : 1).ThenBy(r => severities.FindIndex(v => r.open[v] > 0) is var i && i >= 0 ? i : 9)
             .ThenByDescending(r => r.open.Values.Sum()).ThenBy(r => r.Project, StringComparer.Ordinal).ToList();
-        var packs = argus.Enabled ? await AdvisoriesDayAsync(argus, ct) : null;
+        var packs = codeIntel.Enabled ? await AdvisoriesDayAsync(codeIntel, ct) : null;
         return Results.Ok(new
         {
             repositories,
@@ -86,13 +86,13 @@ public static class SecurityOverview
     private sealed record Found(Guid Id, Guid ScanId, string Kind, string Severity, bool Exploited, string Title, string Path, int Line, string Cwe, string State,
         DateTimeOffset FoundAt, DateTimeOffset? DecidedAt, Guid? DecidedById, string? Why, DateTimeOffset? Until, string[] FoundBy);
 
-    private static async Task<DateOnly?> AdvisoriesDayAsync(ArgusAdmin argus, CancellationToken ct)
+    private static async Task<DateOnly?> AdvisoriesDayAsync(CodeIntelAdmin codeIntel, CancellationToken ct)
     {
         try
         {
-            return SecurityRecheck.AdvisoriesDay(await argus.GetAsync("packs", ct));
+            return SecurityRecheck.AdvisoriesDay(await codeIntel.GetAsync("packs", ct));
         }
-        catch (Exception ex) when (ex is ArgusException or HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is CodeIntelException or HttpRequestException or TaskCanceledException)
         {
             return null;
         }

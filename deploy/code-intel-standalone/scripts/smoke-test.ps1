@@ -1,12 +1,12 @@
 # End to end through the running stack: sign in as the administrator, ask the
 # model a question in a new conversation, and read the streamed answer back.
 . "$PSScriptRoot\lib.ps1"
-$base = "http://127.0.0.1:$(EnvGet 'ARGUS_HTTP_PORT' '8080')"
+$base = "http://127.0.0.1:$(EnvGet 'CODE_INTEL_HTTP_PORT' '8080')"
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$headers = @{ 'X-Argus-Request' = '1' }
+$headers = @{ 'X-code-intel-Request' = '1' }
 Write-Host "smoke test against $base"
 try {
-    $login = @{ username = (EnvGet 'ARGUS_ADMIN_USERNAME' 'admin'); password = (EnvGet 'ARGUS_ADMIN_PASSWORD') } | ConvertTo-Json
+    $login = @{ username = (EnvGet 'CODE_INTEL_ADMIN_USERNAME' 'admin'); password = (EnvGet 'CODE_INTEL_ADMIN_PASSWORD') } | ConvertTo-Json
     Invoke-RestMethod "$base/api/auth/login" -Method Post -Body $login -ContentType 'application/json' -WebSession $session | Out-Null
     Ok 'signed in'
 } catch { Bad "sign-in failed: $($_.Exception.Message)"; exit 1 }

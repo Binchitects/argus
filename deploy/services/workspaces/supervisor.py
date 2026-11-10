@@ -7,7 +7,7 @@ workspace's engine at its port with that workspace's key.
     GET    /health                     {"ok", "running", "slots"}
     GET    /v1/workspaces              [{"id", "port", "since"}] of those running
     PUT    /v1/workspaces/<id>         {"repo", "branch", "git_user", "git_token", "arena_url",
-                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca",
+                                        "api_key", "gateway_url", "mcp_url", "code_intel_url", "model", "ca",
                                         "git_name", "git_email"}
                                        -> {"port", "key", "cloned"}: cloned once (the branch
                                        checked out), its engine started (again)
@@ -203,7 +203,7 @@ def _env(home: str, spec: dict, key: str | None) -> dict:
             env[name] = bundle
         env["NODE_EXTRA_CA_CERTS"] = company
     for name, value in (("ARENA_URL", "arena_url"), ("ARENA_API_KEY", "api_key"), ("ARENA_GATEWAY_URL", "gateway_url"),
-                        ("ARENA_MCP_URL", "mcp_url"), ("ARENA_ARGUS_URL", "argus_url"), ("ARENA_MODEL", "model")):
+                        ("ARENA_MCP_URL", "mcp_url"), ("ARENA_CODE_INTEL_URL", "code_intel_url"), ("ARENA_MODEL", "model")):
         if spec.get(value):
             env[name] = str(spec[value])
     if key:

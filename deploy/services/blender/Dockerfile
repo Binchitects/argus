@@ -32,6 +32,6 @@ ENV SANDBOX_RUN=blender \
     SANDBOX_MAX_OUT_TOTAL_MB=128
 
 LABEL org.opencontainers.image.title="arena-blender" \
-      org.opencontainers.image.description="Blender ${BLENDER_VERSION} headless, run as Argus Arena's 3D sandbox"
+      org.opencontainers.image.description="Blender ${BLENDER_VERSION} headless, run as Arena's 3D sandbox"
 
 ENTRYPOINT ["python3", "-I", "/runner.py"]

@@ -264,7 +264,7 @@ public sealed partial class PeopleService(
 
     /// <summary>
     /// API access on or off. Off, their keys are blocked at the gateway (and refused by the guardrail), no key is shown to
-    /// them or made, and Arena's MCP endpoint and Argus refuse them; on, their keys work again (unless they are disabled).
+    /// them or made, and Arena's MCP endpoint and code-intel refuse them; on, their keys work again (unless they are disabled).
     /// Audited. A warning when the gateway could not be reached (the keys follow at the next check).
     /// </summary>
     /// <remarks>Off is the person's own deny of feature.api_keys; on removes it. A deny through a group, or a role, stays: then the warning says so.</remarks>

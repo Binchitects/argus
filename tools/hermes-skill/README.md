@@ -1,10 +1,10 @@
-# The Argus skill for Hermes
+# The Farzan Graph skill for Hermes
 
 Native Hermes skill that tells the agent **when** to check a fact against
-Argus and **which** tool to use. Install once per workstation:
+Farzan Graph and **which** tool to use. Install once per workstation:
 
 ```bash
-cp -r tools/hermes-skill/argus "$HERMES_HOME/skills/"
+cp -r tools/hermes-skill/code-intel "$HERMES_HOME/skills/"
 ```
 
 On Windows, `HERMES_HOME` is `%LOCALAPPDATA%\hermes`.
@@ -41,7 +41,7 @@ Measured findings, not advice:
 ## What it cannot do
 
 A skill is guidance the model chooses to open, not a hook that fires on its
-behalf. It improves *when* and *how* the agent reaches for Argus; it cannot
+behalf. It improves *when* and *how* the agent reaches for Farzan Graph; it cannot
 compel a model that decides not to look.
 
 **That limit is measured, not assumed.** Same question, same Hermes, skill
@@ -58,7 +58,7 @@ variables had changed at once. The decisive test was the model that *failed*
 it, and it failed the same way.
 
 By then 35b had been given every offer this project can make — native
-function-calling tool schemas, Argus's 1,803-character instructions in its
+function-calling tool schemas, Farzan Graph's 1,803-character instructions in its
 system prompt, and this skill, whose first line is *"check before stating any
 of these, every time, regardless of how certain it feels"*. It read past all
 three and answered from memory in seconds.
@@ -66,4 +66,4 @@ three and answered from memory in seconds.
 So the skill helps a model that already checks reach for the right tool. It
 does not create the impulse. The only measured lever for that is removing the
 choice: forced verify-after took 35b from 9/10 to **10/10** on this exact
-task — see `docs/argus/roadmap.md`, milestone 2.1.
+task — see `docs/code-intel/roadmap.md`, milestone 2.1.

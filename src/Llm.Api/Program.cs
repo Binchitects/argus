@@ -93,7 +93,9 @@ app.MapAppIdentity();
 var api = app.MapGroup("/api");
 // Public: the sign-in page shows the name, headline and where to get help.
 api.MapGet("/info", async (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding,
-    Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Compliance.NoticeOptions> notice, Llm.Core.Data.AppDbContext db, CancellationToken ct) =>
+    Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Compliance.NoticeOptions> notice, Llm.Core.Data.AppDbContext db,
+    Microsoft.Extensions.Options.IOptions<Llm.Api.Operations.CodeIntelOptions> codeIntel, Microsoft.Extensions.Options.IOptions<Llm.Api.Identity.AuthOptions> auth,
+    IConfiguration config, CancellationToken ct) =>
 {
     var b = branding.CurrentValue;
     var icon = await Llm.Api.Settings.BrandingEndpoints.IconAsync(db, ct);
@@ -102,6 +104,9 @@ api.MapGet("/info", async (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.
         name = string.IsNullOrWhiteSpace(b.ProductName) ? AppInfo.Current.Name : b.ProductName,
         // The icon an admin chose (Settings → Branding); null: the app's own, /favicon.svg.
         icon = icon?.Url,
+        // Where people's coding agents reach the code-intelligence service's MCP (CODE_INTEL_HOST): Code Arena asks here
+        // rather than guess its name; null where it is off.
+        codeIntelUrl = Llm.Api.Operations.Features.On(config, "code-intel") && codeIntel.Value.Enabled ? codeIntel.Value.PublicUrl(auth.Value, "/mcp") : null,
         version = AppInfo.Current.Version,
         signInHeadline = b.SignInHeadline,
         supportContact = string.IsNullOrWhiteSpace(b.SupportContact) ? null : b.SupportContact,

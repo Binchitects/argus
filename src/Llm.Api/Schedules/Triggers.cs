@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Llm.Api.Settings;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Schedules;
 
 /// <summary>What started a run besides the schedule: the event in words, for the question, where in GitLab to answer, if anywhere, and its facts.</summary>
@@ -13,21 +14,21 @@ public sealed record TriggerEvent(string Text, GitLabTarget? Reply, JsonObject? 
 /// <summary>A merge request, an issue or a commit in a GitLab project (its ID), to comment on.</summary>
 public sealed record GitLabTarget(long Project, string Kind, string Id);
 
-/// <summary>Configuration section "GitLab": where tasks read events' details and comment. The bot's token is its own, never Argus's read-only one.</summary>
+/// <summary>Configuration section "GitLab": where tasks read events' details and comment. The bot's token is its own, never code-intel's read-only one.</summary>
 public sealed class GitLabOptions
 {
-    /// <summary>GitLab's address, as the app reaches it; empty: Argus's (GITLAB_URL).</summary>
+    /// <summary>GitLab's address, as the app reaches it; empty: code-intel's (GITLAB_URL).</summary>
     public string? Url { get; set; }
     /// <summary>A bot account's token (scope api): reads a merge request's changes and a job's log, and writes the comments.</summary>
     public string? BotToken { get; set; }
 }
 
 /// <summary>The app's own GitLab account for triggers: reads what an event's payload leaves out, and comments the answer back.</summary>
-public sealed class GitLabBot(IHttpClientFactory http, IOptionsMonitor<GitLabOptions> options, IOptions<Operations.ArgusOptions> argus)
+public sealed class GitLabBot(IHttpClientFactory http, IOptionsMonitor<GitLabOptions> options, IOptions<Operations.CodeIntelOptions> codeIntel)
 {
     public const string Client = "gitlab-bot";
 
-    private string? BaseUrl => (string.IsNullOrWhiteSpace(options.CurrentValue.Url) ? argus.Value.GitlabUrl : options.CurrentValue.Url)?.TrimEnd('/');
+    private string? BaseUrl => (string.IsNullOrWhiteSpace(options.CurrentValue.Url) ? codeIntel.Value.GitlabUrl : options.CurrentValue.Url)?.TrimEnd('/');
 
     public bool Ready => BaseUrl is { Length: > 0 } && options.CurrentValue.BotToken is { Length: > 0 };
 
@@ -134,7 +135,7 @@ public static class Triggers
     ];
 
     /// <summary>What a comment of the app's own ends with: a comment that has it does not start anything (no loops).</summary>
-    public const string Signature = "by Argus Arena for";
+    public static readonly string Signature = $"by {Brand.Product} for";
 
     private const int DiffChars = 30_000;
     private const int LogChars = 4_000;

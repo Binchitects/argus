@@ -4,7 +4,7 @@ using Llm.Core.Access;
 namespace Llm.Core.Chat;
 
 /// <summary>
-/// An admin's choices for one tool: a built-in one ("argus", "image",
+/// An admin's choices for one tool: a built-in one ("code-intel", "image",
 /// "calculator", "time") or an MCP server ("mcp:{id}"). A tool without a row
 /// has the defaults: on, on in new chats, runs without asking. Who may use it
 /// is access rules on the tool (<see cref="Access.ResourceKinds.Tool"/>).

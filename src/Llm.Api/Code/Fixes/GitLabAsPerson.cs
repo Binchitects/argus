@@ -7,6 +7,7 @@ using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Code.Fixes;
 
 /// <summary>Why GitLab could not be asked, or said no, in words for the person.</summary>
@@ -14,15 +15,15 @@ public sealed class GitLabException(string message) : Exception(message);
 
 /// <summary>
 /// GitLab as one person: their own token (scope api), linked for Fix it, kept encrypted. It reads the branch to fix and
-/// opens the merge request as them: never the app's or Argus's account.
+/// opens the merge request as them: never the app's or code-intel's account.
 /// </summary>
-public sealed class GitLabAsPerson(IHttpClientFactory http, AppDbContext db, IOptionsMonitor<Schedules.GitLabOptions> options, IOptions<Operations.ArgusOptions> argus,
+public sealed class GitLabAsPerson(IHttpClientFactory http, AppDbContext db, IOptionsMonitor<Schedules.GitLabOptions> options, IOptions<Operations.CodeIntelOptions> codeIntel,
     IOptions<AuthOptions> auth)
 {
     public const string ToolId = "fixit:gitlab";
     public const long MostArchive = 100L * 1024 * 1024;
 
-    public string? BaseUrl => (string.IsNullOrWhiteSpace(options.CurrentValue.Url) ? argus.Value.GitlabUrl : options.CurrentValue.Url)?.TrimEnd('/');
+    public string? BaseUrl => (string.IsNullOrWhiteSpace(options.CurrentValue.Url) ? codeIntel.Value.GitlabUrl : options.CurrentValue.Url)?.TrimEnd('/');
 
     /// <summary>The person's token, or null when they have not linked one.</summary>
     public async Task<string?> TokenAsync(Guid userId, CancellationToken ct)
@@ -51,7 +52,7 @@ public sealed class GitLabAsPerson(IHttpClientFactory http, AppDbContext db, IOp
         catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException)
         {
             // A company CA the stack is not given yet: said as what to do, not as a closed connection.
-            throw new GitLabException($"GitLab's certificate is not trusted here ({baseUrl}). If it comes from your company's own CA, an admin adds that CA under Settings → Argus (GitLab) → GitLab's CA, or GITLAB_CA_FILE at install.");
+            throw new GitLabException($"GitLab's certificate is not trusted here ({baseUrl}). If it comes from your company's own CA, an admin adds that CA under Settings → {Brand.CodeIntel} (GitLab) → GitLab's CA, or GITLAB_CA_FILE at install.");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {

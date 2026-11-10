@@ -159,7 +159,7 @@ def visit(n: int, name: str, password: str, args, tally: Tally):
         return
     timed(tally, "me", lambda: p.call("GET", "/api/auth/me"))
     timed(tally, "list chats", lambda: p.call("GET", "/api/chat/conversations"))
-    made = timed(tally, "new chat", lambda: p.call("POST", "/api/chat/conversations", {"thinking": "off", "useArgus": False, "tools": []}))
+    made = timed(tally, "new chat", lambda: p.call("POST", "/api/chat/conversations", {"thinking": "off", "useCodeIntel": False, "tools": []}))
     if made is None:
         return
     chat = json.loads(made)["id"]

@@ -16,14 +16,14 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CHART = HERE / "argus-arena"
+CHART = HERE / "arena"
 DEPLOY = HERE.parent
 
 COPIES = {
     "files/litellm.yaml": "config/litellm.yaml",
     "files/litellm-ha.yaml": "config/litellm-ha.yaml",
     "files/arena_limits.py": "config/arena_limits.py",
-    "files/argus.yaml": "config/argus.yaml",
+    "files/code-intel.yaml": "config/code-intel.yaml",
     "files/searxng.yml": "config/searxng.yml",
     "files/alertmanager.yml": "config/alertmanager.yml",
     "files/loki.yml": "config/loki.yml",

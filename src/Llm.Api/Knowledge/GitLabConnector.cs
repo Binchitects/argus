@@ -12,7 +12,7 @@ namespace Llm.Api.Knowledge;
 /// <summary>
 /// A GitLab project, or every project of a group, read with the GitLab bot's token (Settings → Scheduled tasks):
 /// its wiki pages and its issues (with their comments; never confidential ones). Who may read them is the
-/// project's members (Guest and up, inherited too, active), matched to people by username as Argus does:
+/// project's members (Guest and up, inherited too, active), matched to people by username as code-intel does:
 /// a person's user name here is their GitLab username. A project whose last activity has not moved since
 /// it was read is not read again, but once a day it is (GitLab notes activity at most hourly).
 /// </summary>

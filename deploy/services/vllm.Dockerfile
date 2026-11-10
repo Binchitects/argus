@@ -47,6 +47,6 @@ COPY vllm/supervisor.sh vllm/vllm-helper.py vllm/serve.py vllm/gguf_config.py /v
 COPY gpu-probe.py /gpu-probe.py
 
 LABEL org.opencontainers.image.title="arena-vllm" \
-      org.opencontainers.image.description="vLLM's own image with its GGUF plugin and Argus Arena's supervisor"
+      org.opencontainers.image.description="vLLM's own image with its GGUF plugin and Arena's supervisor"
 
 ENTRYPOINT ["/bin/sh", "/vllm/supervisor.sh"]

@@ -4,6 +4,7 @@ using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Models;
 
 /// <summary>Something the model library holds on disk, and what keeps it there.</summary>
@@ -33,7 +34,7 @@ public sealed class ModelDisk(ModelLibrary library, IOptions<EngineOptions> engi
     {
         "imagegen" => "the picture server",
         "videogen" => "the video server",
-        "embed" => "the embedder (knowledge and Argus)",
+        "embed" => $"the embedder (knowledge and {Brand.CodeIntel})",
         "laya" => "Laya (decisions)",
         "studio" => "the media studio",
         _ => server,

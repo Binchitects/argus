@@ -5,6 +5,7 @@ using Llm.Core.Code;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>
@@ -12,7 +13,7 @@ namespace Llm.Api.Code;
 /// branch over another, as the person (ReviewEngine), waits for it, and reads the findings; or reads a review made
 /// before. The review is also on the Code page, with its findings to resolve.
 /// </summary>
-public sealed class ReviewTool(AppDbContext db, ReviewEngine engine, ArgusMcp argus, TimeProvider clock) : IChatTool
+public sealed class ReviewTool(AppDbContext db, ReviewEngine engine, CodeIntelMcp codeIntel, TimeProvider clock) : IChatTool
 {
     public const string ToolId = "reviews";
 
@@ -25,7 +26,7 @@ public sealed class ReviewTool(AppDbContext db, ReviewEngine engine, ArgusMcp ar
     public string Icon => "search-code";
 
     public Task<string?> UnavailableAsync(CancellationToken ct) =>
-        Task.FromResult(argus.Enabled ? null : "Argus is not set up here: it reads the code for reviews.");
+        Task.FromResult(codeIntel.Enabled ? null : $"{Brand.CodeIntel} is not set up here: it reads the code for reviews.");
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [

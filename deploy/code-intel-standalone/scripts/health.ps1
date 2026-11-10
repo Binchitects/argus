@@ -1,9 +1,9 @@
 # Is every part of the stack up and answering? Exit code = number of failures.
 . "$PSScriptRoot\lib.ps1"
-$port = EnvGet 'ARGUS_HTTP_PORT' '8080'
+$port = EnvGet 'CODE_INTEL_HTTP_PORT' '8080'
 $gw = EnvGet 'GATEWAY_PORT' '4000'
 Write-Host 'containers'
-foreach ($svc in 'llamacpp', 'llamacpp-embed', 'postgres', 'litellm', 'argus') {
+foreach ($svc in 'llamacpp', 'llamacpp-embed', 'postgres', 'litellm', 'code-intel') {
     $state = docker inspect -f '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' $svc 2>$null
     if (-not $state) { $state = 'missing' }
     if ($state -in 'running', 'running/healthy') { Ok "$svc ($state)" } else { Bad "$svc ($state)" }

@@ -62,7 +62,7 @@ public static class Assistants
         }
         var thinking = body.Thinking ?? (a.Thinking is { } t && ChatEndpoints.ValidThinking(t, chat) ? t : null);
         var tools = body.Tools;
-        if (tools is null && body.UseArgus is null && a.Tools is { } chosen)
+        if (tools is null && body.UseCodeIntel is null && a.Tools is { } chosen)
         {
             var known = allowed.Select(x => x.Tool.Id).ToHashSet();
             tools = [.. chosen.Where(known.Contains)];

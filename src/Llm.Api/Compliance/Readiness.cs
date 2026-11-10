@@ -6,6 +6,7 @@ using Llm.Core.Compliance;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Compliance;
 
 /// <summary>One thing a certification is not ready on: what, and where it is put right.</summary>
@@ -226,7 +227,7 @@ public sealed class Readiness(AppDbContext db, ComplianceChecks checks, IService
                 files.Add(("profile.csv", "a current profile from Arena's controls, with the target for the company to fill in"));
             }
             Text("README.txt", $"""
-                {catalog.Title}: what its auditor reads, from Argus Arena {AppInfo.Current.Version}, made {now:yyyy-MM-dd HH:mm} UTC by {by}.
+                {catalog.Title}: what its auditor reads, from {Brand.Product} {AppInfo.Current.Version}, made {now:yyyy-MM-dd HH:mm} UTC by {by}.
                 Readiness: {readiness.Score} of 100. A framework is met by the company that runs Arena: Arena's controls are its technical part.
 
                 {string.Join("\n", files.Select(f => $"{f.Name,-34}{f.What}"))}
@@ -294,9 +295,9 @@ public sealed class Readiness(AppDbContext db, ComplianceChecks checks, IService
     private static string SecurityTarget(FrameworkCatalog catalog, Dictionary<string, List<ControlView>> serving)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# Argus Arena: Security Target, a draft (Common Criteria CC:2022)").AppendLine();
+        sb.AppendLine("# " + Brand.Product + ": Security Target, a draft (Common Criteria CC:2022)").AppendLine();
         sb.AppendLine("Drafted from Arena's controls (docs/compliance/product-evaluation.md says what it rests on). The laboratory completes it with the").AppendLine("evaluated release's configuration, the assurance package chosen and the vulnerability analysis.").AppendLine();
-        sb.AppendLine("## TOE").AppendLine().AppendLine(CultureInfo.InvariantCulture, $"Argus Arena {AppInfo.Current.Version}: the app, the web and the gateway as the release ships them; the hosts, the container engine, Postgres and the models are its environment.").AppendLine();
+        sb.AppendLine("## TOE").AppendLine().AppendLine(CultureInfo.InvariantCulture, $"{Brand.Product} {AppInfo.Current.Version}: the app, the web and the gateway as the release ships them; the hosts, the container engine, Postgres and the models are its environment.").AppendLine();
         sb.AppendLine("## Security functional requirements, and what meets each").AppendLine().AppendLine("| Family | Name | Arena's controls | Their state now |").AppendLine("|---|---|---|---|");
         foreach (var c in catalog.Clauses.Where(c => c.Id.StartsWith('F') && serving.ContainsKey(c.Id)))
         {

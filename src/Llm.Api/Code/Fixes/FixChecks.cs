@@ -9,6 +9,7 @@ using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code.Fixes;
 
 /// <summary>
@@ -22,7 +23,7 @@ public static partial class FixChecks
     /// <summary>How far from where it was the finding's hit, or its sink, is looked for in the changed file.</summary>
     public const int Near = 10;
     public const int SinkNear = 40;
-    /// <summary>The most files a check sends to the scanners (as Argus takes them).</summary>
+    /// <summary>The most files a check sends to the scanners (as code-intel takes them).</summary>
     public const int MostFiles = 200;
 
     public static async Task<JsonObject?> SecurityAsync(IServiceProvider services, CodeFix fix, Workspace w, AppUser me, CancellationToken ct)
@@ -76,21 +77,21 @@ public static partial class FixChecks
     /// <summary>The scanners on the change's files: the finding's hit still there or not, and the hits the change brought.</summary>
     private static async Task<JsonObject> ScannersAsync(IServiceProvider services, SecurityFinding finding, Workspace w, CancellationToken ct)
     {
-        var argus = services.GetRequiredService<ArgusAdmin>();
+        var codeIntel = services.GetRequiredService<CodeIntelAdmin>();
         var tools = finding.Kind switch { SecurityFinding.Secret => "gitleaks", SecurityFinding.Config => "trivy", _ => "opengrep,bandit" };
         var paths = w.Changes.Where(c => c.Value is not null).Select(c => c.Key).Prepend(finding.Path).Distinct(StringComparer.Ordinal).Where(w.Exists).Take(MostFiles).ToList();
-        if (!argus.Enabled || paths.Count == 0)
+        if (!codeIntel.Enabled || paths.Count == 0)
         {
-            return new JsonObject { ["error"] = argus.Enabled ? "The change leaves no file to scan." : "Argus is not set up here, so the scanners cannot be asked." };
+            return new JsonObject { ["error"] = codeIntel.Enabled ? "The change leaves no file to scan." : $"{Brand.CodeIntel} is not set up here, so the scanners cannot be asked." };
         }
         List<Hit> before, after;
         try
         {
             var original = paths.Select(p => (p, w.Original(p))).Where(x => x.Item2 is not null).ToList();
-            before = original.Count == 0 ? [] : Hits(await argus.PostAsync("scan-files", Files(original, tools), ct));
-            after = Hits(await argus.PostAsync("scan-files", Files([.. paths.Select(p => (p, (string?)w.Read(p)))], tools), ct));
+            before = original.Count == 0 ? [] : Hits(await codeIntel.PostAsync("scan-files", Files(original, tools), ct));
+            after = Hits(await codeIntel.PostAsync("scan-files", Files([.. paths.Select(p => (p, (string?)w.Read(p)))], tools), ct));
         }
-        catch (ArgusException ex)
+        catch (CodeIntelException ex)
         {
             return new JsonObject { ["error"] = ex.Message };
         }

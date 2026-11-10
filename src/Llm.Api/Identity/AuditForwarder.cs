@@ -141,7 +141,7 @@ public sealed partial class AuditForwarder(IServiceScopeFactory scopes, IOptions
 
     /// <summary>RFC 5424: facility log audit (13), informational or, for a failure, warning; the entry as JSON.</summary>
     public static string SyslogLine(AuditEvent e, string host) =>
-        $"<{13 * 8 + (e.Success ? 6 : 4)}>1 {e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", CultureInfo.InvariantCulture)} {host} argus-arena - audit - {Json(e)}";
+        $"<{13 * 8 + (e.Success ? 6 : 4)}>1 {e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", CultureInfo.InvariantCulture)} {host} arena - audit - {Json(e)}";
 
     private static async Task SyslogAsync(string address, IReadOnlyList<AuditEvent> entries, CancellationToken ct)
     {

@@ -5,6 +5,7 @@ using Llm.Api.Models;
 using Llm.Core.Chat;
 using Llm.Core.Models;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>What keeps a prompt's start unchanged from one request to the next, so the engine reads it from its cache.</summary>
@@ -116,14 +117,14 @@ public sealed class PromptCacheTests
     [Fact]
     public void Tools_past_the_budget_are_listed_and_loaded_when_asked_and_stay_loaded()
     {
-        var (tools, runs) = Kit(("argus", "find_symbol"), ("argus", "read_file"), ("python", "run_python"));
-        List<(string, string)> notes = [("argus", "Argus notes."), ("python", "Python notes."), ("research", "Research notes.")];
+        var (tools, runs) = Kit(("code-intel", "find_symbol"), ("code-intel", "read_file"), ("python", "run_python"));
+        List<(string, string)> notes = [("code-intel", $"{Brand.CodeIntel} notes."), ("python", "Python notes."), ("research", "Research notes.")];
 
         // Under the budget: as before, every tool whole and every note.
         var whole = new OnDemandTools(tools, runs, notes, [], 100_000);
         Assert.False(whole.Active);
         Assert.Equal(3, whole.Request().Count);
-        Assert.Equal("Argus notes.\n\nPython notes.\n\nResearch notes.", whole.Notes());
+        Assert.Equal($"{Brand.CodeIntel} notes.\n\nPython notes.\n\nResearch notes.", whole.Notes());
 
         // Past it: only load_tools, a line per tool, and the notes of what has no tools.
         var demand = new OnDemandTools(tools, runs, notes, [], 500);
@@ -131,16 +132,16 @@ public sealed class PromptCacheTests
         Assert.Equal([OnDemandTools.Function], demand.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
         var listed = demand.Notes();
         Assert.StartsWith("Research notes.\n\nTools to load:", listed, StringComparison.Ordinal);
-        Assert.Contains("- ARGUS [argus]: The argus tool. Functions: find_symbol, read_file.", listed, StringComparison.Ordinal);
+        Assert.Contains("- ARGUS [code-intel]: The code-intel tool. Functions: find_symbol, read_file.", listed, StringComparison.Ordinal);
         Assert.Contains("- PYTHON [python]: The python tool. Functions: run_python.", listed, StringComparison.Ordinal);
 
         // A tool by its name loads all its functions; its notes join, its line goes.
-        var (added, unknown) = demand.Load(["argus", "nothing"]);
+        var (added, unknown) = demand.Load(["code-intel", "nothing"]);
         Assert.Equal(["find_symbol", "read_file"], added);
         Assert.Equal(["nothing"], unknown);
         Assert.Equal(["find_symbol", "read_file", OnDemandTools.Function], demand.Request().Select(f => f!["function"]!["name"]!.GetValue<string>()));
-        Assert.DoesNotContain("[argus]", demand.Notes(), StringComparison.Ordinal);
-        Assert.StartsWith("Argus notes.\n\nResearch notes.\n\nTools to load:", demand.Notes(), StringComparison.Ordinal);
+        Assert.DoesNotContain("[code-intel]", demand.Notes(), StringComparison.Ordinal);
+        Assert.StartsWith($"{Brand.CodeIntel} notes.\n\nResearch notes.\n\nTools to load:", demand.Notes(), StringComparison.Ordinal);
 
         // The next turn starts with what the chat loaded; with everything loaded, load_tools goes too.
         var next = new OnDemandTools(tools, runs, notes, demand.Loaded, 500);

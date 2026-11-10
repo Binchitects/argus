@@ -26,7 +26,7 @@ def config(*files: str) -> dict:
     else:
         raise unittest.SkipTest("no compose here")
     env = (DEPLOY / ".env.example").read_text()
-    env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|ARGUS_KEY|GATEWAY_KEY)=$", r"\1=x", env)
+    env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY|GATEWAY_KEY)=$", r"\1=x", env)
     env = re.sub(r"(?m)^DATA_DIR=$", "DATA_DIR=/srv/arena/data", env)
 
     with tempfile.NamedTemporaryFile("w", suffix=".env") as f:
@@ -64,13 +64,13 @@ class HaTests(unittest.TestCase):
         text = (DEPLOY / "config" / "litellm.yaml").read_text()
         self.assertIn("redis_host: os.environ/REDIS_HOST", text)
         self.assertIn("redis_port: os.environ/REDIS_PORT", text)
-        self.assertEqual(text, (DEPLOY / "helm" / "argus-arena" / "files" / "litellm.yaml").read_text())
+        self.assertEqual(text, (DEPLOY / "helm" / "arena" / "files" / "litellm.yaml").read_text())
 
     def test_the_chart_runs_valkey_only_when_asked(self):
         helm = shutil.which("helm")
         if helm is None:
             self.skipTest("no helm here")
-        chart = DEPLOY / "helm" / "argus-arena"
+        chart = DEPLOY / "helm" / "arena"
         off = subprocess.run([helm, "template", "arena", str(chart)], capture_output=True, text=True, timeout=120).stdout
         on = subprocess.run([helm, "template", "arena", str(chart), "--set", "valkey.enabled=true", "--set", "litellm.replicas=2"],
                             capture_output=True, text=True, timeout=120).stdout

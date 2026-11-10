@@ -35,9 +35,9 @@ services:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: litellm
   # A comment at two spaces.
-  argus:
-    build: { context: .., dockerfile: src/Argus/Dockerfile, target: server }
-    container_name: argus
+  code-intel:
+    build: { context: .., dockerfile: src/CodeIntel/Dockerfile, target: server }
+    container_name: code-intel
   cpu-temp-exporter:
     image: python:3.13-slim
     container_name: cpu-temp-exporter
@@ -45,10 +45,10 @@ volumes:
   postgres:
   engine:
 """
-SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\n"
+SERVICES = "traefik\nweb\napp\npostgres\nlitellm\ncode-intel\ncpu-temp-exporter\n"
 # deploy/features for that compose file: its optional services, and a part of the app.
 FEATURES = """# The features (deploy/features): id | default | services | needs | requires | title
-argus      | on  | argus | gitlab | - | Argus
+code-intel      | on  | code-intel | gitlab | - | code-intel
 monitoring | on  | cpu-temp-exporter | - | - | Monitoring
 meetings   | on  | - | - | - | Meetings
 """

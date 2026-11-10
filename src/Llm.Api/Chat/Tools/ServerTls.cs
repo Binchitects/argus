@@ -23,7 +23,7 @@ public sealed class CertificateRefusedException() : AuthenticationException("The
 /// <summary>
 /// How an admin's MCP server or API is trusted over HTTPS: by the system's CAs (the default), by
 /// a CA the admin gave (its chain must lead there, and the host name must still match), or not
-/// checked at all. Only these servers' own connections are touched: the gateway, Argus, webhooks
+/// checked at all. Only these servers' own connections are touched: the gateway, code-intel, webhooks
 /// and the web tool keep the strict check.
 /// </summary>
 public static class ServerTls

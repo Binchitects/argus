@@ -1,3 +1,4 @@
+using Branding;
 namespace Llm.Api.Settings;
 
 /// <summary>One setting of the installation's .env (deploy/settings): what it is, and how it is changed.</summary>
@@ -28,7 +29,7 @@ public static class InstallSettings
         ["DOMAIN"] = "Auth:Domain", ["ADMIN_EMAIL"] = "Auth:AdminEmail", ["HTTPS_PORT"] = "Auth:HttpsPort", ["ACME_EMAIL"] = "Stack:Acme",
         ["HSTS_SECONDS"] = "Stack:HstsSeconds", ["MODEL"] = "Engine:FirstModel", ["DEFAULT_MODELS"] = "Engine:DefaultModels", ["HF_TOKEN"] = "HuggingFace:Token",
         ["LLAMACPP_BACKEND"] = "Engine:Backend", ["MEDIA_GPU"] = "Engine:MediaGpu", ["EMBED_GPU"] = "Engine:EmbedGpu", ["LMCACHE_REMOTE"] = "Engine:LmcacheRemote",
-        ["GITLAB_URL"] = "Argus:GitlabUrl", ["GITLAB_CA_FILE"] = "Tls:CompanyCaFile", ["BACKUP_KEEP"] = "Storage:BackupsKept", ["DB_HOST"] = "Database:Host",
+        ["GITLAB_URL"] = "CodeIntel:GitlabUrl", ["GITLAB_CA_FILE"] = "Tls:CompanyCaFile", ["BACKUP_KEEP"] = "Storage:BackupsKept", ["DB_HOST"] = "Database:Host",
         ["DB_PORT"] = "Database:Port", ["DB_USER"] = "Database:Username", ["DB_SSL_MODE"] = "Database:SslMode", [Features] = "Features:On",
     };
 
@@ -40,7 +41,7 @@ public static class InstallSettings
         new("DB_PASSWORD", "Secrets the installer made", "secret", "-", "Postgres, for the app and the gateway", "Database:Password"),
         new("GATEWAY_KEY", "Secrets the installer made", "secret", "-", "The gateway's master key; the app and the gateway must agree", "Gateway:MasterKey"),
         new("ENGINE_KEY", "Secrets the installer made", "secret", "-", "The engine's key (the gateway and Prometheus use it)", "Engine:ApiKey"),
-        new("ARGUS_KEY", "Secrets the installer made", "secret", "-", "Argus's admin and chat credential, the app's only", "Argus:AdminToken"),
+        new("CODE_INTEL_KEY", "Secrets the installer made", "secret", "-", $"{Brand.CodeIntel}'s admin and chat credential, the app's only", "CodeIntel:AdminToken"),
         new("ADMIN_PASSWORD", "Secrets the installer made", "secret", "-", "The first admin's password, only used while nobody exists", "Auth:AdminPassword"),
     ];
 
@@ -80,17 +81,17 @@ public static class InstallSettings
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> Wiring = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["Argus:Url"] = "Argus's admin surface on the stack's network; Argus runs beside the app",
+        ["CodeIntel:Url"] = $"{Brand.CodeIntel}'s admin surface on the stack's network; {Brand.CodeIntel} runs beside the app",
         ["Audit:AnchorDir"] = "The audit volume as compose mounts it into the app",
         ["Auth:AdminUserName"] = "The first admin's name, made when nobody exists; a later change would leave that account unprotected",
-        ["Auth:DirectoryFile"] = "The file the app writes for Argus on their shared volume",
+        ["Auth:DirectoryFile"] = $"The file the app writes for {Brand.CodeIntel} on their shared volume",
         ["Blender:Dir"] = "The blender-jobs volume as the app mounts it",
         ["Browser:ProxyClients"] = "The browser's container, the only one its proxy serves",
         ["Browser:ProxyPort"] = "The proxy port the browser's container is started with",
         ["Browser:Url"] = "The browser's DevTools on the stack's network (BROWSER_URL in compose)",
         ["Certificates:CaFile"] = "The CA file a Helm release mounts from a Secret; compose reads the certificate served",
         ["Certificates:Probe"] = "Traefik on the stack's network, where the site's chain is read",
-        ["Chat:ArgusChatToken"] = "The secret Argus and the app share for the chat, made by the installer",
+        ["Chat:CodeIntelChatToken"] = $"The secret {Brand.CodeIntel} and the app share for the chat, made by the installer",
         ["Chat:GatewayUrl"] = "LiteLLM on the stack's network",
         ["Compliance:Starter"] = "Read once, at a new installation's first start, before anything can be saved; Admin → Compliance applies the same defaults a step at a time",
         ["Dashboards:AlertmanagerUrl"] = "Alertmanager on the stack's network",
@@ -123,7 +124,7 @@ public static class InstallSettings
         ["Storage:BackupDir"] = "The backups volume as the app mounts it (BACKUP_DIR is the installation's)",
         ["Storage:DockerDir"] = "Where Docker's own disk is mounted into the app",
         ["Workspaces:ArenaUrl"] = "The app as the workspaces reach it on the stack's network",
-        ["Workspaces:ArgusUrl"] = "Argus's MCP endpoint as the workspaces reach it",
+        ["Workspaces:CodeIntelUrl"] = $"{Brand.CodeIntel}'s MCP endpoint as the workspaces reach it",
         ["Workspaces:EngineHost"] = "The workspaces' service name on the stack's network",
         ["Workspaces:Key"] = "The secret the app and the workspaces' supervisor share, made by the installer",
         ["Workspaces:SelfUrl"] = "This replica's own address for the others, found by itself; set only where the network hides it",

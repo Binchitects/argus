@@ -33,7 +33,7 @@ public sealed class SafeguardRulesTests(AppFixture app)
     }
 
     private static async Task<Guid> ChatAsync(TestBrowser b) =>
-        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
 
     private static async Task<HttpResponseMessage> SendAsync(TestBrowser b, Guid chat, object body)
     {

@@ -1,9 +1,9 @@
 namespace Llm.Core.Code;
 
 /// <summary>
-/// What one project's software does for the business, as Argus's business map has it: its name, its domain and a
+/// What one project's software does for the business, as code-intel's business map has it: its name, its domain and a
 /// summary, and its profile (capabilities, entities, rules, processes, integrations and a glossary, each with the
-/// sources it was read from), mapped by a model with Argus's read-only tools. Shown to whoever may read the project.
+/// sources it was read from), mapped by a model with code-intel's read-only tools. Shown to whoever may read the project.
 /// </summary>
 public sealed class BusinessSystem
 {

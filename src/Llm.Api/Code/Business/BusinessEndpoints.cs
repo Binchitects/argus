@@ -9,6 +9,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code.Business;
 
 /// <summary>A project to map: its path in GitLab (group/project).</summary>
@@ -42,25 +43,25 @@ public static class BusinessEndpoints
         } : null,
     };
 
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, BusinessMap map, CancellationToken ct)
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, BusinessMap map, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return Results.Ok(new { argus = false, systems = Array.Empty<object>() });
+            return Results.Ok(new { codeIntel = false, systems = Array.Empty<object>() });
         }
         var me = await Me(p, users);
-        return Results.Ok(new { argus = true, systems = (await map.VisibleAsync(db, argus, me, ct)).Select(Summary) });
+        return Results.Ok(new { codeIntel = true, systems = (await map.VisibleAsync(db, codeIntel, me, ct)).Select(Summary) });
     }
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, BusinessMap map,
+    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, BusinessMap map,
         IConfiguration config, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await db.BusinessSystems.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id, ct) is not { } b || !await map.MayReadAsync(argus, me, b.Project, ct))
+        if (await db.BusinessSystems.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id, ct) is not { } b || !await map.MayReadAsync(codeIntel, me, b.Project, ct))
         {
             return Results.NotFound();
         }
-        var gitlab = config["Argus:GitlabUrl"]?.TrimEnd('/');
+        var gitlab = config["CodeIntel:GitlabUrl"]?.TrimEnd('/');
         return Results.Ok(new
         {
             system = Summary(b), profile = BusinessProfile.Read(b.Profile),
@@ -69,12 +70,12 @@ public static class BusinessEndpoints
         });
     }
 
-    private static async Task<IResult> MapAsync(BusinessRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, BusinessMap map,
+    private static async Task<IResult> MapAsync(BusinessRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, BusinessMap map,
         Audit audit, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus is not deployed here, so there is nothing to map with.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not deployed here, so there is nothing to map with.");
         }
         var me = await Me(p, users);
         var project = (body.Project ?? "").Trim().Trim('/');
@@ -82,9 +83,9 @@ public static class BusinessEndpoints
         {
             return AuthEndpoints.Problem(400, "project", "Name the project by its path in GitLab: group/project.");
         }
-        if (!await map.MayReadAsync(argus, me, project, ct))
+        if (!await map.MayReadAsync(codeIntel, me, project, ct))
         {
-            return AuthEndpoints.Problem(404, "project", $"Argus does not show you {project}: check its path, and that you are a member of it.");
+            return AuthEndpoints.Problem(404, "project", $"{Brand.CodeIntel} does not show you {project}: check its path, and that you are a member of it.");
         }
         var system = await db.BusinessSystems.SingleOrDefaultAsync(b => b.Project == project, ct);
         if (system is { Status: BusinessSystem.Building })
@@ -103,11 +104,11 @@ public static class BusinessEndpoints
         return Results.Created($"/api/code/business/{system.Id}", Summary(system));
     }
 
-    private static async Task<IResult> AgainAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, BusinessMap map,
+    private static async Task<IResult> AgainAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, BusinessMap map,
         Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await db.BusinessSystems.SingleOrDefaultAsync(b => b.Id == id, ct) is not { } system || !await map.MayReadAsync(argus, me, system.Project, ct))
+        if (await db.BusinessSystems.SingleOrDefaultAsync(b => b.Id == id, ct) is not { } system || !await map.MayReadAsync(codeIntel, me, system.Project, ct))
         {
             return Results.NotFound();
         }

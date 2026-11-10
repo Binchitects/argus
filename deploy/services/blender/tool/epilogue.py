@@ -221,7 +221,7 @@ if globals().get("PRINT") and _meshes:
         _k = 1000 * (_want / _longest if _longest > 0 else 1)
         _place = lambda v: ((v[0] - (_lo[0] + _hi[0]) / 2) * _k, (v[1] - (_lo[1] + _hi[1]) / 2) * _k, (v[2] - _lo[2]) * _k)
         with open("model.stl", "wb") as _f:
-            _f.write(b"Argus Arena model".ljust(80, b" "))
+            _f.write(b"Arena model".ljust(80, b" "))
             _f.write(_struct.pack("<I", sum(len(t) for _n, _v, t, _x, _c in _parts)))
             for _n, _vs, _ts, _x, _c in _parts:
                 _pv = [_place(v) for v in _vs]

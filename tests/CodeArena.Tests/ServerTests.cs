@@ -210,6 +210,27 @@ public sealed class ServerTests : IDisposable
         Assert.Equal("https://code.example/mcp", new Config { Url = "https://arena.example.com", CodeIntelUrl = "https://code.example/mcp" }.CodeIntelMcpUrl);
     }
 
+    private sealed class InfoHandler(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(answer(request));
+    }
+
+    [Fact]
+    public async Task The_code_intelligence_address_is_the_one_the_Arena_announces_its_name_the_Arenas_choice()
+    {
+        // An Arena from before 8.0 keeps argus.DOMAIN: it says so in /api/info, and that wins over the guess.
+        using var announced = new HttpClient(new InfoHandler(r => r.RequestUri!.AbsolutePath == "/api/info"
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"name":"Arena","codeIntelUrl":"https://argus.arena.example.com/mcp"}""") }
+            : new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)));
+        Assert.Equal("https://argus.arena.example.com/mcp", await Config.AnnouncedCodeIntelAsync(announced, "https://arena.example.com/", CancellationToken.None));
+        // One with it off says null; one that does not answer, or answers no JSON, names none: the guess then.
+        using var off = new HttpClient(new InfoHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"codeIntelUrl":null}""") }));
+        Assert.Null(await Config.AnnouncedCodeIntelAsync(off, "https://arena.example.com", CancellationToken.None));
+        using var down = new HttpClient(new InfoHandler(_ => throw new HttpRequestException("refused")));
+        Assert.Null(await Config.AnnouncedCodeIntelAsync(down, "https://arena.example.com", CancellationToken.None));
+        Assert.Null(await Config.AnnouncedCodeIntelAsync(announced, null, CancellationToken.None));
+    }
+
     [Fact]
     public async Task A_refusal_says_the_servers_reason()
     {

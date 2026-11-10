@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
+using Branding;
 namespace Llm.Tests;
 
 [Collection(nameof(AppCollection))]
@@ -53,7 +54,7 @@ public sealed class FoundationTests(AppFixture app)
     {
         var info = await _client.GetFromJsonAsync<Dictionary<string, string>>(new Uri("/api/info", UriKind.Relative));
         Assert.NotNull(info);
-        Assert.Equal("Argus Arena", info["name"]);
+        Assert.Equal($"{Brand.Product}", info["name"]);
         Assert.Matches(@"^\d+\.\d+\.\d+", info["version"]);
         // The AGPL offers the source to everyone who uses it over a network.
         Assert.Equal("AGPL-3.0-only", info["license"]);

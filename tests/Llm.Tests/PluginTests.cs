@@ -68,7 +68,7 @@ public sealed class PluginTests(AppFixture app)
         var connections = (await b.JsonAsync(await b.GetAsync("/api/account/connections"))).EnumerateArray().Single();
         Assert.Equal("oauth2", connections.GetProperty("kind").GetString());
         Assert.False(connections.GetProperty("connected").GetBoolean());
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
         var notice = Event(await SendAsync(b, chat, "My issues?"), "notice");
         Assert.Contains("connect your GitLab issues account first", notice.GetProperty("text").GetString(), StringComparison.Ordinal);
 
@@ -126,7 +126,7 @@ public sealed class PluginTests(AppFixture app)
         var go = await b.GetAsync($"/api/account/connections/{Uri.EscapeDataString(toolId)}/connect");
         var state = System.Web.HttpUtility.ParseQueryString(go.Headers.Location!.Query)["state"]!;
         Assert.Equal("/account?connected=GitLab%20issues", (await b.GetAsync($"/api/account/connections/callback?code=good-code&state={Uri.EscapeDataString(state)}")).Headers.Location!.ToString());
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
 
         async Task ExpireAsync()
         {
@@ -187,7 +187,7 @@ public sealed class PluginTests(AppFixture app)
         var (b, _) = await PersonAsync(f);
         Assert.Equal("api_key", (await b.JsonAsync(await b.GetAsync("/api/account/connections"))).EnumerateArray().Single().GetProperty("kind").GetString());
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PutAsJsonAsync(new Uri($"/api/account/connections/{Uri.EscapeDataString(toolId)}", UriKind.Relative), new { secret = "persons-own-key" }));
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
         var read = Event(await SendAsync(b, chat, """[call pets__list_pets {"limit":1}]"""), "tool_result");
         Assert.StartsWith("HTTP 200", read.GetProperty("text").GetString(), StringComparison.Ordinal);
         Assert.Contains(app.Mcp.PetCalls, c => c.Key == "persons-own-key");
@@ -232,7 +232,7 @@ public sealed class PluginTests(AppFixture app)
         async Task<string?> KeyOfAsync(TestBrowser b)
         {
             var before = app.Mcp.PetCalls.Count;
-            var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+            var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
             var read = Event(await SendAsync(b, chat, """[call shared_pets__list_pets {"limit":1}]"""), "tool_result");
             Assert.StartsWith("HTTP 200", read.GetProperty("text").GetString(), StringComparison.Ordinal);
             lock (app.Mcp.PetCalls)
@@ -342,7 +342,7 @@ public sealed class PluginTests(AppFixture app)
         Assert.Equal("sandbox:units", installed.GetProperty("url").GetString());
 
         var (b, _) = await PersonAsync(f);
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
         var events = await SendAsync(b, chat, """[call units__convert {"value": 2, "unit": "m"}]""");
         Assert.Equal("6.56 ft", Event(events, "tool_result").GetProperty("text").GetString());
         var failed = Event(await SendAsync(b, chat, """[call units__boom {}]"""), "tool_result");

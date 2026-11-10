@@ -16,11 +16,11 @@ public sealed class AutoReviewTests(AppFixture app)
 
     private void GitLab(string head)
     {
-        app.Argus.Answers["mr_get"] = $$$"""{"iid": 7, "title": "Count faster", "author": "dev", "source_branch": "fast", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/7", "description": "Speeds up counting.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "{{{head}}}"}}""";
-        app.Argus.Answers["mr_diff"] = $$$"""{"project": "g/app", "iid": 7, "files": [{"old_path": "count.c", "new_path": "count.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{{Diff}}}"}]}""";
-        app.Argus.Answers["ci_status"] = """{"project": "g/app", "pipeline": {"id": 1, "status": "success"}}""";
-        app.Argus.Answers["mr_list"] = $$$"""{"result": [{"iid": 7, "title": "Count faster", "state": "opened", "draft": false, "target_branch": "main", "sha": "{{{head}}}"}, {"iid": 8, "title": "WIP", "state": "opened", "draft": true, "target_branch": "main", "sha": "ddd"}]}""";
-        app.Argus.Answers["compare_refs"] = $$$"""{"project": "g/app", "from": "main", "to": "develop", "commits": [{"sha": "c0", "title": "Start"}, {"sha": "c1", "title": "Count faster"}], "files": [{"old_path": "count.c", "new_path": "count.c", "diff": "{{{Diff}}}"}]}""";
+        app.CodeIntel.Answers["mr_get"] = $$$"""{"iid": 7, "title": "Count faster", "author": "dev", "source_branch": "fast", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/7", "description": "Speeds up counting.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "{{{head}}}"}}""";
+        app.CodeIntel.Answers["mr_diff"] = $$$"""{"project": "g/app", "iid": 7, "files": [{"old_path": "count.c", "new_path": "count.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{{Diff}}}"}]}""";
+        app.CodeIntel.Answers["ci_status"] = """{"project": "g/app", "pipeline": {"id": 1, "status": "success"}}""";
+        app.CodeIntel.Answers["mr_list"] = $$$"""{"result": [{"iid": 7, "title": "Count faster", "state": "opened", "draft": false, "target_branch": "main", "sha": "{{{head}}}"}, {"iid": 8, "title": "WIP", "state": "opened", "draft": true, "target_branch": "main", "sha": "ddd"}]}""";
+        app.CodeIntel.Answers["compare_refs"] = $$$"""{"project": "g/app", "from": "main", "to": "develop", "commits": [{"sha": "c0", "title": "Start"}, {"sha": "c1", "title": "Count faster"}], "files": [{"old_path": "count.c", "new_path": "count.c", "diff": "{{{Diff}}}"}]}""";
     }
 
     private static object Event(string action, string sha, bool draft = false) => new
@@ -96,7 +96,7 @@ public sealed class AutoReviewTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Accepted, await HookAsync(anyone, rule, secret, Event("update", "ccc")));
         var both = await SettledAsync(me, rule);
         Assert.Equal(2, both.Count);
-        Assert.Contains(app.Argus.McpCalls, c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"
+        Assert.Contains(app.CodeIntel.McpCalls, c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"
             && c.Params?.GetProperty("arguments").TryGetProperty("since_sha", out var since) == true && since.GetString() == "bbb");
         JsonElement chat = default;
         for (var i = 0; i < 100; i++)

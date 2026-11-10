@@ -20,12 +20,12 @@ from pathlib import Path
 
 from support import COMPOSE, REPO, Sandbox
 
-SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\nembed\n"
+SERVICES = "traefik\nweb\napp\npostgres\nlitellm\ncode-intel\ncpu-temp-exporter\nembed\n"
 EMBED = "embed/nomic-embed-text-v1.5.f16.gguf"
 THIRD_PARTY = ["traefik:v3.6.7", "pgvector/pgvector:0.8.0-pg16", "ghcr.io/berriai/litellm:main-stable", "python:3.13-slim",
                "ghcr.io/ggml-org/llama.cpp:server-cuda"]
 # What compose names with make-installer's release.yml on top: the release's own by version.
-IMAGES_NEW = "\n".join(THIRD_PARTY + ["arena-web:9.9.9", "arena-app:9.9.9", "arena-argus:9.9.9"])
+IMAGES_NEW = "\n".join(THIRD_PARTY + ["arena-web:9.9.9", "arena-app:9.9.9", "arena-code-intel:9.9.9"])
 # 5.2.0's compose file: one more key it needs, a file this release drops, one this release changes.
 # A GPU service (llamacpp), which this host leaves out (FAKE_SERVICES has it not).
 COMPOSE = COMPOSE.replace("volumes:\n", "  llamacpp:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\nvolumes:\n", 1)
@@ -35,27 +35,28 @@ COMPOSE = COMPOSE.replace("volumes:\n", "  laya:\n    build: ./services/laya\n  
 COMPOSE = COMPOSE.replace("volumes:\n", "  embed:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\n    container_name: embed\nvolumes:\n", 1)
 # LiteLLM reads a file of deploy/ as it starts.
 COMPOSE = COMPOSE.replace("    container_name: litellm\n", "    container_name: litellm\n    volumes: [\"./config/litellm.yaml:/app/config.yaml:ro\"]\n", 1)
-COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n")
+# 5.2.0 named the code-intelligence service after a brand: argus, its service, container, image and volume.
+COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n").replace("code-intel", "argus")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
 # This release's features: each optional service under its feature's profile (5.2.0 had none but Laya's).
-for svc, feature, after in (("argus", "argus", "    container_name: argus\n"), ("cpu-temp-exporter", "monitoring", "    container_name: cpu-temp-exporter\n"),
+for svc, feature, after in (("code-intel", "code-intel", "    container_name: code-intel\n"), ("cpu-temp-exporter", "monitoring", "    container_name: cpu-temp-exporter\n"),
                             ("embed", "knowledge", "    container_name: embed\n"), ("llamacpp", "chat-models", "  llamacpp:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\n")):
     assert COMPOSE_NEW.count(after) == 1, svc
     COMPOSE_NEW = COMPOSE_NEW.replace(after, after + f"    profiles: [{feature}]\n")
 FEATURES = """# id | default | services | needs | requires | title
 chat-models | on  | llamacpp | gpu | - | Chat models on this host
 knowledge   | on  | embed | - | - | Search by meaning
-argus       | on  | argus | gitlab | - | Argus
+code-intel       | on  | code-intel | gitlab | - | code-intel
 monitoring  | on  | cpu-temp-exporter | - | - | Monitoring
 laya        | off | laya | - | - | Laya
 meetings    | on  | - | - | knowledge | Meetings
 """
-DEFAULT_FEATURES = "chat-models,knowledge,argus,monitoring,meetings"
+DEFAULT_FEATURES = "chat-models,knowledge,code-intel,monitoring,meetings"
 # And its data in DATA_DIR's folders, as volumes bound there (5.2.0's were in the engine's storage).
 COMPOSE_NEW = COMPOSE_NEW.replace("volumes:\n  postgres:\n  engine:\n", "volumes:\n" + "".join(
     f'  {v}:\n    driver_opts: {{ type: none, o: bind, device: "${{DATA_DIR:?set DATA_DIR}}/{v}" }}\n' for v in ("postgres", "engine")), 1)
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
-ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
+ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD.replace("ARGUS_KEY=", "CODE_INTEL_KEY=") + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
 OLD_ENV = ("DOMAIN=old.example\nADMIN_EMAIL=me@old.example\nMODELS_DIR=./models\nMODEL=lib/model.gguf\nADMIN_PASSWORD=old-admin-pass\n"
            "APP_KEY=old-app-key\nDB_PASSWORD=old-db\nGATEWAY_KEY=sk-old\nENGINE_KEY=old-engine\nARGUS_KEY=old-argus\nOLD_THING=1\n")
 
@@ -101,21 +102,21 @@ class Release:
         s.write("docs/deployment.md", "# Deploying\n", base=self.repo)
         s.write("docs/plan.md", "# Plans\n", base=self.repo)
         s.write("dist/code-arena-9.9.9-linux-x64.tar.gz", "code arena\n", base=self.repo)
-        s.write("packs/python.arguspack", "a pack\n", base=self.repo)
+        s.write("packs/python.kpack", "a pack\n", base=self.repo)
         git(self.repo, "add", "-A", ":!deploy/untracked.txt", ":!deploy/docker-compose.override.yml")
         git(self.repo, "commit", "-q", "-m", "9.9.9")
         self.state = s.dir / "engine.json"
         # The third-party images, and the release's own as compose built them (latest).
-        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-argus:latest", "arena-laya:latest"]
+        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-code-intel:latest", "arena-laya:latest"]
         self.state.write_text(json.dumps({"images": {r: f"{i:064x}" for i, r in enumerate(refs, start=1)}}))
         s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": services,
-                 "FAKE_COMPOSE_VOLUMES": "postgres\nengine\nargus\n", "FAKE_WAITS_FOR": f"embed={EMBED}"}
+                 "FAKE_COMPOSE_VOLUMES": "postgres\nengine\ncode-intel\n", "FAKE_WAITS_FOR": f"embed={EMBED}"}
         if embed_model:
             # On the packing host, in its model library (deploy/models: no .env there).
             s.write(f"models/{EMBED}", "an embedding model\n")
         self.dist = self.repo / "dist"
         self.made = s.run("make-installer.sh", *make_args)
-        self.run_file = self.dist / "argus-arena-9.9.9-offline.run"
+        self.run_file = self.dist / "arena-9.9.9-offline.run"
         self.bundle = s.dir / "unpacked"
 
     def store(self) -> dict:
@@ -123,12 +124,12 @@ class Release:
 
     def unpack(self) -> Path:
         """The bundle, unpacked once (sh RUN --extract)."""
-        if not (self.bundle / "argus-arena-9.9.9").is_dir():
+        if not (self.bundle / "arena-9.9.9").is_dir():
             self.bundle.mkdir(exist_ok=True)
             r = subprocess.run(["sh", str(self.run_file), "--extract", str(self.bundle)], capture_output=True, text=True,
                                env=self.env(), timeout=120)
             assert r.returncode == 0, r.stdout + r.stderr
-        return self.bundle / "argus-arena-9.9.9"
+        return self.bundle / "arena-9.9.9"
 
     def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "FAKE_"))}
@@ -177,24 +178,24 @@ class BundleTests(unittest.TestCase):
 
     def test_The_installer_and_what_it_plans_with_come_first(self):
         head = self.members("head")
-        self.assertEqual(head[:3], ["argus-arena-9.9.9/installer.sh", "argus-arena-9.9.9/MANIFEST", "argus-arena-9.9.9/SHA256SUMS"])
+        self.assertEqual(head[:3], ["arena-9.9.9/installer.sh", "arena-9.9.9/MANIFEST", "arena-9.9.9/SHA256SUMS"])
         for name in ("images/IMAGES", "images/RELEASE", "deploy/docker-compose.yml", "docs/deployment.md", "known/5.2.0.sha256", "LICENSE.md"):
-            self.assertIn(f"argus-arena-9.9.9/{name}", head)
+            self.assertIn(f"arena-9.9.9/{name}", head)
         body = self.members("body")
-        self.assertTrue(all(n.startswith("argus-arena-9.9.9/") for n in body))
+        self.assertTrue(all(n.startswith("arena-9.9.9/") for n in body))
         self.assertTrue(any(n.endswith(".tar.gz") and "/images/" in n for n in body))
         self.assertFalse(set(head) & set(body))
 
     def test_The_bundle_holds_the_release_and_nothing_of_the_host(self):
         b = self.r.unpack()
         manifest = (b / "MANIFEST").read_text()
-        for line in ("format: argus-arena-offline 1", "version: 9.9.9", "upgrades-from: 5.2.0", "engine: docker", "packs: 1", "code-arena: 1",
+        for line in ("format: arena-offline 1", "version: 9.9.9", "upgrades-from: 5.2.0", "engine: docker", "packs: 1", "code-arena: 1",
                      "embedding: missing"):
             self.assertIn(line + "\n", manifest)
         self.assertRegex(manifest, r"commit: [0-9a-f]{7}")
         self.assertEqual((b / "installer.sh").read_text(), (self.r.s.deploy / "scripts" / "installer.sh").read_text())
         release = dict(line.split("\t") for line in (b / "images" / "RELEASE").read_text().splitlines())
-        self.assertEqual(release, {"web": "arena-web:9.9.9", "app": "arena-app:9.9.9", "argus": "arena-argus:9.9.9", "laya": "arena-laya:9.9.9"})
+        self.assertEqual(release, {"web": "arena-web:9.9.9", "app": "arena-app:9.9.9", "code-intel": "arena-code-intel:9.9.9", "laya": "arena-laya:9.9.9"})
         rows = [line.split("\t") for line in (b / "images" / "IMAGES").read_text().splitlines()]
         self.assertEqual(sorted(r[0] for r in rows), sorted(IMAGES_NEW.split() + ["arena-laya:9.9.9"]))
         for ref, file, _, size, raw in rows:
@@ -210,7 +211,7 @@ class BundleTests(unittest.TestCase):
         self.assertTrue((b / "docs" / "deployment.md").is_file())
         self.assertFalse((b / "docs" / "plan.md").exists())
         self.assertTrue((b / "code-arena" / "code-arena-9.9.9-linux-x64.tar.gz").is_file())
-        self.assertTrue((b / "packs" / "python.arguspack").is_file())
+        self.assertTrue((b / "packs" / "python.kpack").is_file())
         known = (b / "known" / "5.2.0.sha256").read_text()
         self.assertIn("  config/dropped.yml\n", known)
         self.assertIn("  docker-compose.yml\n", known)
@@ -243,10 +244,10 @@ class ImageCacheTests(unittest.TestCase):
             self.assertIn("(cached)", made.stdout, "the images the release before packed are packed once")
             out = r.s.dir / "next"
             out.mkdir()
-            x = subprocess.run(["sh", str(r.dist / "argus-arena-9.9.10-offline.run"), "--extract", str(out)], capture_output=True,
+            x = subprocess.run(["sh", str(r.dist / "arena-9.9.10-offline.run"), "--extract", str(out)], capture_output=True,
                                text=True, env=r.env(), timeout=120)
             self.assertEqual(x.returncode, 0, x.stdout + x.stderr)
-            b = out / "argus-arena-9.9.10"
+            b = out / "arena-9.9.10"
             rows = [line.split("\t") for line in (b / "images" / "IMAGES").read_text().splitlines()]
             for ref, file, *_ in rows:
                 with tarfile.open(b / "images" / file) as t:
@@ -273,14 +274,14 @@ class LeaveOutTests(unittest.TestCase):
         self.assertEqual(self.r.made.returncode, 0, self.r.made.stdout + self.r.made.stderr)
         b = self.r.unpack()
         release = dict(line.split("\t") for line in (b / "images" / "RELEASE").read_text().splitlines())
-        self.assertEqual(sorted(release), ["app", "argus", "web"])
+        self.assertEqual(sorted(release), ["app", "code-intel", "web"])
         refs = [line.split("\t")[0] for line in (b / "images" / "IMAGES").read_text().splitlines()]
         self.assertFalse([ref for ref in refs if "laya" in ref or "llama.cpp" in ref], refs)
         self.assertIn("left-out: laya llamacpp embed\n", (b / "MANIFEST").read_text())
         self.assertIn("features-left-out: laya chat-models knowledge\n", (b / "MANIFEST").read_text())
         services = dict(line.split("\t") for line in (b / "images" / "SERVICES").read_text().splitlines())
         self.assertNotIn("laya", services)
-        self.assertEqual("arena-argus:9.9.9", services["argus"])
+        self.assertEqual("arena-code-intel:9.9.9", services["code-intel"])
         self.assertIn("embedding: left out\n", (b / "MANIFEST").read_text())
 
     def test_A_dry_run_finds_the_images_as_they_are_before_they_are_tagged(self):
@@ -322,10 +323,10 @@ class MakeInstallerArgumentTests(unittest.TestCase):
         self.assertFalse((self.s.repo / "dist").exists() and any((self.s.repo / "dist").glob("*.run")))
 
     def test_A_dry_run_writes_and_saves_nothing(self):
-        r = self.s.run("make-installer.sh", "--dry-run", "--without", "argus")
+        r = self.s.run("make-installer.sh", "--dry-run", "--without", "code-intel")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Would make", r.stdout)
-        self.assertIn("features left out: argus (their services: argus)", r.stdout)
+        self.assertIn("features left out: code-intel (their services: code-intel)", r.stdout)
         # No git here, so no tag of 5.2.0: said in the plan, refused by the real run.
         self.assertIn("known/: NOT MADE: no git tag of 5.2.0", r.stdout)
         self.assertFalse((self.s.repo / "dist").exists())
@@ -342,7 +343,7 @@ class SourceBundleTests(unittest.TestCase):
         cls.stage.mkdir()
         # Images built from a checkout say its version once tagged as the release's.
         cls.made = cls.r.s.run("make-installer.sh", "--images-in-engine", "--stage-only", str(cls.stage), "--no-known", extra={"FAKE_TAG_VERSION": "1"})
-        cls.b = cls.stage / "argus-arena-9.9.9"
+        cls.b = cls.stage / "arena-9.9.9"
 
     @classmethod
     def tearDownClass(cls):
@@ -472,16 +473,16 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("dry run: nothing is done", out)
         self.assertIn("the small ones: the rest is checked when it is unpacked", out)
-        # No GPU and no GitLab: the chat models and Argus are off, and so their images are not loaded.
-        self.assertIn("features: 3 on, off: chat-models argus laya", out)
+        # No GPU and no GitLab: the chat models and code-intel are off, and so their images are not loaded.
+        self.assertIn("features: 3 on, off: chat-models code-intel laya", out)
         self.assertIn("would  load the 7 images of the core and the features on", out)
         self.assertIn("would  write docker-compose.override.yml\n", out)
-        self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off", out)
+        self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): code-intel is off", out)
         self.assertFalse(self.dir.exists())
         mutating = {"load", "tag", "run", "rm", "rmi", "save"}
         self.assertFalse([c for c in self.r.calls() if c[1:2] and c[1] in mutating], self.r.calls())
         self.assertFalse([c for c in self.r.calls() if c[1:2] == ["compose"] and "up" in c])
-        self.assertEqual(list(self.r.dist.glob(".argus-arena-unpack.*")), [])
+        self.assertEqual(list(self.r.dist.glob(".arena-unpack.*")), [])
 
     def test_A_dry_run_upgrade_lists_files_and_env_keys(self):
         self.old_install(version_file=True)
@@ -673,7 +674,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(values["GITLAB_URL"], "https://gitlab.test")
         self.assertEqual(values["GITLAB_TOKEN"], "glpat-a-token-for-the-test")
         self.assertNotIn("glpat-a-token-for-the-test", self.output(r) + self.logs())
-        for key in ("ADMIN_PASSWORD", "APP_KEY", "DB_PASSWORD", "ENGINE_KEY", "ARGUS_KEY", "NEW_KEY"):
+        for key in ("ADMIN_PASSWORD", "APP_KEY", "DB_PASSWORD", "ENGINE_KEY", "CODE_INTEL_KEY", "NEW_KEY"):
             self.assertGreaterEqual(len(values[key]), 24, key)
             self.assertNotIn(values[key], self.output(r) + self.logs(), key)
         self.assertTrue(values["GATEWAY_KEY"].startswith("sk-"))
@@ -684,9 +685,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(f"data in {self.dir}/data", r.stdout)
         self.assertIn("not printed, as this run has no terminal", r.stdout)
         # No GPU (--cpu-only): the chat models are off, the rest of the defaults on.
-        self.assertEqual(values["COMPOSE_PROFILES"], "knowledge,argus,monitoring,meetings")
+        self.assertEqual(values["COMPOSE_PROFILES"], "knowledge,code-intel,monitoring,meetings")
         self.assertNotIn("llamacpp", [c["service"] for c in self.containers()])
-        self.assertIn("argus", [c["service"] for c in self.containers()])
+        self.assertIn("code-intel", [c["service"] for c in self.containers()])
         override = (deploy / "docker-compose.override.yml").read_text()
         self.assertNotIn("llamacpp", override)
         # With a network an admin may download speech models later: the speech server is not kept offline.
@@ -701,7 +702,7 @@ class InstallerTests(unittest.TestCase):
         app = next(c for c in self.containers() if c["service"] == "app")
         self.assertEqual(app["image_id"], self.r.store()["images"]["arena-app:9.9.9"])
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
-        self.assertIn("Argus Arena 9.9.9 runs: https://arena.test:18443", r.stdout)
+        self.assertIn("Arena 9.9.9 runs: https://arena.test:18443", r.stdout)
         # Asked through Traefik here, never through a proxy (which would not take --resolve).
         asks = [c for c in self.r.calls() if c[0] == "curl"]
         self.assertTrue(asks)
@@ -748,13 +749,13 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("--default-models is download, skip, or a folder", r.stderr)
 
-    def test_Without_a_GitLab_Argus_is_left_out_and_said_so(self):
+    def test_Without_a_GitLab_CodeIntel_is_left_out_and_said_so(self):
         r = self.install(gitlab=False)
         env = (self.dir / "deploy" / ".env").read_text()
         self.assertIn("\nCOMPOSE_PROFILES=knowledge,monitoring,meetings\n", env)
-        self.assertIn("Argus is off", r.stdout)
-        self.assertIn("installer.sh repair --with argus", r.stdout)
-        self.assertNotIn("argus", [c["service"] for c in self.containers()])
+        self.assertIn("code-intel is off", r.stdout)
+        self.assertIn("installer.sh repair --with code-intel", r.stdout)
+        self.assertNotIn("code-intel", [c["service"] for c in self.containers()])
         r = self.r.run("install", "--dir", str(self.r.s.dir / "x"), "--yes", "--project", "other", "--gitlab-url", "https://gitlab.test")
         self.assertEqual(r.returncode, 3, self.output(r))
         self.assertIn("--gitlab-url needs its token", r.stderr)
@@ -762,12 +763,12 @@ class InstallerTests(unittest.TestCase):
     def test_An_upgrade_does_not_wait_for_a_service_that_was_down_before_it(self):
         self.old_install(version_file=True)
         store = self.r.store()
-        next(c for c in store["containers"] if c["service"] == "argus")["state"] = "restarting"
+        next(c for c in store["containers"] if c["service"] == "code-intel")["state"] = "restarting"
         self.r.state.write_text(json.dumps(store))
-        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_DOWN": "argus"})
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_DOWN": "code-intel"})
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("not up before the upgrade: argus", r.stdout)
-        self.assertIn("not up, as before the upgrade: argus: restarting", r.stdout)
+        self.assertIn("not up before the upgrade: code-intel", r.stdout)
+        self.assertIn("not up, as before the upgrade: code-intel: restarting", r.stdout)
         # Down after the upgrade but up before: that fails it.
         shutil.rmtree(self.dir)
         self.r.state.write_text(json.dumps(self.pristine))
@@ -840,9 +841,13 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((deploy / "config" / "dropped.yml").exists())
         self.assertEqual((deploy / "config" / "mine.yml").read_text(), "my own\n")
         self.assertEqual((deploy / "certs" / "tls.key").read_text(), "KEY\n")
-        # .env: the old values as they were, the new keys added, nothing removed.
+        # .env: the old values as they were (a key from before 8.0 under its new name, on its own line), the new keys
+        # added, nothing removed; the code-intelligence service keeps the address it had (argus.DOMAIN).
         env = (deploy / ".env").read_text()
-        self.assertTrue(env.startswith(OLD_ENV))
+        self.assertTrue(env.startswith(OLD_ENV.replace("ARGUS_KEY=old-argus", "CODE_INTEL_KEY=old-argus")), env)
+        self.assertNotIn("ARGUS_KEY", env)
+        self.assertIn("\nCODE_INTEL_HOST=argus\n", env)
+        self.assertIn(".env: ARGUS_KEY is CODE_INTEL_KEY now", out)
         self.assertIn("\nNEW_SETTING=on\n", env)
         new_key = [line for line in env.splitlines() if line.startswith("NEW_KEY=")][0].split("=", 1)[1]
         self.assertGreaterEqual(len(new_key), 32)
@@ -1056,7 +1061,7 @@ class InstallerTests(unittest.TestCase):
         record = "".join(f"{sha}  {f}\n" for sha, f in (line.split(None, 1) for line in
                          (self.r.unpack() / "known" / "5.2.0.sha256").read_text().splitlines()) if not f.startswith((".env", "certs/")))
         (state / "deploy.sha256").write_text(record)
-        (state / "MANIFEST").write_text("format: argus-arena-offline 1\nversion: 5.2.0\n")
+        (state / "MANIFEST").write_text("format: arena-offline 1\nversion: 5.2.0\n")
         (state / "state").write_text("version=5.2.0\nengine=docker\nproject=arena\nstatus=installed\n")
         (state / "kept").write_text(f"config/edited.yml\t{self.sha(deploy / 'config' / 'edited.yml')}\n"
                                     f"config/litellm.yaml\t{self.sha(deploy / 'config' / 'litellm.yaml')}\n")
@@ -1231,14 +1236,14 @@ class InstallerTests(unittest.TestCase):
         # Killed (the machine lost, kill -9), a run cannot remove its unpacked bundle: the next one needed room for
         # two, and stopped at "unpacking needs ... MB" on a host with room for one.
         where = self.r.run_file.parent
-        stale, live, kept = (where / f".argus-arena-unpack.{n}" for n in ("STALE1", "LIVE01", "KEPT01"))
+        stale, live, kept = (where / f".arena-unpack.{n}" for n in ("STALE1", "LIVE01", "KEPT01"))
         for d in (stale, live, kept):
-            (d / "argus-arena-9.9.9" / "images").mkdir(parents=True)
+            (d / "arena-9.9.9" / "images").mkdir(parents=True)
         (kept / ".keep").write_text("")
-        running = subprocess.Popen(["sh", "-c", "sleep 60", str(live / "argus-arena-9.9.9" / "installer.sh")])
+        running = subprocess.Popen(["sh", "-c", "sleep 60", str(live / "arena-9.9.9" / "installer.sh")])
         try:
             r = self.r.run("status", "--dir", str(self.dir), via_run=True)
-            self.assertIn(f"argus-arena: removed {stale}, which a run that was cut off left", r.stderr)
+            self.assertIn(f"arena: removed {stale}, which a run that was cut off left", r.stderr)
             self.assertFalse(stale.exists())
             self.assertTrue(live.exists(), "a run going on")
             self.assertTrue(kept.exists(), "--keep-workdir")
@@ -1265,7 +1270,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(before, set(self.r.store()["images"]), "the images it loaded")
 
     def test_On_rootless_Podman_the_backup_is_yours_and_Docker_only_looked_at(self):
-        podman = {"FAKE_STATE_ENGINE": "podman", "FAKE_VOLUMES": "arena_engine\narena_argus"}
+        podman = {"FAKE_STATE_ENGINE": "podman", "FAKE_VOLUMES": "arena_engine\narena_code-intel"}
         deploy = self.old_install(version_file=True, running=False)
         subprocess.run(["podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml", "up", "-d"], cwd=deploy,
                        env=self.r.env(podman), check=True)
@@ -1307,7 +1312,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.dir / "LICENSING.md").is_file())
         self.assertTrue((self.dir / "code-arena").is_dir())
         # Purge takes deploy/ and what it wrote beside it, and nothing else.
-        (self.dir / "packs" / "mine.arguspack").write_text("a pack\n")
+        (self.dir / "packs" / "mine.kpack").write_text("a pack\n")
         r = self.r.run("remove", "--dir", str(self.dir), "--yes", "--purge", "--confirm", "PURGE")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertFalse((self.dir / "deploy").exists())
@@ -1315,7 +1320,7 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((self.dir / gone).exists(), gone)
         self.assertEqual((self.dir / "docs" / "mine.md").read_text(), "my notes\n")
         self.assertEqual((self.dir / "LICENSE.md").read_text(), "my licence\n")
-        self.assertTrue((self.dir / "packs" / "mine.arguspack").is_file())
+        self.assertTrue((self.dir / "packs" / "mine.kpack").is_file())
 
     def test_A_git_checkout_keeps_its_own_docs_and_VERSION(self):
         self.old_install(version_file=True)
@@ -1333,12 +1338,12 @@ class InstallerTests(unittest.TestCase):
         self.old_install(version_file=True)
         copy = self.damaged_copy()
         manifest = copy / "MANIFEST"
-        manifest.write_text(manifest.read_text().replace("left-out: \n", "left-out: argus\n"))
+        manifest.write_text(manifest.read_text().replace("left-out: \n", "left-out: code-intel\n"))
         subprocess.run("sha256sum $(sed -E 's/^[0-9a-f]{64} [ *]//' SHA256SUMS) > S && mv S SHA256SUMS", shell=True, cwd=copy, check=True)
         r = subprocess.run(["bash", str(copy / "installer.sh"), "upgrade", "--dir", str(self.dir), "--yes"], env=self.r.env(),
                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 3, self.output(r))
-        self.assertIn("this bundle has no image for argus (made without it): --without argus", r.stderr)
+        self.assertIn("this bundle has no image for code-intel (made without it): --without code-intel", r.stderr)
 
     # --------------------------------------------------------------- features
 
@@ -1350,7 +1355,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_Install_turns_on_and_off_the_features_asked_and_loads_only_their_images(self):
         r = self.install("--with", "laya", "--without", "monitoring", extra_env=self.LAYA)
-        self.assertEqual(self.env_values()["COMPOSE_PROFILES"], "knowledge,argus,laya,meetings")
+        self.assertEqual(self.env_values()["COMPOSE_PROFILES"], "knowledge,code-intel,laya,meetings")
         running = {c["service"] for c in self.containers()}
         self.assertIn("laya", running)
         self.assertNotIn("cpu-temp-exporter", running)
@@ -1447,7 +1452,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, self.output(r))
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--dry-run", "--without", "meetings,knowledge")
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("features: 1 on, off: chat-models knowledge argus laya meetings", r.stdout)
+        self.assertIn("features: 1 on, off: chat-models knowledge code-intel laya meetings", r.stdout)
 
     def test_Repair_turns_a_feature_on_from_the_bundle_and_off_again_freeing_its_image(self):
         self.install(extra_env=self.LAYA)
@@ -1480,7 +1485,7 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("features", "--dir", str(self.r.s.dir / "none-here"))
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("features: on as a new installation has them", r.stdout)
-        self.assertRegex(r.stdout, r"\n  on   argus +[0-9.]+ [KMG]?B  needs a gitlab +Argus\n")
+        self.assertRegex(r.stdout, r"\n  on   code-intel +[0-9.]+ [KMG]?B  needs a gitlab +code-intel\n")
         self.assertRegex(r.stdout, r"\n  off  laya ")
         # The chat models and the embedding server run one image: turning off one alone frees none of it.
         self.assertIn("Chat models on this host (the same image as knowledge)", r.stdout)
@@ -1501,7 +1506,7 @@ class InstallerTests(unittest.TestCase):
         (deploy / "config" / "litellm.yaml").write_text("changed by hand\n")
         store = self.r.store()
         del store["images"]["arena-web:9.9.9"]
-        next(c for c in store["containers"] if c["service"] == "argus")["state"] = "exited"
+        next(c for c in store["containers"] if c["service"] == "code-intel")["state"] = "exited"
         self.r.state.write_text(json.dumps(store))
         litellm = next(c for c in store["containers"] if c["service"] == "litellm")["id"]
         r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
@@ -1513,7 +1518,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual([p.read_text() for p in (deploy / "config").glob("litellm.yaml.changed-*")], ["changed by hand\n"])
         self.assertIn("missing or not the release's: arena-web:9.9.9", out)
         self.assertIn("loaded arena-web:9.9.9", out)
-        self.assertIn("argus (argus): exited", out)
+        self.assertIn("code-intel (code-intel): exited", out)
         # LiteLLM reads the file put back: it starts again, on the shipped copy.
         self.assertIn("they read a file put back, so they start again: litellm", out)
         self.assertNotEqual(next(c for c in self.containers() if c["service"] == "litellm")["id"], litellm)
@@ -1553,23 +1558,23 @@ class InstallerTests(unittest.TestCase):
     def test_Repair_gives_a_volume_back_to_its_service(self):
         self.install()
         store = self.r.store()
-        store["volumes"]["arena_argus"] = {"labels": []}
+        store["volumes"]["arena_code-intel"] = {"labels": []}
         self.r.state.write_text(json.dumps(store))
-        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"FAKE_OWNER_argus": "0:0"})
-        self.assertIn("the argus volume was 0:0's: now 10001:10001's", r.stdout)
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"FAKE_OWNER_code-intel": "0:0"})
+        self.assertIn("the code-intel volume was 0:0's: now 10001:10001's", r.stdout)
         self.assertTrue(any(c[-3:] == ["chown", "-R", "10001:10001"] or "10001:10001" in c for c in self.r.calls() if "chown" in c))
         # A finding, and its service starts again to write there.
-        self.assertIn("recreated: argus", r.stdout)
+        self.assertIn("recreated: code-intel", r.stdout)
         self.assertIn("Repaired: 1 finding(s)", r.stdout)
 
     def test_A_volume_rootless_Podman_makes_roots_is_given_to_its_service_on_install(self):
-        r = self.install(extra_env={"FAKE_OWNER_argus": "0:0"})
+        r = self.install(extra_env={"FAKE_OWNER_code-intel": "0:0"})
         out = r.stdout
         # Not there before the stack starts: put right once it is, and the service restarted.
         self.assertIn("permissions, now that every volume exists", out)
-        self.assertIn("the argus volume was 0:0's: now 10001:10001's", out)
-        self.assertIn("restarted: argus", out)
-        self.assertTrue(self.r.s.called("compose", "restart", "argus"))
+        self.assertIn("the code-intel volume was 0:0's: now 10001:10001's", out)
+        self.assertIn("restarted: code-intel", out)
+        self.assertTrue(self.r.s.called("compose", "restart", "code-intel"))
 
     # ----------------------------------------------------------------- remove
 
@@ -1591,7 +1596,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn(gone, images)
         for kept in ("traefik:v3.6.7", "python:3.13-slim"):
             self.assertIn(kept, images)
-        self.assertIn("kept traefik:v3.6.7: on this host before Argus Arena was installed", r.stdout)
+        self.assertIn("kept traefik:v3.6.7: on this host before Arena was installed", r.stdout)
         self.assertIn("arena_postgres", self.r.store()["volumes"])
         self.assertNotIn(anon, self.r.store()["volumes"])
         self.assertIn(other, self.r.store()["volumes"])
@@ -1663,7 +1668,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(f"the embedding server waits for {EMBED} in {self.dir}/deploy/models, which the bundle does not carry", out)
         self.assertIn(f"ok     healthy, waiting for models: {len(SERVICES.split()) - 1} of {len(SERVICES.split())} services up, and embed running, waiting for its model", out)
         self.assertIn(f"waiting for models: embed needs {EMBED} in {self.dir}/deploy/models, which nothing here can fetch: copy the file there and it starts by itself", out)
-        self.assertIn("Argus Arena 9.9.9 runs:", out)
+        self.assertIn("Arena 9.9.9 runs:", out)
         self.assertIn("Installed: healthy, waiting for models (embed; above).", out)
         self.assertIn(f"the embedding server waits for its model: bring {EMBED} into", out)
         # status names it and is not failed by it; repair does not recreate it (nothing would change).
@@ -1702,22 +1707,22 @@ class InstallerTests(unittest.TestCase):
                         os.symlink(f, target)
         return f"{base / 'bin'}:{base / 'sys'}"
 
-    def test_Without_curl_the_app_and_Argus_are_asked_from_the_stacks_network(self):
+    def test_Without_curl_the_app_and_CodeIntel_are_asked_from_the_stacks_network(self):
         deploy = self.old_install()
         # No VERSION and no record: the version comes from the running app, asked without curl.
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"PATH": self.no_curl_path()})
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("curl is not installed: the app and Argus are asked their version from a helper container", r.stdout)
+        self.assertIn("curl is not installed: the app and code-intel are asked their version from a helper container", r.stdout)
         self.assertIn("from 5.2.0 (the running app (/api/info)) to 9.9.9", r.stdout)
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
-        self.assertIn("ok     argus: 9.9.9 (its own metrics)", r.stdout)
+        self.assertIn("ok     code-intel: 9.9.9 (its own metrics)", r.stdout)
         asks = [c for c in self.r.calls() if c[1:2] == ["run"] and "arena_default" in c]
         self.assertTrue(asks)
         self.assertFalse([c for c in self.r.calls() if c[0] == "curl"])
         for c in asks:
             self.assertEqual(c[c.index("--pull") + 1], "never")
             # The admin token goes in the environment (-e ASK_TOKEN), never on a command line.
-            self.assertNotIn("old-argus", " ".join(c))
+            self.assertNotIn("old-code-intel", " ".join(c))
         self.assertIn("ASK_TOKEN", [c for c in asks if c[-1].endswith("/admin/metrics")][0])
         self.assertTrue((deploy / ".env").read_text().startswith(OLD_ENV))
 

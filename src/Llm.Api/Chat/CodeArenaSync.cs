@@ -255,7 +255,7 @@ public static partial class CodeArenaSync
     /// Worked out at most once in <see cref="SettingsFor"/> per person, however many of their Code Arenas ask.
     /// </summary>
     private static async Task<IResult> SettingsAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes,
+        IOptions<CodeIntelOptions> codeIntelOptions, CodeIntelMcp codeIntel, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes,
         AppDbContext db, IMemoryCache cache)
     {
         var (me, refusal) = await CallerAsync(http, people);
@@ -267,7 +267,7 @@ public static partial class CodeArenaSync
         var stamp = await cache.GetOrCreateAsync(("code-arena-settings", me.Id), async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = SettingsFor;
-            var config = await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, toolModes, ct);
+            var config = await ChatEndpoints.ConfigForAsync(me, registry, access, policy, codeIntelOptions, codeIntel, models, small, chat, toolModes, ct);
             var skills = await SkillsForAsync(me, registry, access, db, ct);
             var said = JsonSerializer.SerializeToUtf8Bytes(new { config, skills }, JsonSerializerOptions.Web);
             return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(said))[..16];
@@ -366,10 +366,10 @@ public static partial class CodeArenaSync
     /// shows which models are loaded and see pictures, the deployment's thinking levels and default, and its links to GitLab.
     /// </summary>
     private static async Task<IResult> ConfigAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes)
+        IOptions<CodeIntelOptions> codeIntelOptions, CodeIntelMcp codeIntel, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes)
     {
         var (me, refusal) = await CallerAsync(http, people);
-        return me is null ? refusal! : Results.Ok(await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, toolModes, http.RequestAborted));
+        return me is null ? refusal! : Results.Ok(await ChatEndpoints.ConfigForAsync(me, registry, access, policy, codeIntelOptions, codeIntel, models, small, chat, toolModes, http.RequestAborted));
     }
 
     /// <summary>

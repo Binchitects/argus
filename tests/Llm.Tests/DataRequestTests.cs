@@ -112,7 +112,7 @@ public sealed class DataRequestTests(AppFixture app)
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (id, name, password, person) = await PersonAsync(f, admin);
-        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var sent = await person.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "My flat is at 12 Elm Street." });
         await sent.Content.ReadAsStringAsync();
         await StatusAssert.Is(HttpStatusCode.Created, await person.PostAsync("/api/account/memories", new { text = "Lives on Elm Street." }));

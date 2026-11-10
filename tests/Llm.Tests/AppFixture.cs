@@ -43,7 +43,7 @@ public sealed class AppFixture : IAsyncLifetime
 
     public WebApplicationFactory<Program> Factory { get; private set; } = null!;
     public FakeGateway Gateway { get; } = new();
-    public FakeArgus Argus { get; } = new();
+    public FakeCodeIntel CodeIntel { get; } = new();
     public FakeModel Model { get; } = new();
     public FakeMcp Mcp { get; } = new();
     public FakeEngine Engine { get; } = new();
@@ -225,11 +225,11 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Notifications:Watch", "false");
             // Tests send many messages a minute; the safeguards' own tests set the limit.
             b.UseSetting("Safeguards:MessagesPerMinute", "0");
-            b.UseSetting("Argus:Url", "http://argus:7700");
-            b.UseSetting("Argus:AdminToken", FakeArgus.Token);
+            b.UseSetting("CodeIntel:Url", "http://code-intel:7700");
+            b.UseSetting("CodeIntel:AdminToken", FakeCodeIntel.Token);
             b.UseSetting("Chat:DefaultModel", "Qwen3.8-Flash-Next");
             b.UseSetting("Chat:ThinkingPresets", "xhigh:Deep think,low:Quick,off:No thinking");
-            b.UseSetting("Chat:ArgusChatToken", FakeArgus.ChatToken);
+            b.UseSetting("Chat:CodeIntelChatToken", FakeCodeIntel.ChatToken);
             // Every tool whole, unless a test sends tools on demand: the default set grows with each new tool.
             b.UseSetting("Chat:ToolTextChars", "0");
             b.UseSetting("Gateway:MasterKey", "sk-master-for-tests");
@@ -273,8 +273,8 @@ public sealed class AppFixture : IAsyncLifetime
                     // The models a test asks for, as routes beside the app's own.
                     s.AddSingleton(routes);
                 }
-                s.AddHttpClient<Llm.Api.Operations.ArgusAdmin>().ConfigurePrimaryHttpMessageHandler(() => Argus);
-                s.AddHttpClient<Llm.Api.Chat.ArgusMcp>().ConfigurePrimaryHttpMessageHandler(() => Argus);
+                s.AddHttpClient<Llm.Api.Operations.CodeIntelAdmin>().ConfigurePrimaryHttpMessageHandler(() => CodeIntel);
+                s.AddHttpClient<Llm.Api.Chat.CodeIntelMcp>().ConfigurePrimaryHttpMessageHandler(() => CodeIntel);
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(AnswerCache.Client).ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);

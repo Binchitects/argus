@@ -36,7 +36,7 @@ public sealed class ToolTlsTests(AppFixture app)
     private static JsonElement Event(List<JsonElement> events, string type) => events.First(e => e.GetProperty("type").GetString() == type);
 
     private static async Task<Guid> ChatAsync(TestBrowser b, string toolId) =>
-        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
 
     private static async Task<JsonElement> RowAsync(TestBrowser admin, string toolId) =>
         (await admin.JsonAsync(await admin.GetAsync("/api/admin/tools"))).EnumerateArray().Single(t => t.GetProperty("id").GetString() == toolId).GetProperty("server");

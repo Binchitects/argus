@@ -17,7 +17,7 @@ public sealed record KeyHolder(string Hash, Guid UserId, string Email, string Us
 
 /// <summary>
 /// One answer to "whose is this key?" for every part of the app that takes an API key (the answers' line, the answer
-/// cache, Argus's key check, Arena MCP, speech, a key's own requests at once): read from gateway.api_keys and believed
+/// cache, code-intel's key check, Arena MCP, speech, a key's own requests at once): read from gateway.api_keys and believed
 /// for ten seconds (LiteLLM's own key cache's time), forgotten at once on every replica when a key is made, changed or
 /// revoked (the topic keys:changed). A key the app does not know has no holder. Whether the person is disabled, or has
 /// no API access, each caller asks of the person now.

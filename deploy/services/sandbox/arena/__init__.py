@@ -2,11 +2,11 @@
 
     import arena
     arena.tools.search("find a symbol")        # which functions there are, by what they do
-    help(arena.argus.find_symbol)              # its parameters and what it does
-    hits = arena.argus.find_symbol(name="DecodeFrame")
+    help(arena.code-intel.find_symbol)              # its parameters and what it does
+    hits = arena.code-intel.find_symbol(name="DecodeFrame")
 
 Each function is one of the tools the chat has on in this answer, grouped by where it comes from (arena.web,
-arena.argus, arena.knowledge, ...). A call goes to the chat, which runs it as the person: their rights, the
+arena.code-intel, arena.knowledge, ...). A call goes to the chat, which runs it as the person: their rights, the
 safeguards, the record of tool calls. What a call returns is the tool's result: a dict or a list when it is JSON,
 else its text. A call the tool refuses raises arena.ToolError with its words. Only what the program prints (and
 the files it writes) goes back to the chat: filter, join and sum here, and print what matters.

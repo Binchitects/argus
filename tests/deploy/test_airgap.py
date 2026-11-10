@@ -45,8 +45,8 @@ class AirgapTests(unittest.TestCase):
         s.write("config/traefik/routes.yml", "http: {}\n")
         s.write("config/traefik/certificate.yml", "tls: {}\n")
         s.write("config/litellm.yaml", "model_list: []\n")
-        s.write("argus-standalone/.env", "ARGUS_KEY=secret\n")
-        s.write("argus-standalone/env-samples/gpu.env", "MODEL=x\n")
+        s.write("code-intel-standalone/.env", "CODE_INTEL_KEY=secret\n")
+        s.write("code-intel-standalone/env-samples/gpu.env", "MODEL=x\n")
         s.write("scripts/__pycache__/x.pyc", "bytecode")
         s.write("old-bundle.tar", "an earlier bundle")
         outside = s.write("alerts.yml", "route: {}\n", base=s.dir)
@@ -114,10 +114,10 @@ class AirgapTests(unittest.TestCase):
         self.pack()
         deploy = {n[len("arena-airgap/deploy/"):] for n in self.members() if n.startswith("arena-airgap/deploy/")}
         for kept in ("docker-compose.yml", "podman.yml", ".env.example", "certs/README.md", "models/.gitkeep", "backups/.gitkeep",
-                     "config/traefik/routes.yml", "config/litellm.yaml", "argus-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
+                     "config/traefik/routes.yml", "config/litellm.yaml", "code-intel-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
             self.assertIn(kept, deploy)
         for left in (".env", ".env.old", "backups/2026-01-01_000000/postgres.sql.gz", "certs/tls.key", "signing/code-signing.key",
-                     "config/traefik/certificate.yml", "argus-standalone/.env", "scripts/__pycache__/x.pyc", "old-bundle.tar", "models/big/Big-00001-of-00002.gguf"):
+                     "config/traefik/certificate.yml", "code-intel-standalone/.env", "scripts/__pycache__/x.pyc", "old-bundle.tar", "models/big/Big-00001-of-00002.gguf"):
             self.assertNotIn(left, deploy)
         # Links are followed: the file goes in, not the link.
         self.assertEqual(self.read("deploy/config/alertmanager.yml"), "route: {}\n")

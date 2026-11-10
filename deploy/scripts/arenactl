@@ -70,7 +70,7 @@ case "$cmd" in
       [[ -f "$run" ]] || { echo "arenactl: no file $run" >&2; exit 2; }
       exec sh "$run" "$cmd" --dir "$DIR" "$@"
     fi
-    [[ $cmd == upgrade ]] && { echo "arenactl: upgrade needs the new release's offline installer: arenactl upgrade argus-arena-VERSION-offline.run" >&2; exit 2; }
+    [[ $cmd == upgrade ]] && { echo "arenactl: upgrade needs the new release's offline installer: arenactl upgrade arena-VERSION-offline.run" >&2; exit 2; }
     installer repair "$@" ;;
   ps) dc ps --format 'table {{.Service}}\t{{.Status}}\t{{.Image}}' ;;
   logs)

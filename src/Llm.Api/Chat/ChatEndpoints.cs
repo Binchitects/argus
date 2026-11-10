@@ -15,16 +15,16 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>
-/// A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.
+/// A new chat. Tools: the tool ids it may call (default: those on in new chats); UseCodeIntel: the code-intelligence tool on or off in that list.
 /// With an assistant, what is not sent comes from the assistant.
 /// </summary>
 /// <param name="Lab">A science lab notebook of this field (LabFields): its instructions and tools unless the request gives them.</param>
-public sealed record NewConversation(string? Thinking = null, bool? UseArgus = null, string? Model = null, string? SystemPrompt = null,
+public sealed record NewConversation(string? Thinking = null, bool? UseCodeIntel = null, string? Model = null, string? SystemPrompt = null,
     double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? AssistantId = null, string? Lab = null);
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
 /// <param name="AssistantId">With this assistant; Guid.Empty takes it away from its assistant.</param>
-public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseArgus = null, string? Model = null,
+public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseCodeIntel = null, string? Model = null,
     string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null,
     Guid? AssistantId = null);
 
@@ -110,8 +110,8 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct) =>
-        Results.Ok(await ConfigForAsync(await Me(p, users), registry, access, policy, argusOptions, argus, models, small, chat, toolModes, ct));
+        IOptions<CodeIntelOptions> codeIntelOptions, CodeIntelMcp codeIntel, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct) =>
+        Results.Ok(await ConfigForAsync(await Me(p, users), registry, access, policy, codeIntelOptions, codeIntel, models, small, chat, toolModes, ct));
 
     /// <summary>
     /// What the chat offers this person: the models they may use (each loaded or not), the thinking levels, their tools and
@@ -120,7 +120,7 @@ public static partial class ChatEndpoints
     /// chat does (toolMode: direct, code or both).
     /// </summary>
     internal static async Task<object> ConfigForAsync(AppUser me, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct)
+        IOptions<CodeIntelOptions> codeIntelOptions, CodeIntelMcp codeIntel, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct)
     {
         var modeOf = await toolModes.ResolverAsync(ct);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
@@ -141,15 +141,15 @@ public static partial class ChatEndpoints
             }),
             presets = ThinkingPresets.Parse(chat.CurrentValue.ThinkingPresets),
             defaultThinking = chat.CurrentValue.DefaultThinking,
-            argus = tools.Any(t => t.Tool.Id == "argus"),
+            codeIntel = tools.Any(t => t.Tool.Id == "code-intel"),
             // The tools this person may use; a chat turns them on and off.
             tools = tools.Select(t => new
             {
                 id = t.Tool.Id, title = ToolRegistry.TitleOf(t), description = ToolRegistry.DescriptionOf(t), icon = t.Tool.Icon,
                 onByDefault = t.Setting.OnByDefault, askFirst = t.Setting.AskFirst,
             }),
-            // For links from Argus's answers to the code (Argus reads the same GitLab).
-            gitlabUrl = argus.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? argusOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
+            // For links from code-intel's answers to the code (code-intel reads the same GitLab).
+            gitlabUrl = codeIntel.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? codeIntelOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
             maxUploadBytes = chat.CurrentValue.MaxUploadBytes,
             imageTypes = Attachments.ImageTypes,
             // When this person's chats compact (percent of the context; 0: only when a message would not fit), and whose choice it is.
@@ -232,7 +232,7 @@ public static partial class ChatEndpoints
             {
                 SystemPrompt = body.SystemPrompt ?? field.Instructions,
                 Tools = body.Tools ?? [.. field.Tools.Where(id => allowed.Any(a => a.Tool.Id == id))],
-                UseArgus = false,
+                UseCodeIntel = false,
             };
         }
         var c = new Conversation { UserId = me.Id, AssistantId = assistant?.Id, Kind = field is null ? null : Conversation.Lab, LabField = field?.Id };
@@ -247,7 +247,7 @@ public static partial class ChatEndpoints
         {
             tools = [.. start.Tools.Where(id => allowed.Any(a => a.Tool.Id == id))];
         }
-        if (ApplyTools(c, tools, body.UseArgus, allowed) is { } refused)
+        if (ApplyTools(c, tools, body.UseCodeIntel, allowed) is { } refused)
         {
             return refused;
         }
@@ -263,8 +263,8 @@ public static partial class ChatEndpoints
     /// <summary>The ids of the tools a chat has on, of those the person may use.</summary>
     private static List<string> OnFor(Conversation c, IReadOnlyList<ToolChoice> allowed) => [.. ToolRegistry.Chosen(c.Tools, allowed).Select(t => t.Tool.Id)];
 
-    /// <summary>A chat's tools from a request: a whole list, and/or Argus switched on or off in it.</summary>
-    private static IResult? ApplyTools(Conversation c, string[]? tools, bool? useArgus, IReadOnlyList<ToolChoice> allowed)
+    /// <summary>A chat's tools from a request: a whole list, and/or code-intel switched on or off in it.</summary>
+    private static IResult? ApplyTools(Conversation c, string[]? tools, bool? useCodeIntel, IReadOnlyList<ToolChoice> allowed)
     {
         if (tools is not null)
         {
@@ -275,13 +275,13 @@ public static partial class ChatEndpoints
             }
             c.Tools = [.. tools.Distinct()];
         }
-        if (useArgus is { } on)
+        if (useCodeIntel is { } on)
         {
             var current = OnFor(c, allowed);
-            current.Remove("argus");
-            if (on && allowed.Any(t => t.Tool.Id == "argus"))
+            current.Remove("code-intel");
+            if (on && allowed.Any(t => t.Tool.Id == "code-intel"))
             {
-                current.Insert(0, "argus");
+                current.Insert(0, "code-intel");
             }
             c.Tools = current;
         }
@@ -463,7 +463,7 @@ public static partial class ChatEndpoints
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             // An arena answer's cost waits for the vote, as its model does: prices would tell the two apart.
             cost = quality is not null && quality.Model(m) != m.Model ? null : m.Cost,
-            noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
+            noAccess = m.Role == "tool" && CodeIntelMcp.IsNoAccess(m.Content),
             feedback = quality?.Feedback(m.Id),
         });
     }
@@ -478,7 +478,7 @@ public static partial class ChatEndpoints
         {
             // A room's: the person's role, its people and its settings (RoomEndpoints).
             room,
-            c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
+            c.Id, c.Title, c.Thinking, tools, useCodeIntel = tools.Contains("code-intel"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace, projectId = c.WorkProjectId,
             // A science lab notebook's field (null: a chat).
@@ -507,10 +507,10 @@ public static partial class ChatEndpoints
         {
             return problem;
         }
-        if (body.Tools is not null || body.UseArgus is not null)
+        if (body.Tools is not null || body.UseCodeIntel is not null)
         {
             var allowed = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
-            if (ApplyTools(c, body.Tools, body.UseArgus, allowed) is { } refused)
+            if (ApplyTools(c, body.Tools, body.UseCodeIntel, allowed) is { } refused)
             {
                 return refused;
             }

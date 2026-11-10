@@ -56,7 +56,7 @@ public sealed class ChatBranchTests(AppFixture app)
     public async Task Editing_a_question_makes_a_branch_and_both_stay()
     {
         var (b, email) = await PersonAsync(app.Factory);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "first" });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "second" });
         var before = Messages(await ChatAsync(b, id));
@@ -87,7 +87,7 @@ public sealed class ChatBranchTests(AppFixture app)
     public async Task Editing_the_first_question_starts_a_new_first_question()
     {
         var (b, email) = await PersonAsync(app.Factory);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "original" });
         var events = await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "rewritten", root = true });
         Assert.Equal(JsonValueKind.Null, events[0].GetProperty("parentId").ValueKind);
@@ -98,8 +98,8 @@ public sealed class ChatBranchTests(AppFixture app)
     public async Task A_message_from_another_chat_cannot_be_a_parent_or_a_branch()
     {
         var (b, _) = await PersonAsync(app.Factory);
-        var one = await NewChatAsync(b, new { useArgus = false });
-        var two = await NewChatAsync(b, new { useArgus = false });
+        var one = await NewChatAsync(b, new { useCodeIntel = false });
+        var two = await NewChatAsync(b, new { useCodeIntel = false });
         await PostStreamAsync(b, $"/api/chat/conversations/{one}/messages", new { content = "hello" });
         var foreign = Messages(await ChatAsync(b, one))[0].GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{two}/messages", new { content = "x", parentId = foreign }));
@@ -110,7 +110,7 @@ public sealed class ChatBranchTests(AppFixture app)
     public async Task A_chats_own_instructions_and_parameters_reach_the_model()
     {
         var (b, email) = await PersonAsync(app.Factory);
-        var id = await NewChatAsync(b, new { useArgus = false, systemPrompt = "Answer in French.", temperature = 0.3, topP = 0.9, maxTokens = 500 });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, systemPrompt = "Answer in French.", temperature = 0.3, topP = 0.9, maxTokens = 500 });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "hi" });
         var body = LastRequest(email).Body;
         Assert.Equal(0.3, body.GetProperty("temperature").GetDouble());
@@ -174,7 +174,7 @@ public sealed class ChatBranchTests(AppFixture app)
         var (other, _) = await PersonAsync(f);
         await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/attachments/{imageId}/content"));
 
-        var seeing = await NewChatAsync(b, new { useArgus = false, model = "Seeing-Model" });
+        var seeing = await NewChatAsync(b, new { useCodeIntel = false, model = "Seeing-Model" });
         await PostStreamAsync(b, $"/api/chat/conversations/{seeing}/messages", new { content = "what is this?", attachments = new[] { imageId } });
         var (body, _) = LastRequest(email);
         Assert.Equal("Seeing-Model", body.GetProperty("model").GetString());
@@ -182,7 +182,7 @@ public sealed class ChatBranchTests(AppFixture app)
         Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
         Assert.StartsWith("data:image/png;base64,", parts[1].GetProperty("image_url").GetProperty("url").GetString(), StringComparison.Ordinal);
 
-        var blind = await NewChatAsync(b, new { useArgus = false });
+        var blind = await NewChatAsync(b, new { useCodeIntel = false });
         var events = await PostStreamAsync(b, $"/api/chat/conversations/{blind}/messages", new { content = "and this?", attachments = new[] { imageId } });
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "no_vision");
         Assert.Contains("diagram.png", LastRequest(email).Body.GetProperty("messages")[1].GetProperty("content").GetString(), StringComparison.Ordinal);
@@ -210,7 +210,7 @@ public sealed class ChatBranchTests(AppFixture app)
         gateway.Models.Add(new GatewayModel("Long-Answers", 32768, 31744, Vision: false, Tools: true, Thinking: true, null, null, null));
         await using var f = app.Create(app.ConnectionStringFor("answer_" + Guid.NewGuid().ToString("N")[..8]), gateway);
         var (b, email) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false, model = "Long-Answers" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, model = "Long-Answers" });
         // Chosen as long as the model's own (the chat once took it): the request asks for half the context at most, and the
         // budget keeps no more for it, so each message still reads the ones before it.
         using (var scope = f.Services.CreateScope())
@@ -242,7 +242,7 @@ public sealed class ChatBranchTests(AppFixture app)
         app.Model.Windows["Small-Window"] = 2048;
         await using var f = app.Create(app.ConnectionStringFor("small_" + Guid.NewGuid().ToString("N")[..8]), gateway);
         var (b, email) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false, tools = Array.Empty<string>(), model = "Small-Window" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, tools = Array.Empty<string>(), model = "Small-Window" });
         var events = new List<JsonElement>();
         foreach (var question in new[] { "first", "second", "third", "fourth", "fifth" })
         {
@@ -268,7 +268,7 @@ public sealed class ChatBranchTests(AppFixture app)
         app.Model.Windows["Small-Window"] = 2048;
         await using var f = app.Create(app.ConnectionStringFor("small_" + Guid.NewGuid().ToString("N")[..8]), gateway);
         var (b, email) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false, tools = Array.Empty<string>(), model = "Small-Window" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, tools = Array.Empty<string>(), model = "Small-Window" });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "first " + new string('q', 900) });
         // A summary written when summaries could be half the window: 1,024 tokens, too long to fold anything into.
         using (var scope = f.Services.CreateScope())
@@ -295,7 +295,7 @@ public sealed class ChatBranchTests(AppFixture app)
         gateway.Models.Add(new GatewayModel("Other-Model", 32768, 4096, Vision: false, Tools: true, Thinking: true, null, null, null));
         await using var f = app.Create(app.ConnectionStringFor("retry_" + Guid.NewGuid().ToString("N")[..8]), gateway);
         var (b, email) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "hi" });
         var events = await PostStreamAsync(b, $"/api/chat/conversations/{id}/regenerate", new { model = "Other-Model", thinking = "off" });
         Assert.Equal("Other-Model", events.First(e => e.GetProperty("type").GetString() == "assistant").GetProperty("model").GetString());
@@ -319,7 +319,7 @@ public sealed class ChatBranchTests(AppFixture app)
         var saved = await b.JsonAsync(await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = "short" }));
         Assert.Equal("short", saved.GetProperty("answerLength").GetString());
 
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "hi" });
         var system = LastRequest(email).Body.GetProperty("messages")[0].GetProperty("content").GetString()!;
         Assert.Contains(Llm.Api.Chat.AnswerLengths.Note("short")!, system, StringComparison.Ordinal);
@@ -386,7 +386,7 @@ public sealed class ChatBranchTests(AppFixture app)
             }
             var chat = await db.Conversations.AsNoTracking().SingleAsync();
             Assert.Equal(messages[^1].Id, chat.CurrentLeafId);
-            // It had Argus off, so it keeps no tools (ChatTools).
+            // It had code-intel off, so it keeps no tools (ChatTools).
             Assert.Equal([], chat.Tools);
         }
     }

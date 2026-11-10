@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Compliance;
 
 /// <summary>The newest attestation of a control's operator part; <paramref name="Due"/> a year after it.</summary>
@@ -760,7 +761,7 @@ public static class ComplianceEndpoints
             string Csv(IEnumerable<IEnumerable<object?>> rows) => string.Join("\n", rows.Select(r => string.Join(",", r.Select(Cell)))) + "\n";
 
             Text("README.txt", $"""
-                Compliance evidence from Argus Arena {AppInfo.Current.Version}, made {now:yyyy-MM-dd HH:mm} UTC by {p.Identity?.Name}.
+                Compliance evidence from {Brand.Product} {AppInfo.Current.Version}, made {now:yyyy-MM-dd HH:mm} UTC by {p.Identity?.Name}.
 
                 controls.yaml         each control: the clauses it serves, its documents, tests and checks (docs/compliance/)
                 compliance.json       the controls with their state now and their newest attestation, and every check's result

@@ -291,6 +291,29 @@ internal sealed class Config
     /// <summary>https://code-intel.DOMAIN/mcp, or the address given; null for an Arena reached by an IP address or as localhost, which has no such name.</summary>
     public string? CodeIntelMcpUrl => CodeIntelUrl is { Length: > 0 } a ? a : DeriveCodeIntel(Url);
 
+    /// <summary>
+    /// The code-intelligence service's MCP address the Arena announces (/api/info's codeIntelUrl: its name under the domain is
+    /// the Arena's choice, argus on one from before 8.0); null when it has none or does not answer within a few seconds.
+    /// </summary>
+    public static async Task<string?> AnnouncedCodeIntelAsync(HttpClient http, string? arenaUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(arenaUrl) || !Uri.TryCreate(arenaUrl.TrimEnd('/') + "/api/info", UriKind.Absolute, out var info))
+        {
+            return null;
+        }
+        using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        within.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var res = await http.GetAsync(info, within.Token);
+            return res.IsSuccessStatusCode && Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token)) is { } body ? body.Str("codeIntelUrl") : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     public static string? DeriveCodeIntel(string? url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u) || u.HostNameType != UriHostNameType.Dns

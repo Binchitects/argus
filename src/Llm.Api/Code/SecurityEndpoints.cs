@@ -10,6 +10,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 public sealed record NewSecurityScan(string Project, string? Ref = null);
@@ -19,7 +20,7 @@ public sealed record SecurityFindingChange(string State, string? Why = null, Dat
 
 /// <summary>
 /// Security reviews of a repository at a ref (Code → Security): started by a person who may run reviews, read as them
-/// through Argus (read-only), seen by them and by reviews admins; each finding fixed, accepted as a risk (why and until
+/// through code-intel (read-only), seen by them and by reviews admins; each finding fixed, accepted as a risk (why and until
 /// when) or marked wrong.
 /// </summary>
 public static class SecurityEndpoints
@@ -70,13 +71,13 @@ public static class SecurityEndpoints
         return s.UserId == me.Id || await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct) ? s : null;
     }
 
-    private static async Task<IResult> StartAsync(NewSecurityScan body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, SecurityReview engine,
+    private static async Task<IResult> StartAsync(NewSecurityScan body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, SecurityReview engine,
         Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus is not set up here: it reads the code for security reviews.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not set up here: it reads the code for security reviews.");
         }
         var project = (body.Project ?? "").Trim().Trim('/');
         if (project.Length is 0 or > 500)
@@ -211,7 +212,7 @@ public static class SecurityEndpoints
         }).ToList();
         var run = new JsonObject
         {
-            ["tool"] = new JsonObject { ["driver"] = new JsonObject { ["name"] = "Argus Arena security review", ["informationUri"] = "https://github.com/Binchitects/argus", ["rules"] = new JsonArray([.. rules]) } },
+            ["tool"] = new JsonObject { ["driver"] = new JsonObject { ["name"] = $"{Brand.Product} security review", ["informationUri"] = "https://github.com/Binchitects/argus", ["rules"] = new JsonArray([.. rules]) } },
             ["results"] = new JsonArray([.. results]),
         };
         if (s.Commit is not null)

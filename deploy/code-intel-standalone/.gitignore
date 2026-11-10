@@ -12,8 +12,8 @@ backups/
 # Whatever an operator drops here (a GitLab CA, a TLS key) belongs to their
 # environment. The README keeps the directory in a fresh clone, so the bind
 # mount never has to be created by Docker as an empty root-owned directory.
-config/argus/tls/*
-!config/argus/tls/README.md
+config/code-intel/tls/*
+!config/code-intel/tls/README.md
 
 Thumbs.db
 .DS_Store

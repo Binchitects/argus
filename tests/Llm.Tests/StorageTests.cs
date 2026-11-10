@@ -68,7 +68,7 @@ public sealed class StorageTests(AppFixture app)
 
     private static async Task<Guid> ChatAsync(TestBrowser b, string text, Guid[]? attachments = null)
     {
-        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text, attachments });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         await res.Content.ReadAsStringAsync();
@@ -576,7 +576,7 @@ public sealed class StorageTests(AppFixture app)
         var (ann, _, _) = await PersonAsync(f, admin);
         await StatusAssert.Is(HttpStatusCode.OK, await UploadAsync(ann, "full.png", Png(1024 * 1024), "image/png"));
 
-        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var before = app.Model.ImageRequests.Count;
         var res = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = """Draw: [call generate_image {"prompt":"A red fox in the snow"}]""" });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
@@ -617,7 +617,7 @@ public sealed class StorageTests(AppFixture app)
         var (ann, annId, annName) = await PersonAsync(f, admin);
         await StatusAssert.Is(HttpStatusCode.OK, await UploadAsync(ann, "full.png", Png(1024 * 1024), "image/png"));
 
-        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { tool } }))).GetProperty("id").GetGuid();
+        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { tool } }))).GetProperty("id").GetGuid();
         var res = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"Make it: [call {function} {arguments}]" });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         var result = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
@@ -879,8 +879,8 @@ public sealed class StorageTests(AppFixture app)
             var files = page.GetProperty("files");
             Assert.Equal(1, files.GetProperty("total").GetProperty("count").GetInt64());
             Assert.Equal("upload", files.GetProperty("groups")[0].GetProperty("origin").GetString());
-            Assert.Equal(5_000_000, page.GetProperty("argus").GetProperty("report").GetProperty("index_bytes").GetInt64());
-            Assert.Equal("dotnet-docs", page.GetProperty("argus").GetProperty("packs")[0].GetProperty("name").GetString());
+            Assert.Equal(5_000_000, page.GetProperty("code-intel").GetProperty("report").GetProperty("index_bytes").GetInt64());
+            Assert.Equal("dotnet-docs", page.GetProperty("code-intel").GetProperty("packs")[0].GetProperty("name").GetString());
             var metrics = page.GetProperty("metrics");
             Assert.Equal(1_250_000, metrics.GetProperty("bytes").GetInt64());
             Assert.Equal("30 days", metrics.GetProperty("keeps").GetString());
@@ -896,12 +896,12 @@ public sealed class StorageTests(AppFixture app)
             var trends = page.GetProperty("trends");
             Assert.Equal(5, trends.GetProperty("files:upload")[0][1].GetInt64());
             Assert.True(trends.GetProperty("db:" + appDb)[0][1].GetInt64() > 0);
-            Assert.Equal(5_000_000 + 20_000_000 + 3_000_000 + 1000, trends.GetProperty("argus")[0][1].GetInt64());
+            Assert.Equal(5_000_000 + 20_000_000 + 3_000_000 + 1000, trends.GetProperty("code-intel")[0][1].GetInt64());
             Assert.Equal(1_250_000, trends.GetProperty("metrics")[0][1].GetInt64());
 
-            // Measure again: the folders now, and Argus's too.
+            // Measure again: the folders now, and code-intel's too.
             await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync("/api/admin/storage?fresh=true"));
-            Assert.Contains(app.Argus.Calls, c => c.PathAndQuery == "/admin/storage?fresh");
+            Assert.Contains(app.CodeIntel.Calls, c => c.PathAndQuery == "/admin/storage?fresh");
 
             // Again the same day: today's row is measured again, not doubled.
             await f.Services.GetRequiredService<StorageWatch>().SampleAsync(CancellationToken.None);

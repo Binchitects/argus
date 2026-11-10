@@ -1,4 +1,4 @@
-# Argus Arena: the deployment
+# Farzan Arena: the deployment
 
 From the repository's root, on Linux:
 

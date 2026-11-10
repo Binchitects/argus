@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""arenactl: Argus Arena's one command, from a checkout of its repository.
+"""arenactl: the product's one command, from a checkout of its repository.
 
     ./arenactl doctor [--for TASK]       what this machine has for a task, and how to get the rest
     ./arenactl install [options]         install from this checkout: builds the images, then the installer
@@ -8,10 +8,10 @@
     ./arenactl build [--with A,B] [--without A,B] [--all]   the stack's images (built and pulled)
     ./arenactl code-arena [RID ...] [--offline]             Code Arena's packages for each system, in dist/
     ./arenactl deps [--arch amd64|arm64]                    Docker, Compose and NVIDIA's toolkit, for a bundle
-    ./arenactl bundle [--with-deps] [--models] [--packs]    the offline installer: dist/argus-arena-VERSION-offline.run
+    ./arenactl bundle [--with-deps] [--models] [--packs]    the offline installer: dist/arena-VERSION-offline.run
     ./arenactl cert|sign|backup|restore|hosts|kube [args]   the operator's scripts, for an installation
     ./arenactl check NAME [args]          the live checks (functional, compliance, recovery, gpu, ...)
-    ./arenactl test [SUITE ...]           the test suites (app, code-arena, argus, web, deploy)
+    ./arenactl test [SUITE ...]           the test suites (app, code-arena, code-intel, web, deploy)
     ./arenactl scripts                    every script in the repository, by what it is for
 
 Python 3.8 or newer and nothing else to install for itself: on Windows, `python arenactl ...`.
@@ -39,6 +39,10 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+# The product's name people read: PRODUCT_NAME, else branding.env at the repository's root.
+_brand = {k: v.strip() for k, _, v in (l.partition("=") for l in (ROOT / "branding.env").read_text(encoding="utf-8").splitlines()
+          if l and not l.startswith("#"))} if (ROOT / "branding.env").exists() else {}
+PRODUCT = os.environ.get("PRODUCT_NAME") or _brand.get("PRODUCT_NAME") or "Farzan Arena"
 DEPLOY = ROOT / "deploy"
 SCRIPTS = DEPLOY / "scripts"
 TOOLS = ROOT / "tools"
@@ -49,7 +53,7 @@ RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm6
 DOTNET_SDK_IMAGE = "mcr.microsoft.com/dotnet/sdk:10.0"
 NODE_IMAGE = "node:22-alpine"
 # The secrets compose insists on, as placeholders: an image never depends on them (make-installer.sh does the same).
-PLACEHOLDERS = ["APP_KEY", "DB_PASSWORD", "GATEWAY_KEY", "ENGINE_KEY", "ARGUS_KEY"]
+PLACEHOLDERS = ["APP_KEY", "DB_PASSWORD", "GATEWAY_KEY", "ENGINE_KEY", "CODE_INTEL_KEY"]
 
 
 # ----------------------------------------------------------------------------- output
@@ -190,7 +194,7 @@ def free_bytes(path: Path) -> int:
 def linux_only(what: str) -> None:
     if platform.system() != "Linux":
         raise Stop(f"{what} runs on Linux, where the stack runs (this is {platform.system()}): copy the bundle there "
-                   f"(./arenactl bundle makes it) and run it with sh argus-arena-{VERSION}-offline.run install", 3)
+                   f"(./arenactl bundle makes it) and run it with sh arena-{VERSION}-offline.run install", 3)
 
 
 # ----------------------------------------------------------------------------- the container engine
@@ -374,7 +378,7 @@ def doctor_checks(task: str, engine: Engine) -> list[tuple[str, bool, str, bool]
 def cmd_doctor(a) -> int:
     engine = Engine()
     rows = doctor_checks(a.for_, engine)
-    say(f"Argus Arena {VERSION}, for {a.for_}: {platform.system()} {platform.machine()}")
+    say(f"{PRODUCT} {VERSION}, for {a.for_}: {platform.system()} {platform.machine()}")
     bad = 0
     for what, ok, detail, needed in rows:
         mark = "ok     " if ok else ("MISSING" if needed else "note   ")
@@ -430,8 +434,8 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
             step("the LMDeploy engine's image (lmdeploy-build.yml, from PyPI)")
             attempt("lmdeploy", lambda: compose.run("build", "lmdeploy", extra=("lmdeploy-build.yml",)))
         step(f"the release's own images: {len(built)} built ({engine.name} compose build)")
-        if "argus" in built:
-            # Argus's sqlite-vec, fetched here and checked against its pinned SHA-256: the image takes this copy, so its
+        if "code-intel" in built:
+            # code-intel's sqlite-vec, fetched here and checked against its pinned SHA-256: the image takes this copy, so its
             # build reads nothing from PyPI (a build container over a slow link failed it, curl 56).
             run([str(ROOT / "tools" / "fetch-sqlite-vec.sh"), "linux-arm64" if platform.machine() in ("aarch64", "arm64") else "linux-x64"])
         if built:
@@ -473,7 +477,7 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
 def cmd_build(a) -> int:
     engine = Engine(a.engine)
     profiles = choose_features(a.with_, a.without, a.all)
-    say(f"Building Argus Arena {VERSION}'s images with {engine.need()}; features: {', '.join(profiles)}")
+    say(f"Building {PRODUCT} {VERSION}'s images with {engine.need()}; features: {', '.join(profiles)}")
     build_images(engine, profiles, pull=not a.no_pull, services=a.services.split(",") if a.services else None)
     say("Built.")
     return 0
@@ -482,7 +486,7 @@ def cmd_build(a) -> int:
 # ----------------------------------------------------------------------------- Code Arena
 README = """Code Arena {version} for {system}
 
-An IDE in your browser around a coding agent, on your company's Argus Arena:
+An IDE in your browser around a coding agent, on your company's {product}:
 your project's files, an editor, search, terminals and the agent's chat, on
 your own machine. Nothing else needs to be installed.
 
@@ -550,7 +554,7 @@ def readme(rid: str, exe: str) -> str:
                    "  code-arena.exe is for terminals. For the IDE from a double-click, the desktop or the\n"
                    "  Start menu, use code-arena-ide.exe (make a shortcut to it): it starts code-arena.exe\n"
                    "  beside it with no console window.")
-    return README.format(version=VERSION, system=system, install=install, exe=exe)
+    return README.format(version=VERSION, system=system, install=install, exe=exe, product=PRODUCT)
 
 
 def dotnet_cmd(engine: Engine) -> tuple[list[str], str]:
@@ -844,9 +848,9 @@ def cmd_bundle(a) -> int:
         raise Stop("the bundle needs:\n  " + "\n  ".join(missing) + "\n(./arenactl doctor --for bundle)", 3)
     linux_only("Making the bundle")
     # Packs are built, not kept in git: a fresh checkout has none, and a bundle "with the packs" would have none.
-    if a.packs and not list((ROOT / "packs").glob("*.arguspack")):
-        raise Stop(f"--packs: {ROOT / 'packs'} holds no knowledge packs (*.arguspack): they are built, not in git. Copy them in "
-                   "(or argus pack install them there) first, or make the bundle without --packs", 2)
+    if a.packs and not list((ROOT / "packs").glob("*.kpack")):
+        raise Stop(f"--packs: {ROOT / 'packs'} holds no knowledge packs (*.kpack): they are built, not in git. Copy them in "
+                   "(or code-intel pack install them there) first, or make the bundle without --packs", 2)
     profiles = choose_features(None, a.without, all_=True)
     if not a.no_build and not a.dry_run:
         # Every feature's image, each that can be built or pulled here. An optional feature whose image cannot be (the
@@ -937,7 +941,7 @@ def cmd_installer(a) -> int:
         else:
             profiles = choose_features(option(rest, "--with"), option(rest, "--without"), cpu_only="--cpu-only" in rest)
         if not a.no_build and not dry:
-            say(f"{a.command.capitalize()} Argus Arena {VERSION} from this checkout ({ROOT}); its images first, features: {', '.join(profiles)}")
+            say(f"{a.command.capitalize()} {PRODUCT} {VERSION} from this checkout ({ROOT}); its images first, features: {', '.join(profiles)}")
             build_images(engine, profiles)
         stage = Path(tempfile.mkdtemp(prefix="arenactl-bundle-", dir=os.environ.get("TMPDIR") or "/var/tmp"))
         try:
@@ -948,7 +952,7 @@ def cmd_installer(a) -> int:
             if release_tag_missing():
                 mk.append("--no-known")
             run(mk, quiet=True)
-            top = next(stage.glob("argus-arena-*"))
+            top = next(stage.glob("arena-*"))
             return run(["bash", str(top / "installer.sh"), a.command, *rest], check=False, quiet=True)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
@@ -991,7 +995,7 @@ CHECKS = {
     "fp4": ("fp4-bench.py", "a model's FP4, FP8 and BF16 copies side by side: memory, speed, quality"),
     "fp4-h200": ("fp4-h200.sh", "FP4 against FP8 on the H200 host, every set its library has"),
     "qwen-code": ("qwen-code-realworld.py", "Qwen Code against the gateway on real tasks"),
-    "argus": ("../../tools/smoke_test.py", "Argus's MCP serves agents: auth, tools, packs, the index (--url, --token)"),
+    "code-intel": ("../../tools/smoke_test.py", "code-intel's MCP serves agents: auth, tools, packs, the index (--url, --token)"),
 }
 
 
@@ -1023,10 +1027,10 @@ def cmd_check(a) -> int:
 
 # ----------------------------------------------------------------------------- tests
 def cmd_test(a) -> int:
-    suites = a.suites or ["app", "code-arena", "argus", "web", "deploy"]
+    suites = a.suites or ["app", "code-arena", "code-intel", "web", "deploy"]
     engine = Engine()
     dotnet, base = (["dotnet"], "/") if any(version_of(x) >= (10,) for x in (output(["dotnet", "--list-sdks"]) or "").splitlines()) else ([str(TOOLS / "dn")], "/repo")
-    projects = {"app": "tests/Llm.Tests", "code-arena": "tests/CodeArena.Tests", "argus": "tests/Argus.Tests"}
+    projects = {"app": "tests/Llm.Tests", "code-arena": "tests/CodeArena.Tests", "code-intel": "tests/CodeIntel.Tests"}
     failed = []
     for s in suites:
         step(f"tests: {s}")
@@ -1039,7 +1043,7 @@ def cmd_test(a) -> int:
         elif s == "deploy":
             rc = run([sys.executable, "-m", "unittest", "discover", "-q", *(["-k", a.filter] if a.filter else [])], cwd=ROOT / "tests" / "deploy", check=False)
         else:
-            raise Stop(f"no test suite {s} (app, code-arena, argus, web, deploy)", 2)
+            raise Stop(f"no test suite {s} (app, code-arena, code-intel, web, deploy)", 2)
         if rc:
             failed.append(s)
     say("All passed." if not failed else f"Failed: {', '.join(failed)}")
@@ -1090,7 +1094,7 @@ def docker_restart_notice(sudo: list[str], yes: bool) -> None:
     warn("THIS RESTARTS DOCKER. Before it goes on, know that:")
     for line in (
         f"every running container stops: {len(names)} now" + (f" ({', '.join(names[:12])}{', ...' if len(names) > 12 else ''})" if names else ""),
-        "those with a restart policy start again by themselves (Argus Arena's do): the site, chats in progress and "
+        "those with a restart policy start again by themselves (the stack's do): the site, chats in progress and "
         "engines are cut off until then, and the models load again (a minute or more for large ones)",
         f"these have no restart policy and STAY STOPPED until started by hand: {', '.join(stay)}" if stay else
         "every running container has a restart policy",
@@ -1209,7 +1213,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--refresh", action="store_true", help="fetch again what is there already")
     s.set_defaults(func=cmd_deps)
 
-    s = sub.add_parser("bundle", help="the offline installer, dist/argus-arena-VERSION-offline.run")
+    s = sub.add_parser("bundle", help="the offline installer, dist/arena-VERSION-offline.run")
     s.add_argument("--with-deps", action="store_true", help="Docker, Compose and NVIDIA's toolkit inside it, installed from it where missing")
     s.add_argument("--models", action="store_true", help="the models too")
     s.add_argument("--no-chat-models", action="store_true", help="with --models: every model but the chat models (each site brings its own)")
@@ -1243,7 +1247,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("rest", nargs=argparse.REMAINDER)
     s.set_defaults(func=cmd_check)
 
-    s = sub.add_parser("test", help="the test suites: app, code-arena, argus, web, deploy")
+    s = sub.add_parser("test", help="the test suites: app, code-arena, code-intel, web, deploy")
     s.add_argument("suites", nargs="*")
     s.add_argument("--filter")
     s.set_defaults(func=cmd_test)

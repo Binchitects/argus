@@ -1,22 +1,22 @@
-# Continue -> Argus.  NOT EXECUTED on this machine; transcribed from Continue's
+# Continue -> code-intel.  NOT EXECUTED on this machine; transcribed from Continue's
 # documented MCP configuration. Merge into ~/.continue/config.yaml.
 #
-# HTTP form: the platform's Argus, with your Arena API key (Your account ->
-# API key, sk-...). Argus answers as your GitLab account; it takes no GitLab token.
+# HTTP form: the platform's code-intel, with your Arena API key (Your account ->
+# API key, sk-...). code-intel answers as your GitLab account; it takes no GitLab token.
 
 mcpServers:
-  - name: argus
+  - name: code-intel
     type: streamable-http
-    url: https://argus.llm.localhost/mcp
+    url: https://code-intel.llm.localhost/mcp
     requestOptions:
       headers:
         Authorization: Bearer <your API key>
 
-# stdio form, for a local Argus instead: it runs as a child process and
-# resolves your own GitLab token in ARGUS_TOKEN once, at startup.
+# stdio form, for a local code-intel instead: it runs as a child process and
+# resolves your own GitLab token in CODE_INTEL_TOKEN once, at startup.
 #
-#  - name: argus
-#    command: argus
-#    args: ["serve", "--config", "/etc/argus/config.yaml", "--stdio"]
+#  - name: code-intel
+#    command: code-intel
+#    args: ["serve", "--config", "/etc/code-intel/config.yaml", "--stdio"]
 #    env:
-#      ARGUS_TOKEN: <gitlab-pat>
+#      CODE_INTEL_TOKEN: <gitlab-pat>

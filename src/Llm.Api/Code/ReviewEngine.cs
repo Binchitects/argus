@@ -11,10 +11,11 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>
-/// Reviews a merge request (or what one ref has over another) with the model, as the person who asked: Argus reads the
+/// Reviews a merge request (or what one ref has over another) with the model, as the person who asked: code-intel reads the
 /// change with their read-only access (mr_get, mr_diff, ci_status, compare_refs); each file (or a part of a large one) is
 /// reviewed on its own, its lines numbered as in the new file; every finding is then put to a second pass that tries to
 /// refute it; and a summary gives a walkthrough, a risk and a verdict. The model's requests are the person's, tagged
@@ -74,8 +75,8 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
                 ?? throw new ReviewException("Its person is gone.");
             review.Status = CodeReview.Running;
             await StepAsync(db, review, "Reading the change", ct);
-            var argus = services.GetRequiredService<ArgusMcp>();
-            var session = await argus.ConnectAsync(user.Id, user.Email!, ct);
+            var codeIntel = services.GetRequiredService<CodeIntelMcp>();
+            var session = await codeIntel.ConnectAsync(user.Id, user.Email!, ct);
             if (review.Scope == CodeReview.Repository)
             {
                 await ReviewRepositoryAsync(services, db, session, review, user, ct);
@@ -379,7 +380,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
                 batch.Step = "Looking across the repositories";
                 await db.SaveChangesAsync(ct);
                 var user = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(batch.UserId.ToString()) ?? throw new ReviewException("Its person is gone.");
-                var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(user.Id, user.Email!, ct);
+                var session = await services.GetRequiredService<CodeIntelMcp>().ConnectAsync(user.Id, user.Email!, ct);
                 batch.Links = await LinksAsync(session, [.. reviews.Select(r => r.Project)], ct);
                 batch.Model = await ModelAsync(services, user, ct);
                 batch.Report = (await AskModelAsync(services, batch.Model, user.Email!, CrossPrompt, CrossQuestion(reviews, batch.Links), 2_000,
@@ -405,7 +406,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
     /// <summary>The most pairs of repositories whose links are asked for.</summary>
     public const int MostPairs = 15;
 
-    /// <summary>How the repositories depend on each other, pair by pair, as Argus's dependency_path resolves it: one line a link found.</summary>
+    /// <summary>How the repositories depend on each other, pair by pair, as code-intel's dependency_path resolves it: one line a link found.</summary>
     private static async Task<string> LinksAsync(McpSession session, List<string> projects, CancellationToken ct)
     {
         var lines = new List<string>();
@@ -432,7 +433,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
                 lines.Add($"{answer["direction"] ?? $"{projects[i]} and {projects[j]}"}: {string.Join("; ", steps)}, confidence {best["confidence"]}{(answer["weak"] is not null ? ", weak" : "")}");
             }
         }
-        return lines.Count == 0 ? "No dependency between them that Argus resolved (they may still talk at run time: an API, a queue)." : string.Join('\n', lines);
+        return lines.Count == 0 ? $"No dependency between them that {Brand.CodeIntel} resolved (they may still talk at run time: an API, a queue)." : string.Join('\n', lines);
     }
 
     private static string CrossQuestion(List<CodeReview> reviews, string links)
@@ -582,11 +583,11 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
         }
         try
         {
-            return JsonNode.Parse(text) as JsonObject ?? throw new ReviewException($"Argus's {tool} answered something else.");
+            return JsonNode.Parse(text) as JsonObject ?? throw new ReviewException($"{Brand.CodeIntel}'s {tool} answered something else.");
         }
         catch (JsonException)
         {
-            throw new ReviewException($"Argus's {tool} answered something else.");
+            throw new ReviewException($"{Brand.CodeIntel}'s {tool} answered something else.");
         }
     }
 
@@ -664,7 +665,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
     /// <summary>
     /// What the change adds to the repository's security, with no model: each package version an advisory affects that the
     /// target did not have (deps_check at both ends, when a lock file or a manifest changed), and what the scanners find on
-    /// the lines it adds (scan_at on its files, where the scanners are installed). Neither is there without its Argus tool,
+    /// the lines it adds (scan_at on its files, where the scanners are installed). Neither is there without its code-intel tool,
     /// and the review goes on without it.
     /// </summary>
     private static async Task<(List<ReviewFinding> Packages, List<ReviewFinding> Scanned)> SecurityDeltaAsync(McpSession session, CodeReview review,
@@ -710,7 +711,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
             }
             catch (Exception ex) when (ex is ReviewException or McpException)
             {
-                // No advisories pack, lock files Argus cannot read, or an Argus without the tool: the review goes on with the code.
+                // No advisories pack, lock files code-intel cannot read, or an code-intel without the tool: the review goes on with the code.
             }
         }
         var scanned = new List<ReviewFinding>();

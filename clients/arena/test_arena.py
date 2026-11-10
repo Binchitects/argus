@@ -165,7 +165,7 @@ class Handler(BaseHTTPRequestHandler):
         if not m:
             return self.send(404, {"message": "404 Not Found"})
         project, rest = unquote(m.group(1)), m.group(2)
-        if project not in ("42", "eal/eal-core", "platform/argus-arena"):
+        if project not in ("42", "eal/eal-core", "platform/arena"):
             return self.send(404, {"message": "404 Project Not Found"})
         if rest == "merge_requests/7" and method == "GET":
             return self.send(200, world.mr)
@@ -385,7 +385,7 @@ class Review(Case):
         self.assertEqual(len(self.world.notes), 1)
         note = self.world.notes[0]
         self.assertTrue(note.startswith("Answer to: Merge request !7"))
-        self.assertIn("_Review by Argus Arena (Big-Model) of fedcba98._", note)
+        self.assertIn("_Review by Arena (Big-Model) of fedcba98._", note)
         self.assertIn("#note_901", err)
 
     def test_a_dry_run_prints_the_review_and_posts_nothing(self):
@@ -517,7 +517,7 @@ class ExplainFailure(Case):
         self.assertNotIn("section_", question)
         self.assertNotIn("arena-explain", question)
         self.assertEqual(len(self.world.notes), 1)
-        self.assertIn("_Explanation by Argus Arena (Big-Model) of pipeline #555._", self.world.notes[0])
+        self.assertIn("_Explanation by Arena (Big-Model) of pipeline #555._", self.world.notes[0])
 
     def test_in_a_branch_pipeline_the_explanation_goes_on_the_merge_request_open_from_the_branch(self):
         self.world.open_mrs = [{"iid": 7, "source_branch": "fix/header"}]
@@ -627,7 +627,7 @@ class Template(Case):
         with open(TEMPLATE, encoding="utf-8") as f:
             self.ci = yaml.safe_load(f)
         with open(CLI, "rb") as f:
-            self.world.files[("platform/argus-arena", "clients/arena/arena", "v4.2.0")] = f.read()
+            self.world.files[("platform/arena", "clients/arena/arena", "v4.2.0")] = f.read()
         # A PATH with python3 and mktemp only: no arena installed.
         self.bin = os.path.join(self.tmp, "bin")
         os.mkdir(self.bin)
@@ -655,14 +655,14 @@ class Template(Case):
                          "no stages, variables, default or workflow that would change the including pipeline")
 
     def test_the_review_job_fetches_the_cli_from_arena_project_and_posts_the_review(self):
-        run = self.job("arena-review", ARENA_PROJECT="platform/argus-arena", ARENA_REF="v4.2.0")
+        run = self.job("arena-review", ARENA_PROJECT="platform/arena", ARENA_REF="v4.2.0")
         self.assertEqual(run.returncode, 0, run.stderr)
         fetch = [r for r in self.world.gitlab() if "/repository/files/" in r["path"]]
         self.assertEqual(len(fetch), 1)
-        self.assertEqual(fetch[0]["path"], "/api/v4/projects/platform%2Fargus-arena/repository/files/clients%2Farena%2Farena/raw")
+        self.assertEqual(fetch[0]["path"], "/api/v4/projects/platform%2Farena/repository/files/clients%2Farena%2Farena/raw")
         self.assertEqual(fetch[0]["query"], {"ref": "v4.2.0"})
         self.assertEqual(len(self.world.notes), 1)
-        self.assertIn("Review by Argus Arena (Big-Model)", self.world.notes[0])
+        self.assertIn("Review by Arena (Big-Model)", self.world.notes[0])
 
     def test_the_review_job_runs_a_cli_kept_in_the_repository(self):
         shutil.copy(CLI, os.path.join(self.tmp, "arena-cli"))
@@ -686,11 +686,11 @@ class Template(Case):
         self.assertIn("set ARENA_PROJECT", run.stderr)
 
     def test_the_explain_job_explains_the_failed_jobs_and_posts_only_when_asked(self):
-        run = self.job("arena-explain", ARENA_PROJECT="platform/argus-arena", ARENA_REF="v4.2.0", CI_PIPELINE_ID="555", CI_JOB_ID="103")
+        run = self.job("arena-explain", ARENA_PROJECT="platform/arena", ARENA_REF="v4.2.0", CI_PIPELINE_ID="555", CI_JOB_ID="103")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("Answer to: Pipeline #555", run.stdout)
         self.assertEqual(self.world.notes, [])
-        run = self.job("arena-explain", ARENA_PROJECT="platform/argus-arena", ARENA_REF="v4.2.0", CI_PIPELINE_ID="555", CI_JOB_ID="103",
+        run = self.job("arena-explain", ARENA_PROJECT="platform/arena", ARENA_REF="v4.2.0", CI_PIPELINE_ID="555", CI_JOB_ID="103",
                        ARENA_EXPLAIN_POST="true")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(len(self.world.notes), 1)

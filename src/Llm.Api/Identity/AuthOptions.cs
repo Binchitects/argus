@@ -18,7 +18,7 @@ public sealed class AuthOptions
     /// <summary>Group name other services see for admins (in the OIDC groups claim and forwardAuth's Remote-Groups).</summary>
     public string AdminGroup { get; set; } = "admins";
 
-    /// <summary>Hash-free list of people for Argus (email -> username), rewritten on every change.</summary>
+    /// <summary>Hash-free list of people for code-intel (email -> username), rewritten on every change.</summary>
     public string? DirectoryFile { get; set; }
 
     /// <summary>APP_DATA_KEY: encrypts the key ring at rest. Never change it after the first start.</summary>

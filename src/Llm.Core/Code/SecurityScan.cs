@@ -2,7 +2,7 @@ namespace Llm.Core.Code;
 
 /// <summary>
 /// A security review of a repository at a ref by the model, run by a person with their own read access to the code
-/// (Argus, read-only): the places where data reaches a dangerous call (a query, a command, a path, a fetch, a
+/// (code-intel, read-only): the places where data reaches a dangerous call (a query, a command, a path, a fetch, a
 /// deserialiser, HTML) found with git grep, each traced to its callers and judged; a finding is kept only when it cites
 /// the sink's line as the file has it and its weakness is a CWE the security pack knows, and each is then put to a pass
 /// that tries to refute it. Nothing is written to the code host.
@@ -23,7 +23,7 @@ public sealed class SecurityScan
     public required string Project { get; set; }
     /// <summary>The branch, tag or commit read; null: the default branch.</summary>
     public string? Ref { get; set; }
-    /// <summary>The commit it read, once Argus has said which.</summary>
+    /// <summary>The commit it read, once code-intel has said which.</summary>
     public string? Commit { get; set; }
     public string Status { get; set; } = Queued;
     public string? Step { get; set; }

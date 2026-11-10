@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>The stack's features (deploy/features): which are on, and the app leaving out those that are off.</summary>
@@ -96,14 +97,14 @@ public sealed partial class FeaturesTests(AppFixture app)
     [Fact]
     public async Task The_overview_probes_only_what_the_stack_runs_and_a_picture_server_with_no_model_is_idle()
     {
-        var on = string.Join(",", Features.All.Select(f => f.Id).Where(id => id is not ("argus" or "chat-models")));
+        var on = string.Join(",", Features.All.Select(f => f.Id).Where(id => id is not ("code-intel" or "chat-models")));
         await using var f = app.Create(app.ConnectionStringFor("probes_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
             new Dictionary<string, string?> { ["Features:On"] = on });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var services = (await admin.JsonAsync(await admin.GetAsync("/api/admin/services"))).EnumerateArray()
             .ToDictionary(s => s.GetProperty("name").GetString()!, s => (Ok: s.GetProperty("ok").GetBoolean(), Detail: s.GetProperty("detail").GetString()));
-        // A fresh install without a GitLab, or without a GPU: Argus and the engine run nowhere, so they are not down.
-        Assert.DoesNotContain("Argus", services.Keys);
+        // A fresh install without a GitLab, or without a GPU: code-intel and the engine run nowhere, so they are not down.
+        Assert.DoesNotContain($"{Brand.CodeIntel}", services.Keys);
         Assert.DoesNotContain("Engine", services.Keys);
         Assert.Contains("Model gateway", services.Keys);
         Assert.Contains("Speech", services.Keys);

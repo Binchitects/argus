@@ -1,4 +1,4 @@
-# A throwaway GitLab CE instance for verifying Argus end to end.
+# A throwaway GitLab CE instance for verifying code-intel end to end.
 #
 # This exists to answer questions no unit test can:
 #   * does the service token actually SEE private projects? (the membership=false
@@ -19,7 +19,7 @@
 services:
   gitlab:
     image: gitlab/gitlab-ce:latest
-    container_name: argus-test-gitlab
+    container_name: code-intel-test-gitlab
     hostname: gitlab.test
     # "no", deliberately, and NOT `unless-stopped`.
     #
@@ -38,7 +38,7 @@ services:
     shm_size: 256m
     environment:
       # Must survive GitLab's password-complexity check. A readable passphrase
-      # like "argus-test-root-pw-2026" is REJECTED with "Password must not
+      # like "code-intel-test-root-pw-2026" is REJECTED with "Password must not
       # contain commonly used combinations of words and letters", and the
       # failure is quiet: db/fixtures/production/003_admin.rb gives up, no
       # administrator is created, and the container still reports `healthy`

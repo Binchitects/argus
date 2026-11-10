@@ -530,7 +530,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         // In the group, the member may choose it; while it is not loaded, the answer says so.
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { made.GetProperty("id").GetGuid() } }));
         await EventuallyAsync(() => Task.FromResult(gateway.KeysOf("modelmember@example.test").Single().Models.Count == 0), "the member's key back to every model");
-        var chat = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { model = "tiny-b", useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { model = "tiny-b", useCodeIntel = false }))).GetProperty("id").GetGuid();
         var answer = await (await member.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
         Assert.Contains("tiny-b is not loaded right now", answer, StringComparison.Ordinal);
 
@@ -541,7 +541,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         // still gets the admin's default, which loads when asked (a model that happens to be loaded does not take its place).
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
         await EventuallyAsync(async () => (await ChatModelsAsync(member)).GetValueOrDefault("tiny-b"), "tiny-b loaded for the chat");
-        var fresh = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var fresh = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         await (await member.PostAsync($"/api/chat/conversations/{fresh}/messages", new { content = "which model?" })).Content.ReadAsStringAsync();
         Assert.Equal("Qwen3.8-Flash-Next", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
         Assert.Equal("Qwen3.8-Flash-Next", (await member.JsonAsync(await member.GetAsync("/api/chat/config"))).GetProperty("model").GetString());

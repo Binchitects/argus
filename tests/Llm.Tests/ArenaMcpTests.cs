@@ -90,8 +90,8 @@ public sealed class ArenaMcpTests(AppFixture app)
 
         var session = await ConnectAsync(f, key);
         Assert.Contains(email, session.Instructions, StringComparison.Ordinal);
-        // The tools' own notes come with it: Argus's, as its server says them.
-        Assert.Contains(FakeArgus.Instructions, session.Instructions, StringComparison.Ordinal);
+        // The tools' own notes come with it: code-intel's, as its server says them.
+        Assert.Contains(FakeCodeIntel.Instructions, session.Instructions, StringComparison.Ordinal);
         var tools = await session.ToolsAsync(CancellationToken.None);
         var names = Names(tools);
         Assert.Contains("calculate", names);
@@ -326,7 +326,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Equal(["expression"], found[0]!["parameters"]!["required"]!.AsArray().Select(r => r!.GetValue<string>()));
         Assert.DoesNotContain(found, x => x!["call"]!.GetValue<string>().EndsWith(".current_time", StringComparison.Ordinal));
         (text, _) = await session.CallAsync("search_tools", new JsonObject(), null, CancellationToken.None);
-        Assert.Contains("arena.argus.find_symbol: ", text, StringComparison.Ordinal);
+        Assert.Contains("arena.code-intel.find_symbol: ", text, StringComparison.Ordinal);
 
         // The program calls them, each as the person: what it may call, the result, a refusal for the one that asks first.
         (text, isError) = await session.CallAsync("run_code", new JsonObject
@@ -342,7 +342,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Contains("\"ok\":true", lines[1], StringComparison.Ordinal);
         Assert.Contains("42", lines[1], StringComparison.Ordinal);
         Assert.Contains("There is no function current_time to call from code", lines[2], StringComparison.Ordinal);
-        // Argus, behind its MCP server, answers a program's call as it answers the agent's.
+        // code-intel, behind its MCP server, answers a program's call as it answers the agent's.
         Assert.Contains("\"ok\":true", lines[3], StringComparison.Ordinal);
         Assert.Contains("src/parse.c", lines[3], StringComparison.Ordinal);
         Assert.Equal("calculate, find_symbol", output["calls"]!.GetValue<string>());
@@ -351,7 +351,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         var audit = (await AuditAsync(f)).Where(e => e.GetProperty("action").GetString() == "mcp.call").Select(e => (e.GetProperty("target").GetString(), e.GetProperty("detail").GetString())).ToList();
         Assert.Contains(("code", "run_code"), audit);
         Assert.Contains(("calculator", "calculate"), audit);
-        Assert.Contains(("argus", "find_symbol"), audit);
+        Assert.Contains(("code-intel", "find_symbol"), audit);
 
         // The setup page gives both addresses.
         var info = await b.JsonAsync(await b.GetAsync("/api/account/mcp"));
@@ -372,7 +372,7 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
-    public async Task An_Argus_call_goes_as_the_person_whose_key_it_is()
+    public async Task An_CodeIntel_call_goes_as_the_person_whose_key_it_is()
     {
         await using var f = NewApp();
         var (_, _, email, key) = await PersonAsync(f);
@@ -380,9 +380,9 @@ public sealed class ArenaMcpTests(AppFixture app)
         var (text, isError) = await session.CallAsync("find_symbol", new JsonObject { ["name"] = "ParseHeader" }, null, CancellationToken.None);
         Assert.False(isError);
         Assert.Contains("src/parse.c", text, StringComparison.Ordinal);
-        // Argus was asked as this person, with the chat's token: no GitLab token of theirs needed.
-        Assert.Contains(app.Argus.McpCalls, c => c.Method == "tools/call" && c.Email == email);
-        Assert.Contains(await AuditAsync(f), e => e.GetProperty("action").GetString() == "mcp.call" && e.GetProperty("target").GetString() == "argus"
+        // code-intel was asked as this person, with the chat's token: no GitLab token of theirs needed.
+        Assert.Contains(app.CodeIntel.McpCalls, c => c.Method == "tools/call" && c.Email == email);
+        Assert.Contains(await AuditAsync(f), e => e.GetProperty("action").GetString() == "mcp.call" && e.GetProperty("target").GetString() == "code-intel"
             && e.GetProperty("detail").GetString() == "find_symbol");
     }
 
@@ -439,7 +439,7 @@ public sealed class ArenaMcpTests(AppFixture app)
             var (_, init, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
             Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"initialize took {clock.Elapsed.TotalSeconds:0.0} s");
             Assert.Contains("Slow Desk (it did not answer within 2 seconds)", init.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
-            // The rest are served meanwhile: the built-in tools, and Argus, which started beside the slow server.
+            // The rest are served meanwhile: the built-in tools, and code-intel, which started beside the slow server.
             var names = (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
             Assert.Contains("calculate", names);
             Assert.Contains("find_symbol", names);

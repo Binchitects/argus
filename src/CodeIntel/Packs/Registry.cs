@@ -179,6 +179,41 @@ public static class Registry
     }
 
     /// <summary>The file a link points to (absolute), or null for a plain file or none.</summary>
+    /// <summary>The file name packs had before v8.0, a brand's; only read, to take them under <see cref="PackSuffix"/>.</summary>
+    public const string OldPackSuffix = ".arguspack";
+
+    /// <summary>
+    /// Packs installed before v8.0, NAME.arguspack in <paramref name="destDir"/>, taken as NAME.kpack: a file renamed; a link
+    /// (a pack loaded from the library) made again to its library file's new name, or to the old one while that is still
+    /// there. One there under both names keeps the new. How many it took.
+    /// </summary>
+    public static int AdoptOldNames(string destDir)
+    {
+        if (!Directory.Exists(destDir)) return 0;
+        var taken = 0;
+        foreach (var old in Directory.EnumerateFiles(destDir, "*" + OldPackSuffix).ToList())
+        {
+            var now = old[..^OldPackSuffix.Length] + PackSuffix;
+            if (File.Exists(now) || new FileInfo(now).LinkTarget is not null)
+            {
+                File.Delete(old);
+                continue;
+            }
+            if (LinkedFrom(old) is { } target)
+            {
+                var renamed = target.EndsWith(OldPackSuffix, StringComparison.Ordinal) ? target[..^OldPackSuffix.Length] + PackSuffix : target;
+                File.CreateSymbolicLink(now, File.Exists(renamed) ? renamed : target);
+                File.Delete(old);
+            }
+            else
+            {
+                File.Move(old, now);
+            }
+            taken++;
+        }
+        return taken;
+    }
+
     public static string? LinkedFrom(string path)
     {
         return new FileInfo(path).LinkTarget is { } target ? Path.GetFullPath(target, Path.GetDirectoryName(path)!) : null;

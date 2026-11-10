@@ -63,6 +63,6 @@ ENV SANDBOX_RUN=lean \
     SANDBOX_LEAN_PROJECT=/opt/lab
 
 LABEL org.opencontainers.image.title="arena-lean" \
-      org.opencontainers.image.description="Lean ${LEAN_VERSION} with Mathlib, run as Argus Arena's proof checker"
+      org.opencontainers.image.description="Lean ${LEAN_VERSION} with Mathlib, run as Arena's proof checker"
 
 ENTRYPOINT ["python3", "-I", "/runner.py"]

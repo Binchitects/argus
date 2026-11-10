@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Operations;
 
 /// <summary>
@@ -22,7 +23,7 @@ public sealed class TlsOptions
 /// <summary>
 /// The company CA the whole stack trusts besides the public ones: every HTTP client the app makes (sign-in with the
 /// company's provider, a person's GitLab token linked and used, Fix it, scheduled tasks, knowledge sources), and
-/// through the file it writes beside the directory (<see cref="SharedFile"/>), Argus's API client and git. Code
+/// through the file it writes beside the directory (<see cref="SharedFile"/>), code-intel's API client and git. Code
 /// Studio's workspaces get it with each start. A certificate the system trusts stays trusted; one that is not is
 /// trusted only when its chain leads to this CA and its name and dates are right.
 /// </summary>
@@ -33,7 +34,7 @@ public sealed partial class CompanyCa(IOptionsMonitor<TlsOptions> options, IOpti
     private readonly Lock _gate = new();
     private (string Key, X509Certificate2Collection Cas, string? Problem) _read = ("", [], null);
 
-    /// <summary>Where Argus reads it (ARGUS_GITLAB_CA_EXTRA): beside the directory file both share; null without one.</summary>
+    /// <summary>Where code-intel reads it (CODE_INTEL_GITLAB_CA_EXTRA): beside the directory file both share; null without one.</summary>
     public string? SharedFile => auth.Value.DirectoryFile is { Length: > 0 } d && Path.GetDirectoryName(d) is { Length: > 0 } dir ? Path.Combine(dir, FileName) : null;
 
     /// <summary>The CAs given, from Settings and the install file; none when nothing is given.</summary>
@@ -56,7 +57,7 @@ public sealed partial class CompanyCa(IOptionsMonitor<TlsOptions> options, IOpti
             }
             read = _read = Parse(key, o, file);
         }
-        // Changed: Argus is given it as soon as the app sees it.
+        // Changed: code-intel is given it as soon as the app sees it.
         WriteShared(read.Cas);
         return read;
     }
@@ -84,7 +85,7 @@ public sealed partial class CompanyCa(IOptionsMonitor<TlsOptions> options, IOpti
         return (key, cas, problem);
     }
 
-    /// <summary>The CAs as PEM, for the workspaces and Argus; empty when none is given.</summary>
+    /// <summary>The CAs as PEM, for the workspaces and code-intel; empty when none is given.</summary>
     public string Pem() => Pem(Cas());
 
     private static string Pem(X509Certificate2Collection cas) => string.Concat(cas.Select(c => c.ExportCertificatePem() + "\n"));
@@ -149,11 +150,11 @@ public sealed partial class CompanyCa(IOptionsMonitor<TlsOptions> options, IOpti
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Problem}")]
     private static partial void LogUnreadable(ILogger logger, string problem);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The company CA could not be written for Argus to {Path}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The company CA could not be written for code-intel to {Path}")]
     private static partial void LogNotShared(ILogger logger, Exception ex, string path);
 }
 
-/// <summary>Writes the company CA for Argus at start and whenever Settings change it.</summary>
+/// <summary>Writes the company CA for code-intel at start and whenever Settings change it.</summary>
 public sealed class CompanyCaFile(CompanyCa ca, IOptionsMonitor<TlsOptions> options) : IHostedService, IDisposable
 {
     private IDisposable? _watch;

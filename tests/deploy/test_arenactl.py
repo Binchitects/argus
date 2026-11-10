@@ -301,11 +301,11 @@ class BundleTests(unittest.TestCase):
         self.assertIn("lmdeploy", cmd[cmd.index("--without") + 1].split(","))
 
     def test_features_that_need_a_failed_one_go_too(self):
-        arenactl, made, args = self.bundle({"argus"}, without="lean")
+        arenactl, made, args = self.bundle({"code-intel"}, without="lean")
         arenactl.cmd_bundle(args)
         cmd = made[-1]
         left = cmd[cmd.index("--without") + 1].split(",")
-        self.assertTrue({"argus", "scanners", "lean"} <= set(left), left)
+        self.assertTrue({"code-intel", "scanners", "lean"} <= set(left), left)
 
     def test_packs_asked_for_where_there_are_none_stop_the_bundle(self):
         arenactl, made, args = self.bundle(set())
@@ -315,7 +315,7 @@ class BundleTests(unittest.TestCase):
             args.packs = True
             with self.assertRaises(arenactl.Stop):
                 arenactl.cmd_bundle(args)
-            (Path(d) / "packs" / "cpp.arguspack").write_bytes(b"x")
+            (Path(d) / "packs" / "cpp.kpack").write_bytes(b"x")
             arenactl.DIST = Path(d) / "dist"
             self.assertEqual(arenactl.cmd_bundle(args), 0)
 

@@ -11,7 +11,7 @@ from support import REPO
 
 DEPLOY = REPO / "deploy"
 COPIES = (DEPLOY / "config" / "litellm.yaml", DEPLOY / "config" / "litellm-ha.yaml",
-          DEPLOY / "helm" / "argus-arena" / "files" / "litellm.yaml", DEPLOY / "helm" / "argus-arena" / "files" / "litellm-ha.yaml")
+          DEPLOY / "helm" / "arena" / "files" / "litellm.yaml", DEPLOY / "helm" / "arena" / "files" / "litellm-ha.yaml")
 LIMITS = DEPLOY / "config" / "arena_limits.py"
 
 
@@ -57,13 +57,13 @@ class GatewayConfigTests(unittest.TestCase):
             lines = settings(path)
             self.assertIn("  callbacks: [arena_limits.longest_answer]", lines, path)
             self.assertIn("  use_chat_completions_url_for_anthropic_messages: true", lines, path)
-        self.assertEqual(LIMITS.read_text(), (DEPLOY / "helm" / "argus-arena" / "files" / "arena_limits.py").read_text())
+        self.assertEqual(LIMITS.read_text(), (DEPLOY / "helm" / "arena" / "files" / "arena_limits.py").read_text())
 
     def test_the_hold_is_mounted_beside_the_config_that_names_it(self):
         # LiteLLM loads a callback's module from the config's own folder (/app).
         self.assertIn("./config/arena_limits.py:/app/arena_limits.py:ro", (DEPLOY / "docker-compose.yml").read_text())
         self.assertIn("./config/arena_limits.py:/app/arena_limits.py:ro", (DEPLOY / "ha.yml").read_text())
-        chart = DEPLOY / "helm" / "argus-arena" / "templates"
+        chart = DEPLOY / "helm" / "arena" / "templates"
         self.assertIn("mountPath: /app/arena_limits.py, subPath: arena_limits.py", (chart / "gateway.yaml").read_text())
         self.assertIn('{{ .Files.Get "files/arena_limits.py" | indent 4 }}', (chart / "configmaps.yaml").read_text())
 

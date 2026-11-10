@@ -8,8 +8,8 @@ A page per weakness (CWE), attack pattern (CAPEC), OWASP cheat sheet, ASVS 5.0 s
 (.NET's security rules, Bandit's checks, gosec's rules, eslint-plugin-security's rules), each saying whose it is and
 under what licence. Each names its ids as symbols: CWE-89, CAPEC-66, V6.2.1, WSTG-INPV-05, A05:2025, API1:2023,
 LLM01:2025, cs/sql-injection, CA2100, B608, G201, security/detect-object-injection. OUT/index.json lists the pages and
-their symbols, and the sources' versions and commits as the pack's provenance: the work directory of Argus's
-`security` pack (argus pack build --source security --work-dir OUT).
+their symbols, and the sources' versions and commits as the pack's provenance: the work directory of code-intel's
+`security` pack (code-intel pack build --source security --work-dir OUT).
 """
 from __future__ import annotations
 

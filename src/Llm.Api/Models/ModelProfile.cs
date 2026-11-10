@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
+using Branding;
 namespace Llm.Api.Models;
 
 /// <summary>What kind of file a GGUF is, as far as the engine is concerned.</summary>
@@ -248,7 +249,7 @@ public static partial class ModelProfiler
             return basics with
             {
                 Kind = ModelKind.Embedding, TrainedContext = (int?)h.Whole(h.Arch("context_length")),
-                Why = "An embedding model: it turns text into vectors and cannot chat. The engine serves one model at a time, so it would take the chat's place; Argus's embeddings run on their own engine.",
+                Why = $"An embedding model: it turns text into vectors and cannot chat. The engine serves one model at a time, so it would take the chat's place; {Brand.CodeIntel}'s embeddings run on their own engine.",
             };
         }
 

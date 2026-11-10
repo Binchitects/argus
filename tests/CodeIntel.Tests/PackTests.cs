@@ -28,6 +28,33 @@ public static class FakeEmbedder
 public class PackTests
 {
     [Fact]
+    public void Packs_installed_under_their_old_file_names_are_taken_under_the_new_ones_links_following_their_library_file()
+    {
+        using var dir = new TempDir();
+        var dest = System.IO.Path.Combine(dir.Path, "packs");
+        // A pack installed as a file, one loaded from the library (a link), whose library file the upgrade renamed, and one
+        // loaded from a library file still under its old name.
+        dir.File("packs/python.arguspack", "a python pack");
+        var library = dir.File("library/qt.kpack", "the qt pack");
+        File.CreateSymbolicLink(System.IO.Path.Combine(dest, "qt.arguspack"), System.IO.Path.Combine(dir.Path, "library", "qt.arguspack"));
+        var stillOld = dir.File("library/react.arguspack", "the react pack");
+        File.CreateSymbolicLink(System.IO.Path.Combine(dest, "react.arguspack"), stillOld);
+        // There under both names: the new one is kept.
+        dir.File("packs/cpp.arguspack", "old cpp");
+        dir.File("packs/cpp.kpack", "new cpp");
+
+        Assert.Equal(3, Registry.AdoptOldNames(dest));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(dest, "*.arguspack"));
+        Assert.Equal("a python pack", File.ReadAllText(System.IO.Path.Combine(dest, "python.kpack")));
+        Assert.Equal(library, Registry.LinkedFrom(System.IO.Path.Combine(dest, "qt.kpack")));
+        Assert.Equal(stillOld, Registry.LinkedFrom(System.IO.Path.Combine(dest, "react.kpack")));
+        Assert.Equal("new cpp", File.ReadAllText(System.IO.Path.Combine(dest, "cpp.kpack")));
+        // Again: nothing more to take.
+        Assert.Equal(0, Registry.AdoptOldNames(dest));
+        Assert.Equal(0, Registry.AdoptOldNames(System.IO.Path.Combine(dir.Path, "none")));
+    }
+
+    [Fact]
     public void Quantisation_round_trips_direction()
     {
         var q = FakeEmbedder.Vector("decode a jpeg frame");

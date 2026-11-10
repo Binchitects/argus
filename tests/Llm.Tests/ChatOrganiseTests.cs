@@ -57,7 +57,7 @@ public sealed class ChatOrganiseTests(AppFixture app)
     public async Task An_archived_chat_leaves_the_list_and_comes_back_when_written_in()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, new { content = "keep this for later" });
         Assert.Contains("keep this for later", await TitlesAsync(b));
 
@@ -76,7 +76,7 @@ public sealed class ChatOrganiseTests(AppFixture app)
     public async Task A_fork_holds_the_branch_up_to_the_chosen_answer_with_the_chats_settings_and_files()
     {
         var (b, email) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false, thinking = "low", systemPrompt = "Answer in French." });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, thinking = "low", systemPrompt = "Answer in French." });
         var file = await UploadAsync(b, "plan.txt", "The launch is on Tuesday.");
         await SendAsync(b, id, new { content = "first", attachments = new[] { file } });
         await SendAsync(b, id, new { content = "second" });
@@ -133,7 +133,7 @@ public sealed class ChatOrganiseTests(AppFixture app)
     public async Task Deleting_a_chat_deletes_its_files_unless_a_fork_still_uses_them()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var shared = await UploadAsync(b, "shared.txt", "shared");
         await SendAsync(b, id, new { content = "look", attachments = new[] { shared } });
         var fork = (await b.JsonAsync(await ForkAsync(b, id))).GetProperty("id").GetGuid();

@@ -32,7 +32,7 @@ ENV = tempfile.NamedTemporaryFile("w", suffix=".env")
 
 def setUpModule():
     env = (DEPLOY / ".env.example").read_text()
-    env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|ARGUS_KEY|GATEWAY_KEY)=$", r"\1=x", env)
+    env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY|GATEWAY_KEY)=$", r"\1=x", env)
     ENV.write(re.sub(r"(?m)^DATA_DIR=$", "DATA_DIR=/srv/arena/data", env))
     ENV.flush()
 

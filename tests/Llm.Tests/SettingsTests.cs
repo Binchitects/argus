@@ -106,8 +106,8 @@ public sealed partial class SettingsTests(AppFixture app)
     [Fact]
     public async Task The_chat_links_to_gitlab_where_browsers_reach_it()
     {
-        // Argus may reach GitLab by an internal name that no browser can open.
-        var (f, _, _) = NewApp(new() { ["Argus:GitlabUrl"] = "http://gitlab.internal:8929/" });
+        // code-intel may reach GitLab by an internal name that no browser can open.
+        var (f, _, _) = NewApp(new() { ["CodeIntel:GitlabUrl"] = "http://gitlab.internal:8929/" });
         await using var _f = f;
         var admin = await Admin(f);
         async Task<string?> Link() => (await admin.JsonAsync(await admin.GetAsync("/api/chat/config"))).GetProperty("gitlabUrl").GetString();

@@ -75,11 +75,11 @@ class GuardTests(unittest.TestCase):
         self.assertIn("is the live project", r.stderr)
         self.assertFalse(self.s.called("volume", "rm") or self.s.called("image", "rm"))
 
-        volumes = "arena_postgres\narena_audio\narena-restore-test_postgres\narena-restore-test_argus\narena-restore-test-other_x\nmy-arena-restore-test_y\n"
+        volumes = "arena_postgres\narena_audio\narena-restore-test_postgres\narena-restore-test_code-intel\narena-restore-test-other_x\nmy-arena-restore-test_y\n"
         r = self.s.bash("TP_PROJECT=arena-restore-test; tp_down", {"FAKE_VOLUME_LIST": volumes})
         self.assertEqual(r.returncode, 0, r.stderr)
         removed = sorted(c[-1] for c in self.s.calls() if c[1:3] == ["volume", "rm"])
-        self.assertEqual(removed, ["arena-restore-test_argus", "arena-restore-test_postgres"])
+        self.assertEqual(removed, ["arena-restore-test_code-intel", "arena-restore-test_postgres"])
         self.assertTrue(self.s.called("ps", "-aq", "--filter", "label=com.docker.compose.project=arena-restore-test"))
 
     def test_Compose_is_aimed_at_the_throwaway_project_only(self):
@@ -111,7 +111,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(out.count("container_name: !reset null"), len(SERVICES.split()))
         self.assertIn("default: { internal: true }", out)
         self.assertIn('ports: !override ["127.0.0.1:18443:443"]', out)
-        self.assertEqual(out.count("profiles: [off]"), 2)  # argus, cpu-temp-exporter
+        self.assertEqual(out.count("profiles: [off]"), 2)  # code-intel, cpu-temp-exporter
         self.assertEqual(out.count("build: !reset null"), 2)  # app, web: never built
         self.assertEqual(out.count("pull_policy: never"), 5)
         self.assertIn('app: { image: "arena-app" }', out)

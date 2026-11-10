@@ -18,12 +18,12 @@
 #
 # WHY IT CANNOT CALL THE MCP TOOL
 #
-# `docs_verify` is an MCP tool, and hooks are shell commands. `argus verify` is
+# `docs_verify` is an MCP tool, and hooks are shell commands. `code-intel verify` is
 # the same check with an exit code, which is the only interface that works here.
 #
 # WHY IT DOES NOT BLOCK WHEN IT CANNOT CHECK
 #
-# `argus verify` exits 6 -- not 2 -- when no documentation pack is installed or
+# `code-intel verify` exits 6 -- not 2 -- when no documentation pack is installed or
 # the packs cannot be read. Those two answers must not be confused: "the
 # documentation contradicts you" has to block, and "I could not check" must not,
 # or a deployment without packs becomes an agent that can never finish a
@@ -52,20 +52,20 @@
 #
 #   https://code.claude.com/docs/en/hooks
 #
-# Cost: one extra process per turn. `argus verify` resolves identifiers against
+# Cost: one extra process per turn. `code-intel verify` resolves identifiers against
 # the packs and returns in well under a second on a small draft; on a long
 # answer it is bounded by --limit.
 set -uo pipefail
 
-CONFIG="${ARGUS_CONFIG:-/etc/argus/config.yaml}"
-ARGUS="${ARGUS_BIN:-argus}"
-LIMIT="${ARGUS_VERIFY_LIMIT:-40}"
+CONFIG="${CODE_INTEL_CONFIG:-/etc/code-intel/config.yaml}"
+CODE_INTEL="${CODE_INTEL_BIN:-code-intel}"
+LIMIT="${CODE_INTEL_VERIFY_LIMIT:-40}"
 
 payload="$(cat)"
 
 # The transcript path is what the hook is given; the draft is the last assistant
-# message in it. `jq` is not assumed -- python3 is what every Argus deployment
-# already has, because Argus is a python service.
+# message in it. `jq` is not assumed -- python3 is what every code-intel deployment
+# already has, because code-intel is a python service.
 draft="$(
   printf '%s' "$payload" | python3 -c '
 import json, sys
@@ -115,13 +115,13 @@ if [ -z "${draft//[[:space:]]/}" ]; then
   exit 0
 fi
 
-# Exit 2 is the only blocking outcome, and `argus verify` only uses it for a
+# Exit 2 is the only blocking outcome, and `code-intel verify` only uses it for a
 # contradiction. Its stderr is what Claude Code shows the model, so it is passed
 # through untouched -- including 6, which must NOT block. `set +e` around the
 # call because a non-zero exit is the normal, expected answer here, not a
 # failure of this script.
 set +e
-reason="$(printf '%s' "$draft" | "$ARGUS" verify --config "$CONFIG" \
+reason="$(printf '%s' "$draft" | "$CODE_INTEL" verify --config "$CONFIG" \
             --text-file - --limit "$LIMIT" 2>&1 >/dev/null)"
 rc=$?
 set -e

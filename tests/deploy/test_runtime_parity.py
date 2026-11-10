@@ -1,6 +1,6 @@
 """
 The three runtimes run one stack: Docker Compose (deploy/docker-compose.yml, with scale.yml), rootless Podman
-(podman.yml on top) and Kubernetes (the Helm chart, deploy/helm/argus-arena). A service, an environment variable,
+(podman.yml on top) and Kubernetes (the Helm chart, deploy/helm/arena). A service, an environment variable,
 a mounted file or script, a secret or a route the app is reached by that is in one runtime and not the others fails
 here, unless ALLOWED names it with the reason (docs/deployment.md, "Runtimes", says the same to people).
 
@@ -24,7 +24,7 @@ from pathlib import Path
 from support import REPO
 
 DEPLOY = REPO / "deploy"
-CHART = DEPLOY / "helm" / "argus-arena"
+CHART = DEPLOY / "helm" / "arena"
 
 # What differs on purpose. Each key is (what, service, name); "*" as the name is the whole service.
 ALLOWED: dict[tuple[str, str, str], str] = {
@@ -102,7 +102,7 @@ def compose_config(*files: str) -> dict:
     if cmd is None:
         raise unittest.SkipTest("no docker compose or podman compose here")
     example = (DEPLOY / ".env.example").read_text()
-    example = re.sub(r"^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|ARGUS_KEY)=$", r"\1=parity", example, flags=re.M)
+    example = re.sub(r"^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY)=$", r"\1=parity", example, flags=re.M)
     example = re.sub(r"^GATEWAY_KEY=$", "GATEWAY_KEY=sk-parity", example, flags=re.M)
     example = re.sub(r"^DATA_DIR=$", "DATA_DIR=/srv/arena/data", example, flags=re.M)
     with tempfile.TemporaryDirectory(prefix="parity-") as tmp:
@@ -142,7 +142,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "sglang.enabled=true", "lmdeploy.enabled=true", "strata.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs", "gitlab.caCert=a-ca"]
+    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "sglang.enabled=true", "lmdeploy.enabled=true", "strata.enabled=true", "valkey.enabled=true", "code-intel.packLibraryClaim=packs", "gitlab.caCert=a-ca"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.
@@ -363,7 +363,7 @@ class StaticReaderTests(unittest.TestCase):
 
     def test_It_finds_containers_variables_and_mounts(self):
         helm = helm_static()
-        self.assertIn("ARGUS_KEY_CHECK_URL", helm["argus"]["env"])
+        self.assertIn("CODE_INTEL_KEY_CHECK_URL", helm["code-intel"]["env"])
         self.assertIn("Auth__AdminPassword", helm["app"]["env"])
         self.assertIn("DATABASE_URL", helm["litellm"]["env"])
         self.assertEqual(helm["audio"]["env"], {"HF_HUB_DISABLE_XET", "STT_MODEL_TTL", "TTS_MODEL_TTL"})
@@ -392,5 +392,5 @@ class ChartCopiesTests(unittest.TestCase):
         """The chart's copies of deploy/'s files (check-chart.py's COPIES) are byte for byte deploy's: a change to one that
         was not copied again fails here, not only in CI's chart check."""
         stale = [copy for copy, source in chart_copies().items()
-                 if (DEPLOY / "helm" / "argus-arena" / copy).read_bytes() != (DEPLOY / source).read_bytes()]
+                 if (DEPLOY / "helm" / "arena" / copy).read_bytes() != (DEPLOY / source).read_bytes()]
         self.assertEqual([], stale, "copy each again from deploy/ (python3 deploy/helm/check-chart.py says from where)")

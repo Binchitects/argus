@@ -1,4 +1,4 @@
-# Argus Arena's features: what each one is, what it runs, and what it needs.
+# Arena's features: what each one is, what it runs, and what it needs.
 #
 # COMPOSE_PROFILES in .env is the list of the features that are on. Each optional service runs
 # under its feature's profile, so a feature that is off runs nothing and needs no image. The app
@@ -21,7 +21,7 @@ sglang         | off | sglang | gpu | - | The SGLang engine, for many people at 
 lmdeploy       | off | lmdeploy | gpu | - | The LMDeploy engine (TurboMind), for many people at once (arena-lmdeploy, built by lmdeploy-build.yml)
 strata         | off | strata | gpu | - | The Strata engine, for large MoE GGUF models with experts in RAM (STRATA_IMAGE in .env)
 knowledge      | on  | embed | - | - | Company knowledge and search by meaning (the embedding server)
-argus          | on  | argus | gitlab | - | Argus: the company's GitLab indexed, and knowledge packs
+code-intel     | on  | code-intel | gitlab | - | Code intelligence: the company's GitLab indexed, and knowledge packs
 pictures       | on  | imagegen | gpu | - | Pictures made and edited (stable-diffusion.cpp)
 video          | on  | videogen | gpu | - | Video made from words and pictures
 speech         | on  | audio | - | - | Speech to text and text to speech
@@ -33,7 +33,7 @@ lean           | off | lean | - | lab | Proofs checked by Lean 4 with Mathlib (a
 studio         | off | studio | gpu | media | The media studio's own models: cutouts, voices, music
 workspaces     | off | workspaces | - | code-studio | Code Studio's workspaces on this server
 laya           | off | laya | - | - | Laya: typed decisions on the CPU
-scanners       | off | scanners | - | argus | Security scanners for code reviews: opengrep, Bandit, gitleaks, Trivy (an image of about 700 MB)
+scanners       | off | scanners | - | code-intel | Security scanners for code reviews: opengrep, Bandit, gitleaks, Trivy (an image of about 700 MB)
 monitoring     | on  | prometheus alertmanager loki promtail node-exporter cpu-temp-exporter | - | - | Dashboards, logs and alerts
 gpu-monitoring | on  | gpu-exporter | gpu | monitoring | The GPUs' metrics on the dashboards
 dcgm           | off | dcgm-exporter | gpu | monitoring | Data-centre GPU detail (NVIDIA DCGM, bare metal only)

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """A release's software bill of materials and its known vulnerabilities: the release gate.
 
-    python3 tools/release-scan.py                 dist/argus-arena-VERSION.cdx.json (CycloneDX 1.5) and its .sha256;
+    python3 tools/release-scan.py                 dist/arena-VERSION.cdx.json (CycloneDX 1.5) and its .sha256;
                                                   exits 1 when a critical vulnerability is not accepted
     python3 tools/release-scan.py --no-dotnet     without asking .NET for its packages (no SDK here)
 
-What it lists: the .NET packages of the app, Argus and Code Arena (every transitive one, as `dotnet list package`
+What it lists: the .NET packages of the app, code-intel and Code Arena (every transitive one, as `dotnet list package`
 resolves them), the web apps' npm packages (their lock files, without the build tools), the Python packages the
 images pin (`pip install name==version` in their Dockerfiles), the programs they download by version (Trivy and
 gitleaks as Go modules, opengrep), and the base images. What it asks: OSV
@@ -29,8 +29,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OSV = "https://api.osv.dev/v1"
-DOTNET_PROJECTS = ("src/Llm.Api", "src/Argus", "src/CodeArena")
-LOCKS = ("src/web/package-lock.json", "src/argus-web/package-lock.json")
+DOTNET_PROJECTS = ("src/Llm.Api", "src/CodeIntel", "src/CodeArena")
+LOCKS = ("src/web/package-lock.json", "src/code-intel-web/package-lock.json")
 ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
 
 
@@ -195,7 +195,7 @@ def bom(version: str, components: list[dict], findings: list[dict]) -> dict:
     return {
         "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
         "metadata": {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                     "component": {"type": "application", "name": "argus-arena", "version": version, "bom-ref": f"argus-arena@{version}"}},
+                     "component": {"type": "application", "name": "arena", "version": version, "bom-ref": f"arena@{version}"}},
         "components": comps,
         "vulnerabilities": [{"id": f["id"], "source": {"name": "OSV", "url": f"https://osv.dev/vulnerability/{f['id']}"},
                              "ratings": [{"severity": f["severity"]}], "description": f["summary"],
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None, opener=urllib.request.urlopen, run=subpr
     ok = accepted(ROOT / "docs" / "compliance" / "accepted-vulnerabilities.yaml", today or date.today())
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    sbom = out / f"argus-arena-{version}.cdx.json"
+    sbom = out / f"arena-{version}.cdx.json"
     sbom.write_text(json.dumps(bom(version, components, findings), indent=1) + "\n")
     digest = hashlib.sha256(sbom.read_bytes()).hexdigest()
     (out / f"{sbom.name}.sha256").write_text(f"{digest}  {sbom.name}\n")

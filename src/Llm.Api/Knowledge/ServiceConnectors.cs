@@ -115,7 +115,7 @@ public sealed class GitHubConnector(IHttpClientFactory http, IOptions<AuthOption
     {
         var req = new HttpRequestMessage(HttpMethod.Get, Api(s) + path);
         req.Headers.Accept.ParseAdd("application/vnd.github+json");
-        req.Headers.UserAgent.ParseAdd("argus-arena-knowledge");
+        req.Headers.UserAgent.ParseAdd("arena-knowledge");
         if (Secret(s) is { } token)
         {
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

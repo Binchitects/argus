@@ -124,7 +124,7 @@ export interface ServerStatus {
   state: 'connecting' | 'connected' | 'unavailable' | 'failed'
   /** Its tools in the session (Argus's that Arena serves count as Arena's). */
   tools: number
-  /** In words: "Arena: 14 tools", "Argus: not connected, tried again at 10:41:07 (…)". */
+  /** In words: "Arena: 14 tools", "CodeIntel: not connected, tried again at 10:41:07 (…)". */
   status: string
   error: string | null
   nextTry: string | null

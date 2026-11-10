@@ -25,7 +25,7 @@ public sealed class ChatQuoteTests(AppFixture app)
 
     private static async Task<Guid> NewChatAsync(TestBrowser b, object? body = null)
     {
-        var res = await b.PostAsync("/api/chat/conversations", body ?? new { useArgus = false });
+        var res = await b.PostAsync("/api/chat/conversations", body ?? new { useCodeIntel = false });
         await StatusAssert.Is(HttpStatusCode.Created, res);
         return (await b.JsonAsync(res)).GetProperty("id").GetGuid();
     }

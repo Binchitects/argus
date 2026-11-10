@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Argus Arena's offline installer: install, upgrade (from 5.2.0 or newer), repair,
+# Arena's offline installer: install, upgrade (from 5.2.0 or newer), repair,
 # remove, status and verify, from one bundle that ./arenactl bundle makes,
 # with Docker or rootless Podman, and nothing from the network.
 #
-#   sh argus-arena-VERSION-offline.run COMMAND [options]   the bundle unpacks itself and runs this
+#   sh arena-VERSION-offline.run COMMAND [options]   the bundle unpacks itself and runs this
 #   bash installer.sh COMMAND [options]                     in an unpacked bundle
 #   DIR/deploy/scripts/installer.sh COMMAND --dir DIR       an installation's own copy: status,
 #                                                           remove, verify, and repair without a bundle
@@ -81,9 +81,9 @@
 #                        audio.tar.gz for the speech server's), or skip (an admin downloads them later
 #                        under Admin -> Models -> Default models). Default: skip; asked on a terminal
 #   --http-port N  --https-port N   (default 80 and 443; Podman 8080 and 8443)
-#   --gitlab-url URL  --gitlab-token-file FILE   the GitLab Argus indexes, and its read-only
+#   --gitlab-url URL  --gitlab-token-file FILE   the GitLab code-intel indexes, and its read-only
 #                        token (read from the file, never from the command line). Without them
-#                        Argus, which cannot start without a GitLab, is left out until they are
+#                        code-intel, which cannot start without a GitLab, is left out until they are
 #                        in .env
 #   --cpu-only           no NVIDIA GPU: the features that need one are off unless --with names them
 #   --with A,B  --without A,B   features on and off (install, upgrade and repair; installer.sh features)
@@ -113,13 +113,17 @@
 #      cause is put right; the steps by hand are printed
 #   6  checksums do not match: the bundle, or the installed files, are damaged
 set -uo pipefail
+# The product's name people read: PRODUCT_NAME, else branding.env (deploy/'s, or the repository's at its root).
+brand_name() { local d f; d="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"; for f in "$d/../branding.env" "$d/../../branding.env" "$d/branding.env"; do [[ -f "$f" ]] && { sed -n "s/^$1=//p" "$f" | head -n1; return 0; }; done; }
+PRODUCT="${PRODUCT_NAME:-$(brand_name PRODUCT_NAME)}"; PRODUCT="${PRODUCT:-Farzan Arena}"
+
 # Lists sorted the same on every host (en_US puts .env.example last, C first); LC_ALL would override it.
 unset LC_ALL
 export LC_COLLATE=C
 # Deploy files are read by the containers' users; .env, the state and the logs are made 0600/0700.
 umask 022
 
-FORMAT="argus-arena-offline 1"
+FORMAT="arena-offline 1"
 # In the compose file already (cpu-temp-exporter): every bundle has it. backup.sh and this script
 # read the volumes with it, so a plain remove keeps it.
 HELPER=python:3.13-slim
@@ -130,7 +134,7 @@ GPU_SERVICES="llamacpp imagegen videogen gpu-exporter power-limits"
 # The uid the app's image runs as on Docker: it writes MODELS_DIR (ARENA_APP_UID for the tests, which run as theirs).
 APP_UID="${ARENA_APP_UID:-1000}"
 # The services' users, for the volumes they write: repair puts a wrong owner right.
-VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 audit:1000:1000 sandbox:1000:1000 workspaces:0:0 blender:1000:1000 lean:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
+VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 audit:1000:1000 sandbox:1000:1000 workspaces:0:0 blender:1000:1000 lean:1000:1000 audio:1000:1000 code-intel:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
 # .env and this script decide these, not the caller's shell.
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
 export PODMAN_COMPOSE_WARNING_LOGS=false
@@ -292,7 +296,7 @@ for p in "$WITH_ARG" "$WITHOUT_ARG"; do [[ -z "$p" || "$p" =~ ^[a-z0-9,-]+$ ]] |
 BUNDLE=""
 if [[ -n "$BUNDLE_ARG" ]]; then
   BUNDLE="$(cd "$BUNDLE_ARG" 2>/dev/null && pwd)" || usage_error "no bundle folder $BUNDLE_ARG"
-  grep -qx "format: $FORMAT" "$BUNDLE/MANIFEST" 2>/dev/null || usage_error "$BUNDLE is not an unpacked Argus Arena bundle"
+  grep -qx "format: $FORMAT" "$BUNDLE/MANIFEST" 2>/dev/null || usage_error "$BUNDLE is not an unpacked $PRODUCT bundle"
 elif grep -qx "format: $FORMAT" "$(dirname "$SELF")/MANIFEST" 2>/dev/null; then
   BUNDLE="$(dirname "$SELF")"
 fi
@@ -308,7 +312,7 @@ if [[ -n "$BUNDLE" ]]; then
   valid_version "$BVERSION" || die "the bundle's MANIFEST names no version it can use: \"$BVERSION\""
   valid_version "$UPGRADES_FROM" || die "the bundle's MANIFEST says no version it upgrades from"
 fi
-need_bundle() { [[ -n "$BUNDLE" ]] || die "$CMD needs the bundle: run it from argus-arena-VERSION-offline.run (sh argus-arena-VERSION-offline.run $CMD ...), from the release's checkout (./arenactl $CMD ...), or with --bundle DIR"; }
+need_bundle() { [[ -n "$BUNDLE" ]] || die "$CMD needs the bundle: run it from arena-VERSION-offline.run (sh arena-VERSION-offline.run $CMD ...), from the release's checkout (./arenactl $CMD ...), or with --bundle DIR"; }
 
 # Every file of the bundle matches SHA256SUMS and none is unlisted (partly unpacked: those there).
 verify_bundle() {
@@ -541,13 +545,95 @@ move_volumes() {   # move_volumes plan|do
   return 0
 }
 
-# What the app and Argus say of themselves: through Traefik on this host with curl (never through
+# ============================================================== names from before 8.0
+# Until 8.0 the code-intelligence service was named after a brand: its feature, its service and its data
+# folder "argus", its keys ARGUS_*. An upgrade from a release before 8.0 carries them to the neutral names,
+# its rollback back; the address people's DNS, certificates and tools know stays (CODE_INTEL_HOST=argus).
+OLD_NAMES_BEFORE=8.0.0
+from_old_names() { [[ -n "${FROM:-}" && "$(vercmp "$FROM" "$OLD_NAMES_BEFORE")" == -1 ]]; }
+# A feature id as this release names it.
+feature_now_named() { case "$1" in argus) echo code-intel ;; *) echo "$1" ;; esac; }
+carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their new names (before merge_env adds them anew)
+  local env="$DEPLOY/.env" old new val
+  from_old_names || return 0
+  for old in ARGUS_KEY ARGUS_PACK_LIBRARY_DIR; do
+    new="CODE_INTEL_${old#ARGUS_}"
+    [[ -n "$(env_line "$env" "$old")" ]] || continue
+    val="$(env_get "$old")"
+    if [[ $1 == plan ]]; then would ".env: $old as $new$([[ -n "$(env_line "$env" "$new")" ]] && echo " ($new is there: kept, $old taken out)")"; continue; fi
+    # On its own line: .env keeps the order its owner gave it.
+    if [[ -n "$(env_line "$env" "$new")" ]]; then env_edit "$env" "$old" || die "writing $env failed"
+    else env_edit "$env" "$old" "$new=$val" || die "writing $env failed"; fi
+    did ".env: $old is $new now"
+  done
+  if [[ -z "$(env_line "$env" CODE_INTEL_HOST)" ]]; then
+    if [[ $1 == plan ]]; then would ".env: CODE_INTEL_HOST=argus (the code-intelligence service's address stays argus.$DOMAIN)"
+    else env_edit "$env" CODE_INTEL_HOST "CODE_INTEL_HOST=argus" || die "writing $env failed"; did ".env: CODE_INTEL_HOST=argus: its address stays argus.$DOMAIN"; fi
+  fi
+  return 0
+}
+carry_data() {   # carry_data plan|do: the service's data from before 8.0 under its new folder (the stack stopped, its backup taken)
+  local old="${PROJECT}_argus" dev
+  from_old_names || return 0
+  [[ -n "$DATA_DIR" ]] || return 0
+  if [[ -d "$DATA_DIR/argus" && ! -e "$DATA_DIR/code-intel" ]] \
+    || { [[ -d "$DATA_DIR/argus" && -d "$DATA_DIR/code-intel" && -z "$(ls -A "$DATA_DIR/code-intel" 2>/dev/null)" ]]; }; then
+    if [[ $1 == plan ]]; then would "rename $DATA_DIR/argus to $DATA_DIR/code-intel (the code-intelligence service's data; a rollback renames it back)"; return 0; fi
+    dc_down --remove-orphans
+    [[ -d "$DATA_DIR/code-intel" ]] && rmdir "$DATA_DIR/code-intel"
+    mv "$DATA_DIR/argus" "$DATA_DIR/code-intel" || die "renaming $DATA_DIR/argus to $DATA_DIR/code-intel failed"
+    echo renamed > "$SNAP/carried-data"
+    did "$DATA_DIR/argus is $DATA_DIR/code-intel now"
+  elif [[ -d "$DATA_DIR/argus" ]]; then
+    die "$DATA_DIR/argus and $DATA_DIR/code-intel are both there, and $DATA_DIR/code-intel is not empty: the data is not renamed over it (move one aside, then upgrade again)"
+  fi
+  # The volume that named the old folder: compose makes the new one, bound to the new folder.
+  if volume_exists "$old"; then
+    dev="$(volume_device "$old")"
+    if [[ -z "$dev" ]]; then
+      # From a release that kept it in the engine's own storage: copied in, kept until the upgrade is done.
+      if [[ $1 == plan ]]; then would "copy the $old volume into $DATA_DIR/code-intel"; return 0; fi
+      mkdir -p "$DATA_DIR/code-intel" || die "cannot make $DATA_DIR/code-intel"
+      in_helper -v "$old:/from:ro" -v "$DATA_DIR/code-intel:/to" "$HELPER" sh -c 'cp -a /from/. /to/' || die "copying the $old volume into $DATA_DIR/code-intel failed (disk full?)"
+      echo copied > "$SNAP/carried-data"
+      did "the $old volume copied into $DATA_DIR/code-intel"
+    else
+      [[ $1 == plan ]] && { would "remove the $old volume (it named $dev)"; return 0; }
+      dc_down --remove-orphans
+      E volume rm "$old" >/dev/null 2>&1 || note "the $old volume could not be removed ($ENGINE volume rm $old by hand): it names a folder no longer there"
+    fi
+  fi
+  return 0
+}
+uncarry_data() {   # the rollback's: the service's data back under the name its release reads
+  local how
+  how="$(cat "$SNAP/carried-data" 2>/dev/null)"
+  [[ -n "$how" && -n "$DATA_DIR" ]] || return 0
+  if [[ $how == renamed && -d "$DATA_DIR/code-intel" && ! -e "$DATA_DIR/argus" ]]; then
+    mv "$DATA_DIR/code-intel" "$DATA_DIR/argus" || { bad "renaming $DATA_DIR/code-intel back to $DATA_DIR/argus failed"; return 1; }
+    ok "$DATA_DIR/code-intel is $DATA_DIR/argus again"
+  elif [[ $how == copied ]]; then
+    rm -rf "${DATA_DIR:?}/code-intel"
+    ok "the copy of the code-intelligence service's data taken away (its volume, untouched, is the data)"
+  fi
+  E volume rm "${PROJECT}_code-intel" >/dev/null 2>&1
+  rm -f "$SNAP/carried-data"
+  return 0
+}
+# After the upgrade: the old volume a copy was made of.
+carried_done() {
+  [[ "$(cat "$SNAP/carried-data" 2>/dev/null)" == copied ]] || return 0
+  E volume rm "${PROJECT}_argus" >/dev/null 2>&1 && did "the ${PROJECT}_argus volume removed (its data is in $DATA_DIR/code-intel)"
+  rm -f "$SNAP/carried-data"
+}
+
+# What the app and code-intel say of themselves: through Traefik on this host with curl (never through
 # a proxy, which would not take the --resolve address); a host without curl asks the service
 # itself from a helper container on the stack's network.
 ASK_PY='
 import os, sys, urllib.request
 r = urllib.request.Request(sys.argv[1])
-if os.environ.get("ASK_TOKEN"): r.add_header("x-argus-admin-token", os.environ["ASK_TOKEN"])
+if os.environ.get("ASK_TOKEN"): r.add_header("x-code-intel-admin-token", os.environ["ASK_TOKEN"])
 o = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 sys.stdout.write(o.open(r, timeout=10).read().decode())
 '
@@ -556,7 +642,7 @@ ask_service() {   # ask_service TRAEFIK_HOST SERVICE_URL PATH [TOKEN] -> the ans
   if command -v curl >/dev/null; then
     if [[ -n "$token" ]]; then
       hdr="$(mktemp)" && chmod 600 "$hdr" || return 1
-      printf 'x-argus-admin-token: %s\n' "$token" > "$hdr"
+      printf 'x-code-intel-admin-token: %s\n' "$token" > "$hdr"
     fi
     curl -sk --noproxy '*' --max-time 10 --resolve "$host:$HTTPS_PORT:127.0.0.1" ${hdr:+-H "@$hdr"} "https://$host:$HTTPS_PORT$path" 2>/dev/null
     [[ -z "$hdr" ]] || rm -f "$hdr"
@@ -567,12 +653,14 @@ ask_service() {   # ask_service TRAEFIK_HOST SERVICE_URL PATH [TOKEN] -> the ans
   fi
 }
 app_version() { ask_service "$DOMAIN" http://app:8080 /api/info | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1; }
-argus_version() {
-  ask_service "argus.$DOMAIN" http://argus:7700 /admin/metrics "$(env_get ARGUS_KEY)" \
-    | sed -n 's/^argus_index_build_info{version="\([^"]*\)"}.*/\1/p' | head -n1
+# The code-intelligence service's address under DOMAIN: CODE_INTEL_HOST (an installation from before 8.0 keeps argus).
+code_intel_host() { local h; h="$(env_get CODE_INTEL_HOST)"; echo "${h:-code-intel}"; }
+code_intel_version() {
+  ask_service "$(code_intel_host).$DOMAIN" http://code-intel:7700 /admin/metrics "$(env_get CODE_INTEL_KEY)" \
+    | sed -n 's/^code_intel_index_build_info{version="\([^"]*\)"}.*/\1/p' | head -n1
 }
 
-# What app_version or argus_version says once it says WANT, or when the wait is over (90 s at
+# What app_version or code_intel_version says once it says WANT, or when the wait is over (90 s at
 # most; less with a shorter --timeout): Traefik reaches a recreated container a few seconds after
 # compose calls it healthy (a new address, a connection kept to the old one).
 answer_until() {   # answer_until WANT FUNCTION -> the last answer
@@ -1034,7 +1122,7 @@ fix_driver() {   # the driver needs a reboot after it: the installer stops and s
   REQ_REBOOT=1
 }
 fix_sysctl() {   # fix_sysctl KEY VALUE: now and at every boot
-  printf '%s\n' "$2" | as_root tee "/proc/sys/${1//.//}" >/dev/null && printf '%s = %s\n' "$1" "$2" | as_root tee "/etc/sysctl.d/90-argus-arena-${1//./-}.conf" >/dev/null
+  printf '%s\n' "$2" | as_root tee "/proc/sys/${1//.//}" >/dev/null && printf '%s = %s\n' "$1" "$2" | as_root tee "/etc/sysctl.d/90-arena-${1//./-}.conf" >/dev/null
 }
 fix_time() { as_root timedatectl set-ntp true; }
 fix_firewall() {   # fix_firewall ufw|firewalld PORT...
@@ -1073,7 +1161,7 @@ check_requirements() {   # check_requirements fresh|upgrade
   else
     for p in "${missing[@]}"; do
       case "$p" in
-        curl) note "curl is not installed: the app and Argus are asked their version from a helper container on the stack's network, not through Traefik (--fix installs it)" ;;
+        curl) note "curl is not installed: the app and code-intel are asked their version from a helper container on the stack's network, not through Traefik (--fix installs it)" ;;
         ss|flock) note "$p is not installed (--fix installs it)" ;;
         *) req_bad "$p is not installed" ;;
       esac
@@ -1301,7 +1389,7 @@ fix_requirements() {   # fix_requirements MODE
 
 # ======================================================================== images
 # The state's image list: reference<TAB>image id here<TAB>1 when it was on this host before
-# Argus Arena was installed (remove leaves those).
+# Arena was installed (remove leaves those).
 state_image_id() { awk -F'\t' -v r="$1" '$1 == r { print $2 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
 state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
 # The bundle's id of the image it was loaded from (an upgrade's bundle may carry a newer one under the same tag).
@@ -1628,7 +1716,7 @@ example_keys() { sed -n -E 's/^#?[[:space:]]*([A-Z][A-Z0-9_]*)=([^[:space:]]*).*
 example_set_keys() { sed -n -E 's/^([A-Z][A-Z0-9_]*)=(.*)$/\1\t\2/p' "$1"; }
 # Keys compose cannot start without (${KEY:?...}).
 # The secrets the installer makes: an upgrade that adds one of these keys makes it too.
-GEN_SECRETS="DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY WORKSPACES_KEY"
+GEN_SECRETS="DB_PASSWORD APP_KEY ENGINE_KEY CODE_INTEL_KEY WORKSPACES_KEY"
 required_keys() { grep -ohE '\$\{[A-Z][A-Z0-9_]*:\?' "${1:-$DEPLOY}"/docker-compose.yml 2>/dev/null | sed -E 's/\$\{([A-Z0-9_]+):\?/\1/' | sort -u; }
 compose_keys() { grep -ohE '\$\{[A-Z][A-Z0-9_]*' "${1:-$DEPLOY}"/*.yml 2>/dev/null | cut -c3- | sort -u; }
 # Adds to .env every key the release's .env.example sets that .env lacks (its default; a
@@ -1880,7 +1968,7 @@ feat_shares() {   # feat_shares ID
   done
 }
 # The installation's features, as .env says.
-features_now() { local x; x="$(env_get COMPOSE_PROFILES)"; for x in ${x//,/ }; do echo "$x"; done; }
+features_now() { local x; x="$(env_get COMPOSE_PROFILES)"; for x in ${x//,/ }; do feature_now_named "$x"; done; }
 feat_list() {   # feat_list ID...: the features, each on or off, its size, needs and title
   local id b sz
   local -A on=()
@@ -2032,14 +2120,14 @@ cmd_features() {
   if [[ -n "$BUNDLE" ]]; then read_features "$BUNDLE/deploy/features"; else read_features "$DEPLOY/features"; fi
   if [[ -f "$DEPLOY/.env" ]]; then
     mapfile -t on < <(features_now)
-    say "Argus Arena's features in $DIR: on as .env has them (COMPOSE_PROFILES)$([[ -n "$BUNDLE" ]] && echo "; sizes from the $BVERSION bundle")"
+    say "$PRODUCT's features in $DIR: on as .env has them (COMPOSE_PROFILES)$([[ -n "$BUNDLE" ]] && echo "; sizes from the $BVERSION bundle")"
   else
     mapfile -t on < <(feat_defaults)
-    say "Argus Arena $BVERSION's features: on as a new installation has them"
+    say "$PRODUCT $BVERSION's features: on as a new installation has them"
   fi
   feat_list ${on[@]+"${on[@]}"}
   say ""
-  say "install, upgrade or repair with --with A,B and --without A,B changes them (a feature brings those it needs): ./arenactl repair --with A in a checkout, sh argus-arena-VERSION-offline.run repair --with A with the bundle, or $DIR/deploy/scripts/installer.sh repair --with A on this host."
+  say "install, upgrade or repair with --with A,B and --without A,B changes them (a feature brings those it needs): ./arenactl repair --with A in a checkout, sh arena-VERSION-offline.run repair --with A with the bundle, or $DIR/deploy/scripts/installer.sh repair --with A on this host."
 }
 
 # ========================================================================= models
@@ -2164,7 +2252,7 @@ cmd_config() {
   take_sets
   read_settings
   before_domain="$DOMAIN"
-  say "The settings of Argus Arena $(installed_version) in $DIR ($DEPLOY/.env; secrets only as set or not)"
+  say "The settings of $PRODUCT $(installed_version) in $DIR ($DEPLOY/.env; secrets only as set or not)"
   if [[ ${#SET_ORDER[@]} -eq 0 ]]; then
     if [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]]; then
       edit_settings "$DEPLOY/.env"
@@ -2284,7 +2372,7 @@ wait_healthy() {
     sleep $(( secs < 30 ? 1 : 5 ))
   done
 }
-# The version each service runs: the app and Argus say theirs; every container runs the image
+# The version each service runs: the app and code-intel say theirs; every container runs the image
 # its reference names now, and the release's own run this bundle's.
 check_versions() {   # check_versions VERSION
   local want=$1 v failed=0 svc name img ref id
@@ -2295,11 +2383,11 @@ check_versions() {   # check_versions VERSION
   elif [[ -z "$v" ]]; then bad "app: no answer at https://$DOMAIN:$HTTPS_PORT/api/info"; failed=1
   else bad "app: it says $v, not $want"; failed=1
   fi
-  if dc config --services 2>/dev/null | grep -qx argus; then
-    v="$(answer_until "$want" argus_version)"
-    if [[ "$v" == "$want" ]]; then ok "argus: $v (its own metrics)"
-    elif [[ -z "$v" ]]; then note "argus: no answer at argus.$DOMAIN (its image is checked below)"
-    else bad "argus: it says $v, not $want"; failed=1
+  if dc config --services 2>/dev/null | grep -qx code-intel; then
+    v="$(answer_until "$want" code_intel_version)"
+    if [[ "$v" == "$want" ]]; then ok "code-intel: $v (its own metrics)"
+    elif [[ -z "$v" ]]; then note "the code-intelligence service: no answer at $(code_intel_host).$DOMAIN (its image is checked below)"
+    else bad "code-intel: it says $v, not $want"; failed=1
     fi
   fi
   while IFS='|' read -r svc name _ _ img ref; do
@@ -2398,11 +2486,11 @@ print_access() {
   read_settings
   [[ "$HTTPS_PORT" != 443 ]] && port=":$HTTPS_PORT"
   say ""
-  say "Argus Arena $BVERSION runs: https://$DOMAIN$port"
-  say "  the API:  https://gateway.$DOMAIN$port/v1     Argus:  https://argus.$DOMAIN$port/mcp"
+  say "$PRODUCT $BVERSION runs: https://$DOMAIN$port"
+  say "  the API:  https://gateway.$DOMAIN$port/v1     code intelligence:  https://$(code_intel_host).$DOMAIN$port/mcp"
   say "  sign in as admin$([[ -n "$(env_get ADMIN_EMAIL)" ]] && echo " ($(env_get ADMIN_EMAIL))")"
   say "  in $DEPLOY: $(dc_hint) ps"
-  [[ -n "$(model_waits)" ]] && say "  the embedding server waits for its model: bring $EMBED_FILE into $MODELS_DIR (Argus's and the app's search by meaning need it)"
+  [[ -n "$(model_waits)" ]] && say "  the embedding server waits for its model: bring $EMBED_FILE into $MODELS_DIR (code-intel's and the app's search by meaning need it)"
   return 0
 }
 show_password_once() {
@@ -2477,7 +2565,7 @@ cmd_install() {
     NEW_MODEL="$(ask "The first chat model: a .gguf in MODELS_DIR, or a Hugging Face repo:quant (empty: none yet)" "${MODEL_ARG:-$s}")"
     NEW_HTTP="$(ask "HTTP port" "${HTTP_ARG:-$([[ $podman -eq 1 ]] && echo 8080 || echo 80)}")"
     NEW_HTTPS="$(ask "HTTPS port" "${HTTPS_ARG:-$([[ $podman -eq 1 ]] && echo 8443 || echo 443)}")"
-    NEW_GITLAB="$(ask "The GitLab Argus indexes, its address (empty: none yet)" "$GITLAB_ARG")"
+    NEW_GITLAB="$(ask "The GitLab code-intel indexes, its address (empty: none yet)" "$GITLAB_ARG")"
     NEW_GITLAB_TOKEN=""
     if [[ -n "$GITLAB_TOKEN_FILE" ]]; then NEW_GITLAB_TOKEN="$(head -n1 "$GITLAB_TOKEN_FILE" | tr -d '[:space:]')"
     elif [[ -n "$NEW_GITLAB" && $YES -eq 0 && $DRY -eq 0 ]]; then
@@ -2486,8 +2574,8 @@ cmd_install() {
     if [[ -z "$NEW_GITLAB" || -z "$NEW_GITLAB_TOKEN" ]]; then
       [[ -n "$NEW_GITLAB" && $DRY -eq 0 ]] && refuse "--gitlab-url needs its token: --gitlab-token-file FILE"
       NEW_GITLAB=""
-      # Argus cannot start without a GitLab: off until .env names one.
-      [[ "$known" == *" argus "* ]] && NO_GITLAB=1
+      # code-intel cannot start without a GitLab: off until .env names one.
+      [[ "$known" == *" code-intel "* ]] && NO_GITLAB=1
     fi
   fi
   [[ "$NEW_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || usage_error "the domain is a host name: $NEW_DOMAIN"
@@ -2524,9 +2612,9 @@ cmd_install() {
   # A model folder there already: its models are used as they are, nothing is moved.
   MODELS_HAD="$(find "$MODELS_DIR" -type f \( -name '*.gguf' -o -name '*.safetensors' -o -name '*.onnx' -o -name '*.bin' \) 2>/dev/null | wc -l)"
 
-  say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  say "Install $PRODUCT $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR$([[ ${MODELS_HAD:-0} -gt 0 ]] && echo " ($MODELS_HAD model file(s) there already, used as they are)"), data in $DATA_DIR; features: $(feat_count)"
-  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off; to turn it on later, GITLAB_URL and GITLAB_TOKEN in .env, then $DIR/deploy/scripts/installer.sh repair --with argus"
+  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): code-intel is off; to turn it on later, GITLAB_URL and GITLAB_TOKEN in .env, then $DIR/deploy/scripts/installer.sh repair --with code-intel"
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
@@ -2554,7 +2642,7 @@ cmd_install() {
     return 0
   fi
   preflight fresh
-  confirm "Install Argus Arena $BVERSION in $DIR?" || refuse "not confirmed"
+  confirm "Install $PRODUCT $BVERSION in $DIR?" || refuse "not confirmed"
   if [[ $leftover -eq 1 ]]; then
     lock; start_log
     undo_install leftover
@@ -3015,6 +3103,7 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
     fi
   fi
   restore_files || return 1
+  uncarry_data || return 1
   while IFS=$'\t' read -r ref id tag; do
     [[ -n "$ref" ]] || continue
     E tag "$tag" "$ref" >/dev/null 2>&1 || { bad "the old image of $ref ($tag) is gone"; rc=1; }
@@ -3169,7 +3258,7 @@ cmd_upgrade() {
     refuse "$iv is installed ($src); this bundle upgrades $UPGRADES_FROM or newer. Upgrade to $UPGRADES_FROM first (its own way, docs/deployment.md), then run this"
   fi
   cmp="$(vercmp "$iv" "$BVERSION")"
-  if [[ $cmp == 0 && ! -f "$MARKER" ]]; then say "Argus Arena $iv is installed in $DIR already ($src): nothing to upgrade. (repair checks it against this bundle.)"; return 0; fi
+  if [[ $cmp == 0 && ! -f "$MARKER" ]]; then say "$PRODUCT $iv is installed in $DIR already ($src): nothing to upgrade. (repair checks it against this bundle.)"; return 0; fi
   [[ $cmp == 1 ]] && refuse "$iv is installed ($src), newer than this bundle's $BVERSION: going back is a restore of the backup taken before that upgrade (upgrade --rollback with its bundle)"
   FROM="$iv"
   SNAP="$STATE/rollback/$FROM"
@@ -3182,7 +3271,7 @@ cmd_upgrade() {
     DATA_DIR="${DATA_DIR%/}"
   fi
 
-  say "Upgrade Argus Arena in $DIR from $FROM ($src) to $BVERSION ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  say "Upgrade $PRODUCT in $DIR from $FROM ($src) to $BVERSION ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   # The features: those on before (from a release before the list, those whose services ran), and
   # a feature new in this release asked about (unattended: off, and named).
   local svc active id
@@ -3206,7 +3295,7 @@ cmd_upgrade() {
   for id in ${new[@]+"${new[@]}"}; do
     [[ ",$WITH_ARG,$WITHOUT_ARG," == *",$id,"* ]] && continue
     if [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]] && choose "New in $BVERSION: $id, ${FEAT_TITLE[$id]}. Turn it on?" "$([[ ${FEAT_DEF[$id]} == on ]] && echo y || echo n)"; then base+=("$id")
-    else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); sh argus-arena-$BVERSION-offline.run repair --with $id --dir $DIR (or ./arenactl repair --with $id in a checkout) turns it on"; fi
+    else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); sh arena-$BVERSION-offline.run repair --with $id --dir $DIR (or ./arenactl repair --with $id in a checkout) turns it on"; fi
   done
   choose_features upgrade ${base[@]+"${base[@]}"}
   load_setting_defs "$BUNDLE/deploy/settings"
@@ -3223,16 +3312,18 @@ cmd_upgrade() {
     sync_deploy upgrade "$FROM" plan
     [[ $SYNC_CHANGES -eq 0 ]] && ok "no file changes"
     step ".env"
+    carry_env plan
     merge_env plan
     for id in ${SET_ORDER[@]+"${SET_ORDER[@]}"}; do would "set $id in .env$([[ "${SET_KIND[$id]}" != secret ]] && echo " to ${SET_VAL[$id]:-its default}")"; done
     write_features plan
     write_extras plan
+    carry_data plan
     make_data_dirs plan
     move_volumes plan
     place_models plan
     fill_audio plan
     ensure_cert plan
-    would "start $BVERSION (the app and Argus migrate their data as they start), wait until every service is healthy, check every service's version"
+    would "start $BVERSION (the app and code-intel migrate their data as they start), wait until every service is healthy, check every service's version"
     would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup, the data as it is kept first)"
     return 0
   fi
@@ -3305,6 +3396,7 @@ cmd_upgrade() {
     ok "$SYNC_SUMMARY"
     step ".env"
     ENV_ADDED_FILE="$SNAP/env-added"; touch "$ENV_ADDED_FILE"
+    carry_env do
     merge_env do
     apply_settings "$DEPLOY/.env"
     write_features do
@@ -3312,6 +3404,7 @@ cmd_upgrade() {
     (umask 077; sha_of "$DEPLOY/.env" > "$SNAP/env-sha")
     write_extras do
     step "data in $DATA_DIR"
+    carry_data do
     make_data_dirs do
     if [[ -n "$(move_volumes plan 2>/dev/null)" ]]; then
       dc_down
@@ -3347,6 +3440,7 @@ cmd_upgrade() {
   record_kept $(cat "$SNAP/kept" "$SNAP/beside" 2>/dev/null)
   state_set target "" previous "$FROM"
   rm -f "$MARKER"
+  carried_done
   # Carried on from an older bundle's cut-off upgrade: the images it loaded of that release's own, which nothing
   # runs now and no record names, go.
   if [[ -n "$TAKEOVER" ]]; then
@@ -3438,7 +3532,7 @@ cmd_repair() {
   iv="$(installed_version)"
   [[ $DRY -eq 1 ]] && act=plan
   if [[ -n "$BUNDLE" && -n "$iv" && "$iv" != "$BVERSION" ]]; then refuse "$iv is installed, and this bundle is $BVERSION: repair with $iv's bundle, or upgrade"; fi
-  say "Repair Argus Arena ${iv:-(version unknown)} in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  say "Repair $PRODUCT ${iv:-(version unknown)} in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   [[ -z "$BUNDLE" ]] && note "no bundle: files and images are only checked; run repair from the bundle to restore them"
   if [[ $DRY -eq 0 ]]; then lock; start_log; fi
   [[ -n "$BUNDLE" ]] && check_bundle
@@ -3620,7 +3714,7 @@ images_to_remove() {
     cut -f3 "$STATE"/rollback/*/IMAGES 2>/dev/null
   } | sed '/^$/d' | sort -u | while IFS= read -r ref; do
     id="$(image_id "$ref")"; [[ -n "$id" ]] || continue
-    if [[ "$(state_image_pre "$ref")" == 1 ]]; then printf 'keep\t%s\t%s\n' "$ref" "on this host before Argus Arena was installed"; continue; fi
+    if [[ "$(state_image_pre "$ref")" == 1 ]]; then printf 'keep\t%s\t%s\n' "$ref" "on this host before $PRODUCT was installed"; continue; fi
     if [[ $PURGE -eq 0 && "${ref#docker.io/library/}" == "$HELPER" ]]; then printf 'keep\t%s\t%s\n' "$ref" "backups read the kept volumes with it (remove --purge takes it)"; continue; fi
     user="$(E ps -a --filter "ancestor=$id" --format '{{.Names}}' 2>/dev/null | while IFS= read -r n; do
       [[ "$(E inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$n" 2>/dev/null)" == "$PROJECT" ]] || echo "$n"; done | head -n1)"
@@ -3655,7 +3749,7 @@ cmd_remove() {
   fi
   list="$(images_to_remove)"
   vols="$(project_volumes)"
-  say "Remove Argus Arena from $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  say "Remove $PRODUCT from $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   say "  containers: $(printf '%s' "$ids" | grep -c . ) (stopped and removed, with the project's network)"
   say "  images: $(grep -c '^remove' <<<"$list") removed$(grep -q '^keep' <<<"$list" && echo "; kept:")"
   grep '^keep' <<<"$list" | while IFS=$'\t' read -r _ f why; do say "    $f: $why"; done
@@ -3688,7 +3782,7 @@ cmd_remove() {
   if [[ -n "$FINAL_BACKUP" ]]; then
     FINAL_BACKUP="$(abspath "$FINAL_BACKUP")"
     [[ "$FINAL_BACKUP" == "$DIR" || "$FINAL_BACKUP" == "$DIR"/* || "$FINAL_BACKUP" == "$BACKUP_DIR"* ]] && refuse "the last backup must go outside $DIR and $BACKUP_DIR, which are removed"
-    backup_usable || refuse "the backup.sh installed in $DEPLOY/scripts is an older release's, which backs up only with Docker: run remove from the release's bundle (sh argus-arena-VERSION-offline.run remove ...), whose backup.sh does; nothing removed"
+    backup_usable || refuse "the backup.sh installed in $DEPLOY/scripts is an older release's, which backs up only with Docker: run remove from the release's bundle (sh arena-VERSION-offline.run remove ...), whose backup.sh does; nothing removed"
   fi
   mkdir -p "$STATE" 2>/dev/null; lock; start_log
   if [[ -n "$FINAL_BACKUP" ]]; then
@@ -3757,7 +3851,7 @@ cmd_remove() {
     find "$STATE" -mindepth 1 -maxdepth 1 ! -name logs ! -name lock -exec rm -rf {} + 2>/dev/null
     did "the installer's record (its logs stay in $STATE/logs)"
     unlink_cli
-    say ""; say "Purged: Argus Arena and its data are gone from this host$([[ -n "$FINAL_BACKUP" ]] && echo "; the last backup is in $FINAL_BACKUP")."
+    say ""; say "Purged: $PRODUCT and its data are gone from this host$([[ -n "$FINAL_BACKUP" ]] && echo "; the last backup is in $FINAL_BACKUP")."
   else
     say ""; say "Removed the containers and images. Kept: the volumes ($(wc -w <<<"$vols")), $DEPLOY/.env, the backups and the models. install (or upgrade) brings it back; remove --purge deletes the data."
   fi
@@ -3767,12 +3861,12 @@ cmd_remove() {
 # ======================================================================== status
 cmd_status() {
   local iv svc name st health img ref problems=0 v root free left
-  [[ -f "$DEPLOY/docker-compose.yml" ]] || { say "Nothing installed in $DIR."; [[ -n "$BUNDLE" ]] && say "The bundle: Argus Arena $BVERSION ($(bundle_get commit))."; return 1; }
+  [[ -f "$DEPLOY/docker-compose.yml" ]] || { say "Nothing installed in $DIR."; [[ -n "$BUNDLE" ]] && say "The bundle: $PRODUCT $BVERSION ($(bundle_get commit))."; return 1; }
   # A log beside the installation's others, when it can be written (status changes nothing).
   [[ -n "$LOG_ARG" || -d "$STATE/logs" ]] && start_log soft
   read_settings
   iv="$(installed_version)"
-  say "Argus Arena in $DIR ($ENGINE, project $PROJECT)"
+  say "$PRODUCT in $DIR ($ENGINE, project $PROJECT)"
   say "  installed: ${iv:-unknown} ($(version_source))$([[ -n "$(state_get status)" && "$(state_get status)" != installed ]] && echo "; status: $(state_get status)")"
   if [[ -f "$MARKER" && "$(marker_get rolling-back)" == 1 ]]; then say "  a rollback to $(marker_get from) was cut off: run upgrade again to finish it"
   elif [[ -f "$MARKER" ]]; then say "  an upgrade to $(marker_get to) was interrupted: that bundle's upgrade (or a newer release's) run again carries it on; upgrade --rollback goes back to $(marker_get from)"; fi
@@ -3787,7 +3881,7 @@ cmd_status() {
     seen[$svc]=1
     v=""
     [[ $svc == app ]] && v="$(app_version)" && v="${v:+says $v}"
-    [[ $svc == argus ]] && v="$(argus_version)" && v="${v:+says $v}"
+    [[ $svc == code-intel ]] && v="$(code_intel_version)" && v="${v:+says $v}"
     [[ "$models" == *" $svc "* ]] && v="waits for $EMBED_FILE in MODELS_DIR"
     printf '  %-18s %-10s %-10s %s%s\n' "$svc" "$st" "${health:--}" "$ref" "${v:+  ($v)}"
     [[ $st == running && ( "$models" == *" $svc "* || ( $health != unhealthy && $health != starting ) ) ]] || problems=$((problems + 1))
@@ -3854,7 +3948,7 @@ cmd_verify() {
 # ================================================================== requirements
 cmd_requirements() {
   HTTP_PORT="${HTTP_ARG:-$([[ $ENGINE == podman ]] && echo 8080 || echo 80)}" HTTPS_PORT="${HTTPS_ARG:-$([[ $ENGINE == podman ]] && echo 8443 || echo 443)}"
-  say "What Argus Arena needs on this host ($ENGINE)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is changed")"
+  say "What $PRODUCT needs on this host ($ENGINE)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is changed")"
   check_requirements fresh
   if [[ $REQ_FAIL -eq 0 && ${#FIXES[@]} -eq 0 ]]; then say "Every requirement is met."; return 0; fi
   if [[ $FIX_REQ -eq 1 ]]; then

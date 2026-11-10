@@ -9,9 +9,9 @@
 # problem, not a throughput win. The embedding server serialises the calls
 # anyway, so concurrency buys almost nothing and costs heat.
 #
-# Uses the argus CLI (ARGUS_BIN, default `argus` on PATH -- or
-# src/Argus/bin/Release/net10.0/argus after a build) and the embedding
-# server at ARGUS_EMBED_URL (the stack's llamacpp-embed, e.g.
+# Uses the code-intel CLI (CODE_INTEL_BIN, default `code-intel` on PATH -- or
+# src/CodeIntel/bin/Release/net10.0/code-intel after a build) and the embedding
+# server at CODE_INTEL_EMBED_URL (the stack's llamacpp-embed, e.g.
 # http://localhost:8081 when its port is published).
 #
 # Resumable: a pack that already exists is skipped, so re-running after an
@@ -22,10 +22,10 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-SRC_DIR="${ARGUS_DOCSRC:-.packwork/docsrc}"
-OUT_DIR="${ARGUS_PACKS_OUT:-packs}"
-VERSION="${ARGUS_PACK_VERSION:-1.0}"
-ARGUS="${ARGUS_BIN:-argus}"
+SRC_DIR="${CODE_INTEL_DOCSRC:-.packwork/docsrc}"
+OUT_DIR="${CODE_INTEL_PACKS_OUT:-packs}"
+VERSION="${CODE_INTEL_PACK_VERSION:-1.0}"
+CODE_INTEL="${CODE_INTEL_BIN:-code-intel}"
 
 # pack name -> checkout directory. Ordered smallest first: a cheap pack that
 # fails tells you the pipeline is broken before an eleven-hour one does.
@@ -64,7 +64,7 @@ for name in "${wanted[@]}"; do
         failed+=("$name"); continue
     fi
     work="$SRC_DIR/$dir"
-    out="$OUT_DIR/$name-$VERSION.arguspack"
+    out="$OUT_DIR/$name-$VERSION.kpack"
 
     if [ -f "$out" ]; then
         echo "== $name: already built, skipping ($(du -h "$out" | cut -f1))"
@@ -78,7 +78,7 @@ for name in "${wanted[@]}"; do
     echo
     echo "== $name: building from $work"
     started=$(date +%s)
-    if "$ARGUS" pack build --source "$name" --work-dir "$work" \
+    if "$CODE_INTEL" pack build --source "$name" --work-dir "$work" \
             --out "$out" --version "$VERSION"; then
         echo "== $name: done in $(( ($(date +%s) - started) / 60 )) min"
     else

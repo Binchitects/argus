@@ -8,7 +8,7 @@ namespace Llm.Api.Chat.Tools;
 
 /// <summary>
 /// Tools as code (run_code): the model writes a short Python program that calls the chat's other tools as functions
-/// (arena.argus.find_symbol(...), found with arena.tools.search), loops, filters and joins their results, and only what
+/// (arena.code-intel.find_symbol(...), found with arena.tools.search), loops, filters and joins their results, and only what
 /// the program prints (and the files it writes) comes back to the window. It runs in the sandbox (no network); its calls
 /// go through the runner's socket to the chat, which runs each as the person, as a direct call would be.
 /// </summary>
@@ -80,7 +80,7 @@ public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, Ap
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [Schema.Function(Function,
             "Runs a Python 3.13 program that calls this chat's tools as functions, and returns what it prints. In it, `import arena`: " +
-            "arena.tools.search(\"words\") lists the functions that match (arena.<tool>.<function>), help(arena.argus.find_symbol) tells one's parameters, " +
+            "arena.tools.search(\"words\") lists the functions that match (arena.<tool>.<function>), help(arena.code-intel.find_symbol) tells one's parameters, " +
             "and each call (keyword arguments) returns the tool's result: a dict or a list when it is JSON, else text; a refused call raises arena.ToolError. " +
             $"At most {MostCalls} calls a program, {options.CurrentValue.TimeoutSeconds} seconds a run, no network but those calls. The chat's files are in the working directory; " +
             "files the program writes there are given to the person. Print only what you need: the results stay in the program.",

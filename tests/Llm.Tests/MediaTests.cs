@@ -68,7 +68,7 @@ public sealed class MediaTests(AppFixture app)
 
     private async Task<JsonObject> AskAsync(TestBrowser b, string model, Guid attachment)
     {
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model, useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model, useCodeIntel = false }))).GetProperty("id").GetGuid();
         var marker = "media-" + Guid.NewGuid().ToString("N")[..8];
         var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = marker, attachments = new[] { attachment } });
         await res.Content.ReadAsStringAsync();
@@ -176,7 +176,7 @@ public sealed class MediaTests(AppFixture app)
         await using var _s = sandbox;
         app.Model.UnknownOnce["Omni"] = true;
         app.Model.LoadingOnce["Omni"] = true;
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model = "Omni", useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model = "Omni", useCodeIntel = false }))).GetProperty("id").GetGuid();
         var answer = await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello after a first start" })).Content.ReadAsStringAsync();
         Assert.DoesNotContain("Invalid model name", answer, StringComparison.Ordinal);
         Assert.Contains(app.Model.Requests, r => r.Body.ToJsonString().Contains("hello after a first start", StringComparison.Ordinal));

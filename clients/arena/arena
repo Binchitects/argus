@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""arena: Argus Arena's models from a terminal or a CI job.
+"""arena: Arena's models from a terminal or a CI job.
 
 Python 3.8 or later and its standard library only: copy this one file anywhere.
 
@@ -515,7 +515,7 @@ def review(args, env, io):
 
     # The merge request's head, whose changes were read (CI_COMMIT_SHA can be a merged-results commit).
     sha = (mr.get("sha") or env.get("CI_COMMIT_SHA") or "")[:8]
-    footer = "Review by Argus Arena (%s)%s." % (model, " of " + sha if sha else "")
+    footer = "Review by Arena (%s)%s." % (model, " of " + sha if sha else "")
     if cut or left:
         footer += " It saw %d of %d changed files in full%s%s (ARENA_MAX_CHARS is %d)." % (
             shown, len(changes), ", %s in part" % cut if cut else "", "; left out: " + names(left) if left else "", budget)
@@ -587,7 +587,7 @@ def explain_failure(args, env, io):
         if not iid:
             err.write("No merge request is open for this pipeline: the explanation is in this job's log only.\n")
             return 0
-        footer = "Explanation by Argus Arena (%s)%s." % (model, " of pipeline #" + pipeline if pipeline else "")
+        footer = "Explanation by Arena (%s)%s." % (model, " of pipeline #" + pipeline if pipeline else "")
         gitlab.note(iid, "%s\n\n---\n_%s_\n" % (answer, footer))
         err.write("Posted the explanation on !%s.\n" % iid)
     return 0
@@ -598,7 +598,7 @@ def parser():
     common.add_argument("--model", help="the model (default: ARENA_MODEL, or the first chat model the key may use)")
     common.add_argument("--max-chars", type=int, metavar="N",
                         help="how much of the diff, the logs or piped text is sent (default: ARENA_MAX_CHARS, or %d)" % MAX_CHARS)
-    top = argparse.ArgumentParser(prog="arena", description="Argus Arena's models from a terminal or a CI job.",
+    top = argparse.ArgumentParser(prog="arena", description="Arena's models from a terminal or a CI job.",
                                   epilog=__doc__.split("\n\n", 3)[3], formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = top.add_subparsers(dest="command", metavar="command")
 

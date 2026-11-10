@@ -144,7 +144,7 @@ class RequirementsTests(unittest.TestCase):
             f"docker\t28.5.1\tdocker/docker-28.5.1.tgz\t{arch}\t-\n"
             f"docker-compose\t2.40.0\tdocker/docker-compose\t{arch}\t-\n"
             f"nvidia-container-toolkit-deb\t1.18.0\tnvidia/nvidia-container-toolkit_1.18.0_deb_amd64.tar.gz\t{arch}\t-\n")
-        (bundle / "MANIFEST").write_text("format: argus-arena-offline 1\nversion: 9.9.9\nupgrades-from: 5.2.0\n")
+        (bundle / "MANIFEST").write_text("format: arena-offline 1\nversion: 9.9.9\nupgrades-from: 5.2.0\n")
         self.s.bin.joinpath("nvidia-smi").write_text('#!/bin/sh\necho "GPU 0: Fake GPU (UUID: GPU-0)"\n')
         self.s.bin.joinpath("nvidia-smi").chmod(0o755)
         self.fake("groupadd", 'echo "groupadd $*" >> "$CALLS"')

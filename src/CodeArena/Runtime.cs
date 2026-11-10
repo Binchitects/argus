@@ -1511,7 +1511,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 try
                 {
-                    return await McpClient.ConnectAsync(CodeIntelName, new HttpMcpTransport(Http, codeIntelUrl, auth), ct);
+                    // Its address as the Arena announces it, unless the config gives one; else found by its name beside the Arena's.
+                    var url = Config.CodeIntelUrl is { Length: > 0 } given ? given : await Config.AnnouncedCodeIntelAsync(Http, Config.Url, ct) ?? codeIntelUrl;
+                    return await McpClient.ConnectAsync(CodeIntelName, new HttpMcpTransport(Http, url, auth), ct);
                 }
                 catch (McpException e) when (e.NoSuchHost && Config.CodeIntelUrl is not { Length: > 0 })
                 {

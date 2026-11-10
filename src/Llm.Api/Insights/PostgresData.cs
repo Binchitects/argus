@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Llm.Core.Insights;
 using Npgsql;
 
+using Branding;
 namespace Llm.Api.Insights;
 
 /// <summary>Why a data source could not be read, or a query not run, in words for the person (and the model, to fix it).</summary>
@@ -70,7 +71,7 @@ public sealed class PostgresData : IDataEngine
     /// <summary>Its own connection each time (no pool: nothing one query sets stays for the next), named in the database's activity.</summary>
     private static string Prepared(string connection, int seconds) => new NpgsqlConnectionStringBuilder(connection)
     {
-        Pooling = false, Timeout = 10, CommandTimeout = seconds + 5, ApplicationName = "Argus Arena (Ask your data)",
+        Pooling = false, Timeout = 10, CommandTimeout = seconds + 5, ApplicationName = $"{Brand.Product} (Ask your data)",
     }.ConnectionString;
 
     private static async Task<NpgsqlConnection> OpenAsync(string connection, int seconds, CancellationToken ct)

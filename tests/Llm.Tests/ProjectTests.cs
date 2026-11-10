@@ -44,7 +44,7 @@ public sealed class ProjectTests(AppFixture app)
 
     private static async Task<Guid> ChatAsync(TestBrowser b)
     {
-        var res = await b.PostAsync("/api/chat/conversations", new { useArgus = false });
+        var res = await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false });
         await StatusAssert.Is(HttpStatusCode.Created, res);
         return (await b.JsonAsync(res)).GetProperty("id").GetGuid();
     }

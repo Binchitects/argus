@@ -28,7 +28,7 @@ SUDO=""
 [[ $EUID -ne 0 ]] && SUDO="sudo"
 
 NAMES=("$DOMAIN")
-for n in auth chat admin api metrics alerts gateway traces logs cadvisor node gpu s3 argus; do
+for n in auth chat admin api metrics alerts gateway traces logs cadvisor node gpu s3 code-intel; do
   NAMES+=("$n.$DOMAIN")
 done
 

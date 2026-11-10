@@ -64,7 +64,8 @@ public sealed class DashboardStore(IOptions<DashboardOptions> options)
 
     private static Dashboard? Load(string file)
     {
-        if (JsonNode.Parse(File.ReadAllText(file)) is not JsonObject d || d["uid"]?.GetValue<string>() is not { } uid)
+        // Written with the default names (Brand.Named): shown with the names built.
+        if (JsonNode.Parse(Branding.Brand.Named(File.ReadAllText(file))) is not JsonObject d || d["uid"]?.GetValue<string>() is not { } uid)
         {
             return null;
         }

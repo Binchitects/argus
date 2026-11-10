@@ -11,14 +11,15 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
+using Branding;
 namespace Llm.Api.Code.Business;
 
 /// <summary>Why a project could not be mapped, in words for the person.</summary>
 public sealed class BusinessException(string message) : Exception(message);
 
 /// <summary>
-/// Argus's business map: for each project mapped, what its software does for the business, so Argus can explain the
-/// business, not only the code. A model, as the person who asks for the map, reads the project with Argus's read-only
+/// code-intel's business map: for each project mapped, what its software does for the business, so code-intel can explain the
+/// business, not only the code. A model, as the person who asks for the map, reads the project with code-intel's read-only
 /// tools (its README and documents, its code, the systems around it, its GitLab issues and wiki) and reports a profile
 /// through report_business: capabilities, entities, rules, processes, integrations and a glossary, each item with the
 /// sources it read. One map a project, mapped again on request; a person sees the maps of the projects they may read.
@@ -29,7 +30,7 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
     public const string Tag = "business";
     public const int MostTurns = 40;
 
-    /// <summary>The tools of Argus's the mapper reads with: the code, the estate, the issues and the wiki; nothing that changes anything.</summary>
+    /// <summary>The tools of code-intel's the mapper reads with: the code, the estate, the issues and the wiki; nothing that changes anything.</summary>
     public static readonly IReadOnlySet<string> ReadingTools = new HashSet<string>(StringComparer.Ordinal)
     {
         "overview", "get_file", "search_code", "semantic_search", "find_symbol", "find_references", "repo_map", "system_map", "dependency_path",
@@ -58,8 +59,8 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
     /// <summary>What runs stops with the host's own stopping token: nothing of its own to stop (or to be disposed before it is).</summary>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    /// <summary>Whether the person may read the project, as Argus says (GitLab's membership), kept ten minutes.</summary>
-    public async Task<bool> MayReadAsync(ArgusMcp argus, AppUser me, string project, CancellationToken ct)
+    /// <summary>Whether the person may read the project, as code-intel says (GitLab's membership), kept ten minutes.</summary>
+    public async Task<bool> MayReadAsync(CodeIntelMcp codeIntel, AppUser me, string project, CancellationToken ct)
     {
         var key = $"business-read:{me.Id:N}:{project}";
         if (cache.TryGetValue(key, out bool may))
@@ -68,13 +69,13 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
         }
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email!, ct);
             var (_, isError) = await session.CallAsync("issue_list", new JsonObject { ["project"] = project, ["limit"] = 1 }, null, ct);
             may = !isError;
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            // Argus out of reach: nothing is shown rather than too much.
+            // code-intel out of reach: nothing is shown rather than too much.
             return false;
         }
         cache.Set(key, may, TimeSpan.FromMinutes(10));
@@ -82,13 +83,13 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
     }
 
     /// <summary>The maps the person may read (ready or not), by name.</summary>
-    public async Task<List<BusinessSystem>> VisibleAsync(AppDbContext db, ArgusMcp argus, AppUser me, CancellationToken ct)
+    public async Task<List<BusinessSystem>> VisibleAsync(AppDbContext db, CodeIntelMcp codeIntel, AppUser me, CancellationToken ct)
     {
         var all = await db.BusinessSystems.AsNoTracking().OrderBy(b => b.Name).ThenBy(b => b.Project).ToListAsync(ct);
         var seen = new List<BusinessSystem>();
         foreach (var b in all)
         {
-            if (await MayReadAsync(argus, me, b.Project, ct))
+            if (await MayReadAsync(codeIntel, me, b.Project, ct))
             {
                 seen.Add(b);
             }
@@ -115,7 +116,7 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
             var model = await ModelAsync(services, user, ct);
             system.Model = model;
             await StepAsync(db, system, "Reading the project", ct);
-            var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(user.Id, user.Email!, ct);
+            var session = await services.GetRequiredService<CodeIntelMcp>().ConnectAsync(user.Id, user.Email!, ct);
             var tools = Mcp.ToOpenAiTools(new JsonArray([.. (await session.ToolsAsync(ct)).OfType<JsonObject>()
                 .Where(t => ReadingTools.Contains(t["name"]?.GetValue<string>() ?? "")).Select(t => (JsonNode)t.DeepClone())]));
             tools.Add(ReportTool.DeepClone());
@@ -138,7 +139,7 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
             LogFailed(logger, id, ex);
             system.Status = BusinessSystem.Failed;
             system.Error = ex is BusinessException or ChatGatewayException ? ex.Message
-                : ex is McpException or HttpRequestException ? "Argus could not be reached: map it again in a moment."
+                : ex is McpException or HttpRequestException ? $"{Brand.CodeIntel} could not be reached: map it again in a moment."
                 : "The map failed on the server. Try again, and tell an admin if it keeps failing.";
             system.Step = null;
             await db.SaveChangesAsync(CancellationToken.None);

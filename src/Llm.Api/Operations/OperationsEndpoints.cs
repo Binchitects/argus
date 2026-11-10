@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Operations;
 
 public sealed record Probe(string Name, string Purpose, bool Ok, string Detail);
@@ -33,7 +34,7 @@ public sealed record RepoBatchRequest(long[] Ids, string Action, string? Schedul
 /// <param name="LeaveOut">Leave the repository out of the index too; else it is built anew by the next pass or an update.</param>
 public sealed record RemoveIndexRequest(bool LeaveOut = false);
 
-/// <param name="Schedule">Five-field cron; "": Argus does not reindex by itself.</param>
+/// <param name="Schedule">Five-field cron; "": code-intel does not reindex by itself.</param>
 /// <param name="TimeZone">IANA, e.g. Europe/Berlin.</param>
 public sealed record IndexScheduleRequest(string Schedule, string TimeZone);
 
@@ -49,48 +50,48 @@ public static class OperationsEndpoints
     {
         var g = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.SettingsManage);
         g.MapGet("/overview", OverviewAsync);
-        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Features features,
+        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<CodeIntelOptions> a, IOptions<Dashboards.DashboardOptions> d, Features features,
             Models.MediaControl media, CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, features, media, ct)));
         // People, their emails and spend: people.read's, not monitoring's.
         g.MapGet("/people.csv", PeopleCsvAsync).RequirePermission(Llm.Core.Access.Permissions.PeopleRead);
 
-        var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage, new Dictionary<string, string>
+        var codeIntel = g.MapGroup("/code-intel").RequirePermissions(Llm.Core.Access.Permissions.CodeIntelRead, Llm.Core.Access.Permissions.CodeIntelManage, new Dictionary<string, string>
         {
-            ["POST /api/admin/argus/webhook"] = Llm.Core.Access.Permissions.ArgusWebhook,
-            ["DELETE /api/admin/argus/webhook"] = Llm.Core.Access.Permissions.ArgusWebhook,
-            ["POST /api/admin/argus/index"] = Llm.Core.Access.Permissions.ArgusIndex,
-            ["POST /api/admin/argus/repos/discover"] = Llm.Core.Access.Permissions.ArgusRepos,
-            ["PATCH /api/admin/argus/repos/{gitlabId:long}"] = Llm.Core.Access.Permissions.ArgusRepos,
-            ["POST /api/admin/argus/repos/batch"] = Llm.Core.Access.Permissions.ArgusRepos,
-            ["POST /api/admin/argus/repos/{gitlabId:long}/index/remove"] = Llm.Core.Access.Permissions.ArgusIndex,
-            ["PUT /api/admin/argus/repos/settings"] = Llm.Core.Access.Permissions.ArgusRepos,
-            ["PUT /api/admin/argus/schedule"] = Llm.Core.Access.Permissions.ArgusIndex,
-            ["POST /api/admin/argus/packs/{action}"] = Llm.Core.Access.Permissions.ArgusPacks,
+            ["POST /api/admin/code-intel/webhook"] = Llm.Core.Access.Permissions.CodeIntelWebhook,
+            ["DELETE /api/admin/code-intel/webhook"] = Llm.Core.Access.Permissions.CodeIntelWebhook,
+            ["POST /api/admin/code-intel/index"] = Llm.Core.Access.Permissions.CodeIntelIndex,
+            ["POST /api/admin/code-intel/repos/discover"] = Llm.Core.Access.Permissions.CodeIntelRepos,
+            ["PATCH /api/admin/code-intel/repos/{gitlabId:long}"] = Llm.Core.Access.Permissions.CodeIntelRepos,
+            ["POST /api/admin/code-intel/repos/batch"] = Llm.Core.Access.Permissions.CodeIntelRepos,
+            ["POST /api/admin/code-intel/repos/{gitlabId:long}/index/remove"] = Llm.Core.Access.Permissions.CodeIntelIndex,
+            ["PUT /api/admin/code-intel/repos/settings"] = Llm.Core.Access.Permissions.CodeIntelRepos,
+            ["PUT /api/admin/code-intel/schedule"] = Llm.Core.Access.Permissions.CodeIntelIndex,
+            ["POST /api/admin/code-intel/packs/{action}"] = Llm.Core.Access.Permissions.CodeIntelPacks,
         });
-        argus.MapGet("/status", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
+        codeIntel.MapGet("/status", (CodeIntelAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
         // The GitLab webhook: on a push or a merge, the repository's index is brought up to date.
-        argus.MapGet("/webhook", (ArgusWebhook w, ArgusAdmin a, CancellationToken ct) => Relay(async () => (JsonNode?)await w.ViewAsync(ct), a));
-        argus.MapPost("/webhook", (ArgusWebhook w, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapGet("/webhook", (CodeIntelWebhook w, CodeIntelAdmin a, CancellationToken ct) => Relay(async () => (JsonNode?)await w.ViewAsync(ct), a));
+        codeIntel.MapPost("/webhook", (CodeIntelWebhook w, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var token = await w.RotateAsync(ct);
-            await audit.WriteAsync("argus.webhook_secret", "gitlab");
-            // The only time the secret is shown: Argus keeps its hash, the app nothing.
+            await audit.WriteAsync("code-intel.webhook_secret", "gitlab");
+            // The only time the secret is shown: code-intel keeps its hash, the app nothing.
             var view = await w.ViewAsync(ct);
             view["token"] = token;
             return (JsonNode?)view;
         }, a));
-        argus.MapDelete("/webhook", (ArgusWebhook w, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapDelete("/webhook", (CodeIntelWebhook w, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             await w.DisableAsync(ct);
-            await audit.WriteAsync("argus.webhook_off", "gitlab");
+            await audit.WriteAsync("code-intel.webhook_off", "gitlab");
             return (JsonNode?)await w.ViewAsync(ct);
         }, a));
-        argus.MapPost("/index", (IndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapPost("/index", (IndexRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             if (body.Repo is { Length: > 0 } repo)
             {
                 var one = await a.PostAsync("index", new JsonObject { ["repo"] = repo.Trim() }, ct);
-                await audit.WriteAsync("argus.index_repo", repo.Trim());
+                await audit.WriteAsync("code-intel.index_repo", repo.Trim());
                 return one;
             }
             var branches = (body.Branches ?? []).Select(b => b.Trim()).Where(b => b.Length > 0).ToArray();
@@ -99,18 +100,18 @@ public static class OperationsEndpoints
                 ["branches"] = new JsonArray([.. branches.Select(b => JsonValue.Create(b))]),
                 ["allow_partial"] = body.AllowPartial,
             }, ct);
-            await audit.WriteAsync("argus.index", string.Join(",", branches), detail: body.AllowPartial ? "partial enumeration allowed" : null);
+            await audit.WriteAsync("code-intel.index", string.Join(",", branches), detail: body.AllowPartial ? "partial enumeration allowed" : null);
             return res;
         }, a));
-        // Which repositories and branches are indexed (Argus keeps the choices).
-        argus.MapGet("/repos", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("repos", ct), a));
-        argus.MapPost("/repos/discover", (ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        // Which repositories and branches are indexed (code-intel keeps the choices).
+        codeIntel.MapGet("/repos", (CodeIntelAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("repos", ct), a));
+        codeIntel.MapPost("/repos/discover", (CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var res = await a.PostAsync("repos/discover", new JsonObject(), ct);
-            await audit.WriteAsync("argus.repos_discover", null);
+            await audit.WriteAsync("code-intel.repos_discover", null);
             return res;
         }, a));
-        argus.MapPatch("/repos/{gitlabId:long}", (long gitlabId, RepoChoiceRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapPatch("/repos/{gitlabId:long}", (long gitlabId, RepoChoiceRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var payload = new JsonObject();
             if (body.Included is { } included)
@@ -127,7 +128,7 @@ public static class OperationsEndpoints
             }
             var res = await a.PatchAsync($"repos/{gitlabId}", payload, ct);
             var repo = res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            await audit.WriteAsync("argus.repo_choice", repo,
+            await audit.WriteAsync("code-intel.repo_choice", repo,
                 detail: string.Join("; ", new[]
                 {
                     body.Included is { } i ? (i ? "indexed" : "not indexed") : null, body.Branches is { } b ? $"branches: {string.Join(", ", b)}" : null,
@@ -136,7 +137,7 @@ public static class OperationsEndpoints
             return res;
         }, a));
         // Several at once, each with its outcome: in or out, updated now, a schedule, more branches, removed.
-        argus.MapPost("/repos/batch", (RepoBatchRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapPost("/repos/batch", (RepoBatchRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var payload = new JsonObject { ["action"] = body.Action, ["ids"] = new JsonArray([.. (body.Ids ?? []).Select(id => JsonValue.Create(id))]) };
             if (body.Schedule is { } schedule)
@@ -149,24 +150,24 @@ public static class OperationsEndpoints
             }
             var res = await a.PostAsync("repos/batch", payload, ct);
             var results = res?["results"] as JsonArray ?? [];
-            await audit.WriteAsync("argus.repos_batch", body.Action,
+            await audit.WriteAsync("code-intel.repos_batch", body.Action,
                 detail: $"{results.Count(r => r?["ok"]?.GetValue<bool>() == true)} of {results.Count} repositories" +
                         (body.Schedule is { } s ? $"; schedule: {(s.Trim().Length > 0 ? s.Trim() : "default")}" : "") +
                         (body.Branches is { } b ? $"; branches: {string.Join(", ", b)}" : ""));
             return res;
         }, a));
-        argus.MapGet("/repos/{gitlabId:long}/log", (long gitlabId, int? runs, ArgusAdmin a, CancellationToken ct) =>
+        codeIntel.MapGet("/repos/{gitlabId:long}/log", (long gitlabId, int? runs, CodeIntelAdmin a, CancellationToken ct) =>
             Relay(() => a.GetAsync($"repos/{gitlabId}/log?runs={Math.Clamp(runs ?? 5, 1, 20)}", ct), a));
-        argus.MapGet("/repos/{gitlabId:long}/branches", (long gitlabId, ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync($"repos/{gitlabId}/branches", ct), a));
+        codeIntel.MapGet("/repos/{gitlabId:long}/branches", (long gitlabId, CodeIntelAdmin a, CancellationToken ct) => Relay(() => a.GetAsync($"repos/{gitlabId}/branches", ct), a));
         // Its index removed now; left out too, or kept in to be built anew.
-        argus.MapPost("/repos/{gitlabId:long}/index/remove", (long gitlabId, RemoveIndexRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapPost("/repos/{gitlabId:long}/index/remove", (long gitlabId, RemoveIndexRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var res = await a.PostAsync($"repos/{gitlabId}/index/remove", new JsonObject { ["leave_out"] = body.LeaveOut }, ct);
-            await audit.WriteAsync("argus.index_remove", res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            await audit.WriteAsync("code-intel.index_remove", res?["repo"]?.GetValue<string>() ?? gitlabId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 detail: body.LeaveOut ? "left out" : "kept in, built anew");
             return res;
         }, a));
-        argus.MapPut("/repos/settings", (RepoPolicyRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapPut("/repos/settings", (RepoPolicyRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             var payload = new JsonObject();
             if (body.NewRepos is { } policy)
@@ -182,7 +183,7 @@ public static class OperationsEndpoints
                 payload["schedule_tz"] = zone.Trim();
             }
             var res = await a.PutAsync("repos/settings", payload, ct);
-            await audit.WriteAsync("argus.repo_policy", body.NewRepos ?? body.Schedule,
+            await audit.WriteAsync("code-intel.repo_policy", body.NewRepos ?? body.Schedule,
                 detail: string.Join("; ", new[]
                 {
                     body.NewRepos is { } n ? $"new repositories: {n}" : null, body.Schedule is { } s ? $"schedule for all: {s.Trim()}" : null,
@@ -190,10 +191,10 @@ public static class OperationsEndpoints
                 }.OfType<string>()));
             return res;
         }, a));
-        argus.MapGet("/schedule", ScheduleAsync);
-        argus.MapPut("/schedule", SetScheduleAsync);
-        argus.MapGet("/packs", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("packs", ct), a));
-        argus.MapPost("/packs/{action}", (string action, PackRequest body, ArgusAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
+        codeIntel.MapGet("/schedule", ScheduleAsync);
+        codeIntel.MapPut("/schedule", SetScheduleAsync);
+        codeIntel.MapGet("/packs", (CodeIntelAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("packs", ct), a));
+        codeIntel.MapPost("/packs/{action}", (string action, PackRequest body, CodeIntelAdmin a, Identity.Audit audit, CancellationToken ct) => Relay(async () =>
         {
             JsonObject payload = action switch
             {
@@ -202,13 +203,13 @@ public static class OperationsEndpoints
                 "remove" => new() { ["name"] = body.Name },
                 "load" => new() { ["file"] = body.File },
                 "renew" => new() { ["name"] = body.Name },
-                _ => throw new ArgusException("Unknown pack action.", 404),
+                _ => throw new CodeIntelException("Unknown pack action.", 404),
             };
             var res = await a.PostAsync("packs/" + action, payload, ct);
-            await audit.WriteAsync("argus.packs." + action, body.Name ?? body.Source ?? body.File);
+            await audit.WriteAsync("code-intel.packs." + action, body.Name ?? body.Source ?? body.File);
             return res;
         }, a));
-        argus.MapGet("/explore", (string? q, string? repo, int? limit, ArgusAdmin a, CancellationToken ct) =>
+        codeIntel.MapGet("/explore", (string? q, string? repo, int? limit, CodeIntelAdmin a, CancellationToken ct) =>
         {
             var query = $"explore?q={Uri.EscapeDataString(q ?? "")}&repo={Uri.EscapeDataString(repo ?? "")}&limit={Math.Clamp(limit ?? 50, 1, 500)}";
             return Relay(() => a.GetAsync(query, ct), a);
@@ -220,7 +221,7 @@ public static class OperationsEndpoints
             ("docs", new[] { "q", "mode", "source", "limit" }), ("doc", new[] { "path", "source" }),
         })
         {
-            argus.MapGet("/explore/" + what, (HttpRequest request, ArgusAdmin a, CancellationToken ct) =>
+            codeIntel.MapGet("/explore/" + what, (HttpRequest request, CodeIntelAdmin a, CancellationToken ct) =>
             {
                 var query = string.Join('&', keys.Select(k => $"{k}={Uri.EscapeDataString(request.Query[k].ToString())}"));
                 return Relay(() => a.GetAsync($"explore/{what}?{query}", ct), a);
@@ -228,11 +229,11 @@ public static class OperationsEndpoints
         }
     }
 
-    /// <summary>When Argus reindexes by itself: the schedule, its zone, and the next passes.</summary>
-    private static IResult ScheduleAsync(IOptionsMonitor<ArgusIndexOptions> options, TimeProvider clock)
+    /// <summary>When code-intel reindexes by itself: the schedule, its zone, and the next passes.</summary>
+    private static IResult ScheduleAsync(IOptionsMonitor<CodeIntelIndexOptions> options, TimeProvider clock)
     {
         var o = options.CurrentValue;
-        var (cron, zone, problem) = ArgusIndexSchedule.Read(o);
+        var (cron, zone, problem) = CodeIntelIndexSchedule.Read(o);
         return Results.Ok(new
         {
             schedule = o.Schedule ?? "", timeZone = zone.Id, problem,
@@ -259,21 +260,21 @@ public static class OperationsEndpoints
             {
                 return AuthEndpoints.Problem(400, "schedule", "That schedule never comes round (31 February?).");
             }
-            if (cron.ShortestGap(clock.GetUtcNow(), zone) is { } gap && gap < ArgusIndexSchedule.MinInterval)
+            if (cron.ShortestGap(clock.GetUtcNow(), zone) is { } gap && gap < CodeIntelIndexSchedule.MinInterval)
             {
-                return AuthEndpoints.Problem(400, "schedule", $"At most one pass every {ArgusIndexSchedule.MinInterval.TotalMinutes:0} minutes: a pass reads every repository's changes.");
+                return AuthEndpoints.Problem(400, "schedule", $"At most one pass every {CodeIntelIndexSchedule.MinInterval.TotalMinutes:0} minutes: a pass reads every repository's changes.");
             }
             schedule = cron.Expression;
         }
-        await settings.SaveAsync([new Settings.SettingChange("ArgusIndex:Schedule", schedule), new Settings.SettingChange("ArgusIndex:TimeZone", zone.Id)], ct);
-        await audit.WriteAsync("argus.index_schedule", schedule.Length > 0 ? schedule : "off", detail: zone.Id);
+        await settings.SaveAsync([new Settings.SettingChange("CodeIntelIndex:Schedule", schedule), new Settings.SettingChange("CodeIntelIndex:TimeZone", zone.Id)], ct);
+        await audit.WriteAsync("code-intel.index_schedule", schedule.Length > 0 ? schedule : "off", detail: zone.Id);
         return Results.NoContent();
     }
 
-    /// <summary>Argus's answer as it is, or a sentence saying why there is none.</summary>
-    private static async Task<IResult> Relay(Func<Task<JsonNode?>> call, ArgusAdmin argus)
+    /// <summary>code-intel's answer as it is, or a sentence saying why there is none.</summary>
+    private static async Task<IResult> Relay(Func<Task<JsonNode?>> call, CodeIntelAdmin codeIntel)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
             return Results.Ok(new { configured = false });
         }
@@ -281,14 +282,14 @@ public static class OperationsEndpoints
         {
             return Results.Ok(await call());
         }
-        catch (ArgusException ex)
+        catch (CodeIntelException ex)
         {
-            return AuthEndpoints.Problem(ex.Status, "argus", ex.Message);
+            return AuthEndpoints.Problem(ex.Status, "code-intel", ex.Message);
         }
     }
 
-    private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
-        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
+    private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CodeIntelAdmin codeIntel,
+        IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<CodeIntelOptions> codeIntelOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
         Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, Features features, CancellationToken ct)
     {
@@ -299,16 +300,16 @@ public static class OperationsEndpoints
         var warning = spending.Problem;
         var over = people.Where(p => spending.Over(p).Count > 0).Select(p => p.UserName).ToList();
 
-        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value, features, media, ct);
+        var probes = ProbeAllAsync(factory, stack.Value, codeIntelOptions.Value, dashboards.Value, features, media, ct);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
         var space = disks.ListAsync(ct);
         JsonNode? index = null;
         string? indexError = null;
-        if (argus.Enabled)
+        if (codeIntel.Enabled)
         {
             try
             {
-                var st = await argus.GetAsync("index/status", ct);
+                var st = await codeIntel.GetAsync("index/status", ct);
                 index = st?["index"]?.DeepClone();
                 if (index is JsonObject o && st?["job"] is JsonObject job)
                 {
@@ -317,7 +318,7 @@ public static class OperationsEndpoints
                     o["state"] = job["state"]?.DeepClone();
                 }
             }
-            catch (ArgusException ex)
+            catch (CodeIntelException ex)
             {
                 indexError = ex.Message;
             }
@@ -330,7 +331,7 @@ public static class OperationsEndpoints
             overCredit = over,
             warning,
             services = await probes,
-            index = new { configured = argus.Enabled, summary = index, error = indexError },
+            index = new { configured = codeIntel.Enabled, summary = index, error = indexError },
             model = models.DefaultName,
             certificate = await certificate,
             // The fullest disks, and which are past the share that raises the storage alert (Admin → Storage).
@@ -360,7 +361,7 @@ public static class OperationsEndpoints
     /// picture and video servers run only while their model is loaded (MediaControl): one whose model is unloaded, as
     /// meant (idle ten minutes, or never asked for), or that has no model in the library yet, is idle, not down.
     /// </summary>
-    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d,
+    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, CodeIntelOptions a, Dashboards.DashboardOptions d,
         Features features, Models.MediaControl? media = null, CancellationToken ct = default)
     {
         var http = factory.CreateClient("probe");
@@ -375,10 +376,10 @@ public static class OperationsEndpoints
             ("videogen", "Video", "the video tool's server", Models.MediaModels.VideoUrl + "/v1/models"),
             ("audio", "Speech", "speech to text and text to speech", Models.MediaModels.AudioUrl + "/health"),
             ("searxng", "Web search", "SearXNG, the web tool's search", "http://searxng:8080/healthz"),
-            ("argus", "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"),
+            ("code-intel", $"{Brand.CodeIntel}", "the code index", a.Url.TrimEnd('/') + "/healthz"),
         };
         var probes = await Task.WhenAll(services
-            .Where(x => features.Runs(x.Service) && (x.Service != "argus" || a.Enabled))
+            .Where(x => features.Runs(x.Service) && (x.Service != "code-intel" || a.Enabled))
             .Select(x => ProbeAsync(http, x.Name, x.Purpose, x.Url)));
         if (media is null)
         {

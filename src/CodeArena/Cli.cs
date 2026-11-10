@@ -538,7 +538,8 @@ internal static partial class Cli
                 // A key of another account (a test one) would keep the sessions with that account's chats, not the person's.
                 ui.Line($"{ui.Green("✓")} Sessions are kept with {account}'s chats in Arena: the key's account.");
             }
-            var codeIntel = new Config { Url = url, CodeIntelUrl = config.CodeIntelUrl };
+            // Its address as the Arena announces it (argus.DOMAIN on one from before 8.0), unless the config gives one.
+            var codeIntel = new Config { Url = url, CodeIntelUrl = config.CodeIntelUrl is { Length: > 0 } given ? given : await Config.AnnouncedCodeIntelAsync(http, url, ct) };
             if (config.CodeIntelTools && codeIntel.CodeIntelMcpUrl is { } codeIntelUrl)
             {
                 try

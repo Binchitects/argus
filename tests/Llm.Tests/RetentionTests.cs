@@ -42,7 +42,7 @@ public sealed class RetentionTests(AppFixture app)
 
     private static async Task<Guid> ChatAsync(TestBrowser b, string text, Guid[]? attachments = null)
     {
-        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text, attachments });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         await res.Content.ReadAsStringAsync();

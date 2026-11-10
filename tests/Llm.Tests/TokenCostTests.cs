@@ -241,7 +241,7 @@ public sealed class TokenCostTests(AppFixture app)
         var (b, personId, _) = await PersonAsync(f);
         async Task<Guid> CompareAsync(TestBrowser who)
         {
-            var chat = (await who.JsonAsync(await who.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+            var chat = (await who.JsonAsync(await who.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
             var res = await who.PostAsync($"/api/chat/conversations/{chat}/compare", new { content = "Which sort is stable?" });
             await StatusAssert.Is(HttpStatusCode.OK, res);
             await res.Content.ReadAsStringAsync();

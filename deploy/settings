@@ -1,4 +1,4 @@
-# Argus Arena's settings in .env that an operator chooses: what each is, its kind and its default.
+# Arena's settings in .env that an operator chooses: what each is, its kind and its default.
 #
 # installer.sh asks them on install, upgrade and repair (on a terminal, when asked to: "Change other
 # settings"), takes them as --set KEY=VALUE (--set KEY=@FILE reads a secret from a file, never from the
@@ -15,7 +15,8 @@
 #   default   what empty means (the compose file's default); "-" for none
 #   what      what it does, in a few words
 #
-DOMAIN               | Address       | host    | llm.localhost | The address people open: https://DOMAIN (also gateway.DOMAIN and argus.DOMAIN)
+DOMAIN               | Address       | host    | llm.localhost | The address people open: https://DOMAIN (also gateway.DOMAIN and CODE_INTEL_HOST.DOMAIN)
+CODE_INTEL_HOST      | Address       | text    | code-intel    | The code-intelligence service's address under DOMAIN: CODE_INTEL_HOST.DOMAIN (people's DNS and tools name it)
 ADMIN_EMAIL          | Address       | email   | admin@example.com | The first admin's email (their user name is admin)
 HTTP_PORT            | Address       | port    | 80            | The port for http:// (it sends people on to https)
 HTTPS_PORT           | Address       | port    | 443           | The port for https://
@@ -39,11 +40,11 @@ LMDEPLOY_SHM         | Models        | size    | 16gb          | LMDeploy's shar
 STRATA_IMAGE         | Models        | text    | ghcr.io/niko1221/strata:0.2.11-cuda13 | Strata's image (the strata feature)
 STRATA_SHM           | Models        | size    | 2gb           | Strata's shared memory
 KVCACHE_DIR          | Models        | path    | ./kvcache     | LMCache's disk tier for vLLM models: fast NVMe
-GITLAB_URL           | GitLab        | url     | -             | The GitLab Argus indexes
+GITLAB_URL           | GitLab        | url     | -             | The GitLab the code-intelligence service indexes
 GITLAB_TOKEN         | GitLab        | secret  | -             | Its read-only token (read_api and read_repository)
-GITLAB_LDAP          | GitLab        | text    | -             | An LDAP account for Argus's own sign-in: a provider's name, or off
+GITLAB_LDAP          | GitLab        | text    | -             | An LDAP account for the code-intelligence service's own sign-in: a provider's name, or off
 GITLAB_VERIFY_TLS    | GitLab        | choice:true/false | true | Check GitLab's certificate (false: testing only)
-GITLAB_CA_FILE       | GitLab        | path    | -             | GitLab's CA when it is your company's own (or GitLab's self-signed certificate): a PEM file, trusted by the app, Argus and the workspaces
+GITLAB_CA_FILE       | GitLab        | path    | -             | GitLab's CA when it is your company's own (or GitLab's self-signed certificate): a PEM file, trusted by the app, the code-intelligence service and the workspaces
 GITHUB_API_URL       | GitLab        | text    | -             | Reviews of GitHub pull requests: empty is github.com, an Enterprise API, or off
 GITEA_URL            | GitLab        | url     | -             | Reviews of Gitea pull requests: your Gitea
 BACKUP_DIR           | Backups       | path    | ./backups     | Where backups go

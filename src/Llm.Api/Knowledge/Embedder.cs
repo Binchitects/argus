@@ -35,7 +35,7 @@ public sealed class KnowledgeOptions
 public sealed class EmbedderException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// Text to unit vectors through an OpenAI-compatible /v1/embeddings (the embed module, as Argus uses it).
+/// Text to unit vectors through an OpenAI-compatible /v1/embeddings (the embed module, as code-intel uses it).
 /// Present when its name resolves on the stack's network (<see cref="Operations.Modules"/>): no embedder, no knowledge.
 /// </summary>
 public sealed class Embedder(IHttpClientFactory http, IOptionsMonitor<KnowledgeOptions> options, Operations.Modules modules)

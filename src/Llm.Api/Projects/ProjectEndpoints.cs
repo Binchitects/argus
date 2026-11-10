@@ -15,6 +15,7 @@ using Llm.Core.Projects;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Projects;
 
 /// <summary>Only what is sent changes. MonthlyBudget: 0 or less takes the budget away; StartsOn and DueOn: "" clears them.</summary>
@@ -39,7 +40,7 @@ public sealed record ProjectGoalRequest(string? Title = null, string? Descriptio
 public sealed record ProjectTaskRequest(string? Title = null, Guid? GoalId = null, Guid? AssigneeId = null, bool? Done = null, decimal? HumanHours = null);
 
 /// <summary>
-/// Projects in Argus Arena and Code Arena: made by anyone who may (feature.projects; a global one, everyone's to see and add
+/// Projects in Arena and Code Arena: made by anyone who may (feature.projects; a global one, everyone's to see and add
 /// to, with feature.projects.global), with their people and groups in roles, their repositories, the chats, rooms and Code
 /// Arena sessions put in them, the assistants, skills and apps they use, their goals and tasks, and their accounting over any
 /// time (the usage log's requests tagged with them) on their page and as PDF, Excel or CSV. Every change is audited.
@@ -499,7 +500,7 @@ public static class ProjectEndpoints
 
     // -------------------------------------------------- repositories, things --
 
-    /// <summary>"group/repo", from a path, a clone address or a web address: what Code Arena's sessions and Argus know it by.</summary>
+    /// <summary>"group/repo", from a path, a clone address or a web address: what Code Arena's sessions and code-intel know it by.</summary>
     public static (string Path, string? Host)? RepositoryOf(string text, string? host)
     {
         var t = text.Trim();
@@ -931,7 +932,7 @@ public static class ProjectEndpoints
     /// person's share is for its owners (others see their own row, and that it is so).
     /// </summary>
     private static async Task<IResult> ReportAsync(Guid id, DateTimeOffset from, DateTimeOffset to, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db,
-        AccessService access, LedgerSql sql, ArgusMcp argus, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
+        AccessService access, LedgerSql sql, CodeIntelMcp codeIntel, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
     {
         var me = await Me(principal, users);
         var (p, role, refused) = await FindAsync(db, id, me, await access.MembershipAsync(me, ct), ProjectMember.Viewer, ct);
@@ -952,7 +953,7 @@ public static class ProjectEndpoints
         {
             return AuthEndpoints.Problem(503, "usage", "Usage cannot be read right now: " + ex.Message);
         }
-        var (merged, mergedError) = await MergedAsync(db, argus, me, p.Id, from, to, ct);
+        var (merged, mergedError) = await MergedAsync(db, codeIntel, me, p.Id, from, to, ct);
         var everyone = role == ProjectMember.Owner;
         return Results.Ok(new
         {
@@ -965,7 +966,7 @@ public static class ProjectEndpoints
     }
 
     private static async Task<IResult> ExportAsync(Guid id, DateTimeOffset from, DateTimeOffset to, string? format, ClaimsPrincipal principal, UserManager<AppUser> users,
-        AppDbContext db, AccessService access, LedgerSql sql, ArgusMcp argus, Audit audit, TimeProvider clock, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
+        AppDbContext db, AccessService access, LedgerSql sql, CodeIntelMcp codeIntel, Audit audit, TimeProvider clock, Microsoft.Extensions.Options.IOptionsMonitor<Reports.CostOptions> costs, CancellationToken ct)
     {
         var me = await Me(principal, users);
         var (p, role, refused) = await FindAsync(db, id, me, await access.MembershipAsync(me, ct), ProjectMember.Viewer, ct);
@@ -990,7 +991,7 @@ public static class ProjectEndpoints
         {
             return AuthEndpoints.Problem(503, "usage", "Usage cannot be read right now: " + ex.Message);
         }
-        var (merged, _) = await MergedAsync(db, argus, me, p.Id, from, to, ct);
+        var (merged, _) = await MergedAsync(db, codeIntel, me, p.Id, from, to, ct);
         var goals = await db.ProjectGoals.AsNoTracking().Where(x => x.ProjectId == id).OrderBy(x => x.Position).ToListAsync(ct);
         var doc = ProjectReport.Document(p, n, goals, [.. merged.Select(x => (x.Repository, x.Iid, x.Title, x.Author, x.MergedAt))], role == ProjectMember.Owner, me.Id, Name(me),
             clock.GetUtcNow());
@@ -1000,8 +1001,8 @@ public static class ProjectEndpoints
 
     private sealed record Merged(string Repository, int Iid, string Title, string? Author, DateTimeOffset? MergedAt, string? Url);
 
-    /// <summary>The changes merged in the project's repositories in the time, as the person may read them (Argus, as them); why not, when it cannot say.</summary>
-    private static async Task<(List<Merged> Merged, string? Error)> MergedAsync(AppDbContext db, ArgusMcp argus, AppUser me, Guid id, DateTimeOffset from, DateTimeOffset to,
+    /// <summary>The changes merged in the project's repositories in the time, as the person may read them (code-intel, as them); why not, when it cannot say.</summary>
+    private static async Task<(List<Merged> Merged, string? Error)> MergedAsync(AppDbContext db, CodeIntelMcp codeIntel, AppUser me, Guid id, DateTimeOffset from, DateTimeOffset to,
         CancellationToken ct)
     {
         var repos = await db.ProjectRepositories.AsNoTracking().Where(r => r.ProjectId == id).Select(r => r.Path).ToListAsync(ct);
@@ -1009,15 +1010,15 @@ public static class ProjectEndpoints
         {
             return ([], null);
         }
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return ([], "Argus is not set up here: merged changes come from it.");
+            return ([], $"{Brand.CodeIntel} is not set up here: merged changes come from it.");
         }
         var list = new List<Merged>();
         var errors = new List<string>();
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email!, ct);
             foreach (var repo in repos.Take(20))
             {
                 var (text, isError) = await session.CallAsync("mr_list", new JsonObject
@@ -1026,7 +1027,7 @@ public static class ProjectEndpoints
                 }, null, ct);
                 if (isError)
                 {
-                    errors.Add(ArgusMcp.IsNoAccess(text) ? $"{repo}: you may not read it." : $"{repo}: {(text.Length > 200 ? text[..200] : text)}");
+                    errors.Add(CodeIntelMcp.IsNoAccess(text) ? $"{repo}: you may not read it." : $"{repo}: {(text.Length > 200 ? text[..200] : text)}");
                     continue;
                 }
                 var node = JsonNode.Parse(text);
@@ -1043,7 +1044,7 @@ public static class ProjectEndpoints
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or System.Text.Json.JsonException or TaskCanceledException or InvalidOperationException or FormatException)
         {
-            errors.Add("Argus could not be reached: try again in a moment.");
+            errors.Add($"{Brand.CodeIntel} could not be reached: try again in a moment.");
         }
         return ([.. list.OrderByDescending(x => x.MergedAt)], errors.Count == 0 ? null : string.Join(" ", errors));
     }

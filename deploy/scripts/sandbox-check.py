@@ -251,14 +251,14 @@ def main():
     r = run("import time\nfor i in range(100): print(i, flush=True); time.sleep(1)", timeout=60, cancel_after=True)
     rec("a stop request stops the run", r.get("cancelled") is True and r.get("duration_ms", 99999) < 10000, f"{r.get('duration_ms')} ms")
 
-    tools = json.dumps([{"name": "find_symbol", "group": "argus", "description": "Find a symbol.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}])
+    tools = json.dumps([{"name": "find_symbol", "group": "code-intel", "description": "Find a symbol.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}])
     r = run("""
         import arena
         print(arena.tools.search("symbol"))
-        print(arena.argus.find_symbol(name="DecodeFrame"))
+        print(arena.code-intel.find_symbol(name="DecodeFrame"))
         """, inputs={".arena-tools.json": tools}, calls=True)
     rec("a program calls the chat's tools through the runner, one line each way, and no other way out",
-        "arena.argus.find_symbol" in r.get("stdout", "") and "'called': 'find_symbol', 'with': {'name': 'DecodeFrame'}" in r.get("stdout", "") and r.get("calls") == 1,
+        "arena.code-intel.find_symbol" in r.get("stdout", "") and "'called': 'find_symbol', 'with': {'name': 'DecodeFrame'}" in r.get("stdout", "") and r.get("calls") == 1,
         (r.get("stdout", "") + r.get("stderr", ""))[-200:].strip())
 
     # The science lab's mathematics (src/Llm.Api/Lab/lab.py), as the app runs it: its call in a file beside it.

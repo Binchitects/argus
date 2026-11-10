@@ -12,6 +12,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code.Fixes;
 
 /// <summary>What to fix: a review finding, a security review's finding, a GitLab issue, a failed pipeline, or words; in a project, from a branch.</summary>
@@ -412,13 +413,13 @@ public static partial class FixEndpoints
             }
             await gitlab.PostAsync(token, $"{GitLabAsPerson.Project(f.Project)}/repository/commits", new JsonObject
             {
-                ["branch"] = branch, ["start_sha"] = f.BaseSha, ["commit_message"] = $"{title}\n\nMade with Fix it (Argus Arena) for {me.DisplayName}.", ["actions"] = actions,
+                ["branch"] = branch, ["start_sha"] = f.BaseSha, ["commit_message"] = $"{title}\n\nMade with Fix it ({Brand.Product}) for {me.DisplayName}.", ["actions"] = actions,
             }, ct);
             var mr = await gitlab.PostAsync(token, $"{GitLabAsPerson.Project(f.Project)}/merge_requests", new JsonObject
             {
                 ["source_branch"] = branch, ["target_branch"] = f.Branch, ["title"] = title, ["remove_source_branch"] = true,
                 ["description"] = $"{f.Summary}" + (FixChecks.Describe(f.Checks is { } checks ? JsonNode.Parse(checks) as JsonObject : null) is { Length: > 0 } said ? $"\n\n**Checked after the change:** {said}" : "") +
-                    $"\n\n---\n*Made with Fix it in Argus Arena, opened by {me.DisplayName}.*",
+                    $"\n\n---\n*Made with Fix it in {Brand.Product}, opened by {me.DisplayName}.*",
             }, ct);
             f.MergeRequestUrl = mr["web_url"]?.GetValue<string>();
         }

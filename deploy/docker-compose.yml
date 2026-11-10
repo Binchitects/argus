@@ -1,4 +1,4 @@
-# Argus Arena: chat, API keys and credit, code search, pictures, video and voice.
+# Arena: chat, API keys and credit, code search, pictures, video and voice.
 #
 #   cp .env.example .env     # then fill it in
 #   docker compose up -d     # https://$DOMAIN
@@ -43,6 +43,8 @@ services:
       - --global.checknewversion=false
     environment:
       DOMAIN: ${DOMAIN:-llm.localhost}
+      # The code-intelligence service's address: CODE_INTEL_HOST.DOMAIN (an upgrade from before 8.0 keeps argus).
+      CODE_INTEL_HOST: ${CODE_INTEL_HOST:-code-intel}
       ACME_EMAIL: ${ACME_EMAIL:-}
       # Strict-Transport-Security's max-age; empty: a year with Let's Encrypt, none with your own CA.
       HSTS_SECONDS: ${HSTS_SECONDS:-}
@@ -96,11 +98,12 @@ services:
       Engine__EmbedGpu: ${EMBED_GPU:-}
       # LMCache's remote store for the vLLM models' token cache (redis://valkey:6379 with the valkey profile); empty: none.
       Engine__LmcacheRemote: ${LMCACHE_REMOTE:-}
-      Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
+      CodeIntel__AdminToken: ${CODE_INTEL_KEY:?set CODE_INTEL_KEY in .env}
       # Code Studio's workspaces (the workspaces profile): the service and its key.
       Workspaces__Url: http://workspaces:4000
       Workspaces__Key: ${WORKSPACES_KEY:-}
-      Argus__GitlabUrl: ${GITLAB_URL:-}
+      CodeIntel__GitlabUrl: ${GITLAB_URL:-}
+      CodeIntel__Host: ${CODE_INTEL_HOST:-code-intel}
       # GitLab's CA when it is the company's own (GITLAB_CA_FILE), trusted by every client the app makes; Settings can add one.
       Tls__CompanyCaFile: ${GITLAB_CA_FILE:+/etc/arena/company-ca.pem}
       # The browser agent's browser (COMPOSE_PROFILES=browser); without it the Browser tool says it is not running.
@@ -363,7 +366,7 @@ services:
     healthcheck:
       disable: true
 
-  # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
+  # Embeddings for code-intel and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:
     <<: *service
     profiles: [knowledge]
@@ -378,50 +381,50 @@ services:
           -ngl 0 -c 2048 -b 2048 -ub 2048 -t 4 --parallel 2 --port 8080
 
   # The code index (GitLab, read-only token) and knowledge packs, over MCP.
-  argus:
+  code-intel:
     <<: *service
-    profiles: [argus]
-    build: { context: .., dockerfile: src/Argus/Dockerfile, target: server, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
-    container_name: argus
+    profiles: [code-intel]
+    build: { context: .., dockerfile: src/CodeIntel/Dockerfile, target: server, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
+    container_name: code-intel
     command:
       - serve
-      - --config=/etc/argus/config.yaml
+      - --config=/etc/code-intel/config.yaml
       - --host=0.0.0.0
       - --port=7700
-      - --allowed-host=argus
-      - --allowed-host=argus:*
-      - --allowed-host=argus.${DOMAIN:-llm.localhost}
-      - --allowed-host=argus.${DOMAIN:-llm.localhost}:*
+      - --allowed-host=code-intel
+      - --allowed-host=code-intel:*
+      - --allowed-host=${CODE_INTEL_HOST:-code-intel}.${DOMAIN:-llm.localhost}
+      - --allowed-host=${CODE_INTEL_HOST:-code-intel}.${DOMAIN:-llm.localhost}:*
     environment:
-      ARGUS_ADMIN_TOKEN: ${ARGUS_KEY}
-      ARGUS_CHAT_CLIENT_TOKEN: ${ARGUS_KEY}
+      CODE_INTEL_ADMIN_TOKEN: ${CODE_INTEL_KEY}
+      CODE_INTEL_CHAT_CLIENT_TOKEN: ${CODE_INTEL_KEY}
       # Coding agents connect with the person's API key (sk-...); the app says whose it is. GitLab tokens are refused.
-      ARGUS_KEY_CHECK_URL: http://app:8080/api/authz/key
-      ARGUS_GITLAB_URL: ${GITLAB_URL:-}
-      ARGUS_GITLAB_TOKEN: ${GITLAB_TOKEN:-}
-      # Only where no token can be made for the account: Argus signs in with these once and makes its own token.
-      ARGUS_GITLAB_USERNAME: ${GITLAB_USERNAME:-}
-      ARGUS_GITLAB_PASSWORD: ${GITLAB_PASSWORD:-}
-      ARGUS_GITLAB_LDAP: ${GITLAB_LDAP:-}
-      ARGUS_GITLAB_VERIFY: ${GITLAB_VERIFY_TLS:-true}
-      # The company CA the app trusts (GITLAB_CA_FILE and Settings), written for Argus beside the directory, read again as it changes.
-      ARGUS_GITLAB_CA_EXTRA: /directory/company-ca.pem
+      CODE_INTEL_KEY_CHECK_URL: http://app:8080/api/authz/key
+      CODE_INTEL_GITLAB_URL: ${GITLAB_URL:-}
+      CODE_INTEL_GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      # Only where no token can be made for the account: code-intel signs in with these once and makes its own token.
+      CODE_INTEL_GITLAB_USERNAME: ${GITLAB_USERNAME:-}
+      CODE_INTEL_GITLAB_PASSWORD: ${GITLAB_PASSWORD:-}
+      CODE_INTEL_GITLAB_LDAP: ${GITLAB_LDAP:-}
+      CODE_INTEL_GITLAB_VERIFY: ${GITLAB_VERIFY_TLS:-true}
+      # The company CA the app trusts (GITLAB_CA_FILE and Settings), written for code-intel beside the directory, read again as it changes.
+      CODE_INTEL_GITLAB_CA_EXTRA: /directory/company-ca.pem
       # Pull requests on GitHub (or GitHub Enterprise's API, or off) and Gitea, read with each person's own token.
-      ARGUS_GITHUB_API: ${GITHUB_API_URL:-}
-      ARGUS_GITEA_URL: ${GITEA_URL:-}
-      ARGUS_USERS_FILE: /directory/users.yml
-      ARGUS_EMBED_URL: http://embed:8080
-      ARGUS_PACK_LIBRARY: /pack-library
-      ARGUS_APP: "off"
+      CODE_INTEL_GITHUB_API: ${GITHUB_API_URL:-}
+      CODE_INTEL_GITEA_URL: ${GITEA_URL:-}
+      CODE_INTEL_USERS_FILE: /directory/users.yml
+      CODE_INTEL_EMBED_URL: http://embed:8080
+      CODE_INTEL_PACK_LIBRARY: /pack-library
+      CODE_INTEL_APP: "off"
       # The security scanners (the scanners feature): security reviews send them the commit read.
-      ARGUS_SCANNERS_URL: http://scanners:7800
+      CODE_INTEL_SCANNERS_URL: http://scanners:7800
       # The advisories pack, once installed, renewed each day from GitHub's advisory database and CISA's catalog.
-      ARGUS_ADVISORIES_RENEW_HOURS: "24"
+      CODE_INTEL_ADVISORIES_RENEW_HOURS: "24"
     volumes:
-      - ./config/argus.yaml:/etc/argus/config.yaml:ro
-      - argus:/var/lib/argus
-      # Built knowledge packs to load (Admin -> Packs): the repository's packs/, or ARGUS_PACK_LIBRARY_DIR.
-      - ${ARGUS_PACK_LIBRARY_DIR:-../packs}:/pack-library:ro
+      - ./config/code-intel.yaml:/etc/code-intel/config.yaml:ro
+      - code-intel:/var/lib/code-intel
+      # Built knowledge packs to load (Admin -> Packs): the repository's packs/, or CODE_INTEL_PACK_LIBRARY_DIR.
+      - ${CODE_INTEL_PACK_LIBRARY_DIR:-../packs}:/pack-library:ro
       - directory:/directory:ro
     # Code Studio's workspaces ask it too, each with the person's own key; it alone reaches the scanners.
     networks: [default, workspaces, scanning]
@@ -577,7 +580,7 @@ services:
   # Code Studio's workspaces: Code Arena's own engine per workspace (a clone of a project the person works on in the
   # browser's IDE), each as its own user with limits (services/workspaces/supervisor.py). Off unless COMPOSE_PROFILES
   # names workspaces. No Docker socket; only the capabilities to switch users and clean up after them. Its network
-  # reaches the app (the IDE's requests come through it, and its agents' model calls), Argus (with the person's own key)
+  # reaches the app (the IDE's requests come through it, and its agents' model calls), code-intel (with the person's own key)
   # and the internet (the code host, package registries), not the stack's databases, gateway, engines or browser.
   workspaces:
     <<: *service
@@ -623,7 +626,7 @@ services:
     cpus: 4
 
   # The security scanners: opengrep with Arena's own rules, Bandit, gitleaks and Trivy's configuration checks, run on
-  # a commit Argus sends (a security review's). Off unless COMPOSE_PROFILES names scanners. Its network is Argus's
+  # a commit code-intel sends (a security review's). Off unless COMPOSE_PROFILES names scanners. Its network is code-intel's
   # alone and leads nowhere: the scanners fetch nothing, and nothing they are sent is run. A read-only root, nobody's
   # user, and each scan's files in memory, gone when it ends.
   scanners:
@@ -664,11 +667,11 @@ services:
     profiles: [monitoring]
     image: prom/prometheus:v3.1.0
     container_name: prometheus
-    environment: { ENGINE_KEY: "${ENGINE_KEY}", ARGUS_KEY: "${ARGUS_KEY}" }
+    environment: { ENGINE_KEY: "${ENGINE_KEY}", CODE_INTEL_KEY: "${CODE_INTEL_KEY}" }
     entrypoint: [/bin/sh, -c]
     command:
       - |
-        printf %s "$$ENGINE_KEY" > /tmp/engine.token; printf %s "$$ARGUS_KEY" > /tmp/argus.token
+        printf %s "$$ENGINE_KEY" > /tmp/engine.token; printf %s "$$CODE_INTEL_KEY" > /tmp/code-intel.token
         exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus \
           --storage.tsdb.retention.time=30d --storage.tsdb.retention.size=20GB --web.enable-lifecycle --web.enable-admin-api
     volumes:
@@ -767,7 +770,7 @@ networks:
   browsing: { internal: true }
   # Between the app and the studio only: internal, so no way out of the stack.
   studio: { internal: true }
-  # Between Argus and the security scanners only: internal, so no way out of the stack.
+  # Between code-intel and the security scanners only: internal, so no way out of the stack.
   scanning: { internal: true }
   # Between the app, the gateway and Code Studio's workspaces: not internal (a workspace clones, pushes and installs
   # packages), and nothing else of the stack is on it.
@@ -799,8 +802,8 @@ volumes:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/blender" }
   lean:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/lean" }
-  argus:
-    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/argus" }
+  code-intel:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/code-intel" }
   audio:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/audio" }
   prometheus:

@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using Llm.Core.Insights;
 using Microsoft.Data.SqlClient;
 
+using Branding;
 namespace Llm.Api.Insights;
 
 /// <summary>
@@ -57,7 +58,7 @@ public sealed class SqlServerData : IDataEngine
     private static string Prepared(string connection, int seconds) => new SqlConnectionStringBuilder(connection)
     {
         Pooling = false, ConnectTimeout = 10, CommandTimeout = seconds + 5, ApplicationIntent = ApplicationIntent.ReadOnly, MultipleActiveResultSets = false,
-        ApplicationName = "Argus Arena (Ask your data)",
+        ApplicationName = $"{Brand.Product} (Ask your data)",
     }.ConnectionString;
 
     private static async Task<SqlConnection> OpenAsync(string connection, int seconds, CancellationToken ct)

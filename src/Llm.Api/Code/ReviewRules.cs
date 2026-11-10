@@ -17,6 +17,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>A project's automatic reviews, as set or changed; null: unchanged (Guid.Empty for the room: none).</summary>
@@ -27,7 +28,7 @@ public sealed record RuleRequest(string? Project = null, bool? Enabled = null, b
 /// Automatic reviews: each project's rule looks at its open merge requests every few minutes (and GitLab's webhook, sent to
 /// the rule's own address, says at once when one opens or gets new commits), and runs its scheduled branch review on its
 /// cron. A review is queued for what changed, at most two of a rule's run at once, and a rule starts no more than its
-/// reviews a day. The code is read with the rule's person's read-only access (Argus), never written to.
+/// reviews a day. The code is read with the rule's person's read-only access (code-intel), never written to.
 /// </summary>
 public sealed partial class AutoReviews(IServiceScopeFactory scopes, ReviewEngine engine, QueuedMessages queue, TimeProvider clock, ILogger<AutoReviews> logger) : BackgroundService
 {
@@ -99,7 +100,7 @@ public sealed partial class AutoReviews(IServiceScopeFactory scopes, ReviewEngin
     /// <summary>The open merge requests of the rule's project, as its person may read them: those changed since the rule was made.</summary>
     private static async Task<List<JsonObject>> OpenAsync(IServiceProvider services, ReviewRule rule, AppUser owner, CancellationToken ct)
     {
-        var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(owner.Id, owner.Email!, ct);
+        var session = await services.GetRequiredService<CodeIntelMcp>().ConnectAsync(owner.Id, owner.Email!, ct);
         var args = new JsonObject { ["project"] = rule.Project, ["state"] = "opened", ["limit"] = 100, ["updated_after"] = rule.CreatedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) };
         var (text, isError) = await session.CallAsync("mr_list", args, null, ct);
         if (isError)
@@ -144,7 +145,7 @@ public sealed partial class AutoReviews(IServiceScopeFactory scopes, ReviewEngin
         }
         catch (Exception ex) when (ex is ReviewException or McpException or HttpRequestException or JsonException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            rule.LastError = ex is ReviewException ? ex.Message : "Argus could not be reached.";
+            rule.LastError = ex is ReviewException ? ex.Message : $"{Brand.CodeIntel} could not be reached.";
             said.Add(rule.LastError);
         }
         await db.SaveChangesAsync(ct);
@@ -419,13 +420,13 @@ public static class ReviewRuleEndpoints
         return null;
     }
 
-    private static async Task<IResult> CreateAsync(RuleRequest body, HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, Audit audit,
+    private static async Task<IResult> CreateAsync(RuleRequest body, HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, Audit audit,
         TimeProvider clock, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus is not set up here: it reads the code for reviews.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not set up here: it reads the code for reviews.");
         }
         var project = (body.Project ?? "").Trim().Trim('/');
         if (project.Length is 0 or > 500)
@@ -443,16 +444,16 @@ public static class ReviewRuleEndpoints
         // The person must read the project: a rule reads it as them.
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email!, ct);
             var (text, isError) = await session.CallAsync("mr_list", new JsonObject { ["project"] = project, ["state"] = "opened", ["limit"] = 1 }, null, ct);
             if (isError)
             {
-                return AuthEndpoints.Problem(ArgusMcp.IsNoAccess(text) ? 404 : 400, "project", text.Length > 600 ? text[..600] : text);
+                return AuthEndpoints.Problem(CodeIntelMcp.IsNoAccess(text) ? 404 : 400, "project", text.Length > 600 ? text[..600] : text);
             }
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus could not be reached: try again in a moment.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} could not be reached: try again in a moment.");
         }
         var rule = new ReviewRule { UserId = me.Id, Project = project, CreatedAt = clock.GetUtcNow() };
         if (await ApplyAsync(rule, body, me, db, clock, ct) is { } problem)

@@ -50,6 +50,6 @@ COPY lmdeploy/serve.py /lmdeploy/
 COPY gpu-probe.py /gpu-probe.py
 
 LABEL org.opencontainers.image.title="arena-lmdeploy" \
-      org.opencontainers.image.description="LMDeploy ${LMDEPLOY_VERSION} with Argus Arena's supervisor"
+      org.opencontainers.image.description="LMDeploy ${LMDEPLOY_VERSION} with Arena's supervisor"
 
 ENTRYPOINT ["/bin/sh", "/vllm/supervisor.sh"]

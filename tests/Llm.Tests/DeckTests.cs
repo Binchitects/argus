@@ -190,7 +190,7 @@ public sealed class DeckTests(AppFixture app)
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var kim = await PersonAsync(admin, f);
-        var chat = (await kim.JsonAsync(await kim.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { "decks" } }))).GetProperty("id").GetGuid();
+        var chat = (await kim.JsonAsync(await kim.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { "decks" } }))).GetProperty("id").GetGuid();
         var text = await (await kim.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = """Slides please: [call make_deck {"about":"Our quarter for the board"}]""" })).Content.ReadAsStringAsync();
         var result = text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)
             .First(e => e.GetProperty("type").GetString() == "tool_result");

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>The installable app: its manifest, and the bell's news pushed to each device (Web Push, RFC 8291 and RFC 8292).</summary>
@@ -215,7 +216,7 @@ public sealed class WebPushTests(AppFixture app) : IDisposable
         var res = await app.Factory.CreateClient().GetAsync(new Uri("/api/app/manifest.webmanifest", UriKind.Relative));
         Assert.Equal("application/manifest+json", res.Content.Headers.ContentType?.MediaType);
         var manifest = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
-        Assert.Equal("Argus Arena", manifest.GetProperty("name").GetString());
+        Assert.Equal($"{Brand.Product}", manifest.GetProperty("name").GetString());
         Assert.Equal("standalone", manifest.GetProperty("display").GetString());
         Assert.Equal("/", manifest.GetProperty("start_url").GetString());
         var icons = manifest.GetProperty("icons").EnumerateArray().ToList();

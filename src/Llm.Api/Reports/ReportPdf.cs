@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 
+using Branding;
 namespace Llm.Api.Reports;
 
 /// <summary>
@@ -93,7 +94,7 @@ public static class ReportPdf
 
     private static void Heading(Canvas c, ReportDocument doc)
     {
-        c.Text("ARGUS ARENA", Left, c.Y - 8, 7.5, bold: true, Muted);
+        c.Text(Branding.Brand.Product.ToUpperInvariant(), Left, c.Y - 8, 7.5, bold: true, Muted);
         c.TextRight("Made " + doc.Made.UtcDateTime.ToString("d MMM yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture) + (doc.MadeBy is { } by ? " for " + by : ""),
             PageW - Right, c.Y - 8, 7.5, colour: Muted);
         c.Y -= 34;
@@ -467,7 +468,7 @@ public static class ReportPdf
         Object($"<< /Type /Pages /Kids [{kids}] /Count {pages.Count} >>");
         Object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
         Object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-        Object($"<< /Title {Utf16(doc.Title)} /Subject {Utf16(doc.Subtitle)} /Producer (Argus Arena) /CreationDate (D:{doc.Made.UtcDateTime.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)}Z) >>");
+        Object($"<< /Title {Utf16(doc.Title)} /Subject {Utf16(doc.Subtitle)} /Producer ({Brand.Product}) /CreationDate (D:{doc.Made.UtcDateTime.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)}Z) >>");
         for (var i = 0; i < pages.Count; i++)
         {
             Object($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {N(PageW)} {N(PageH)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {7 + 2 * i} 0 R >>");

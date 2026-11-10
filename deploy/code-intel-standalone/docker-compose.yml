@@ -1,14 +1,14 @@
 # ==============================================================================
-# Argus -- a team's chat, code index and documentation, on local models.
+# code-intel -- a team's chat, code index and documentation, on local models.
 #
 #   models    llama.cpp: the chat model (GPU) and the embedding model (CPU)
 #   gateway   LiteLLM + Postgres: one OpenAI-compatible endpoint, a key and a
 #             budget per person
-#   app       argus: the .NET backend serving the React app -- sign-in, chat
+#   app       code-intel: the .NET backend serving the React app -- sign-in, chat
 #             with code-index tools, administration, MCP for editors
 #
 # Start:  cp env-samples/<one>.env .env, fill the SECRETS block, docker compose up -d
-# Then open http://localhost:${ARGUS_HTTP_PORT:-8080} and sign in as ARGUS_ADMIN_USERNAME.
+# Then open http://localhost:${CODE_INTEL_HTTP_PORT:-8080} and sign in as CODE_INTEL_ADMIN_USERNAME.
 # ==============================================================================
 
 x-logging: &default-logging
@@ -32,7 +32,7 @@ networks:
     driver: bridge
 
 volumes:
-  argus-data:
+  code-intel-data:
   postgres-data:
   llamacpp-engine:
   power-limits-state:
@@ -373,7 +373,7 @@ services:
       -m /embed/${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}
       --host 0.0.0.0
       --port 8080
-      --alias ${ARGUS_EMBED_MODEL:-nomic-embed-text}
+      --alias ${CODE_INTEL_EMBED_MODEL:-nomic-embed-text}
       --embeddings
       --pooling mean
       -c 2048 -b 2048 -ub 2048
@@ -496,59 +496,59 @@ services:
   # The .NET backend and the React app it serves, on one port: sign-in,
   # chat, administration, the code index (GitLab), knowledge packs, and MCP
   # for editors at /mcp. Built from the repository's Dockerfile the first time.
-  argus:
-    image: ${ARGUS_IMAGE:-argus}:${ARGUS_VERSION:-latest}
+  code-intel:
+    image: ${CODE_INTEL_IMAGE:-code-intel}:${CODE_INTEL_VERSION:-latest}
     build:
       context: ../..
-      dockerfile: src/Argus/Dockerfile
+      dockerfile: src/CodeIntel/Dockerfile
       target: server
-    container_name: argus
+    container_name: code-intel
     restart: unless-stopped
     networks: [llm-net]
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${ARGUS_HTTP_PORT:-8080}:7700"
+      - "${BIND_ADDRESS:-127.0.0.1}:${CODE_INTEL_HTTP_PORT:-8080}:7700"
     volumes:
-      - argus-data:/var/lib/argus
-      - ./config/argus/config.yaml:/etc/argus/config.yaml:ro
-      # PEM files for a GitLab on a private CA (ARGUS_GITLAB_CA_CERT) and for
-      # serving HTTPS (ARGUS_TLS_CERT / ARGUS_TLS_KEY).
-      - ./config/argus/tls:/etc/argus/tls:ro
+      - code-intel-data:/var/lib/code-intel
+      - ./config/code-intel/config.yaml:/etc/code-intel/config.yaml:ro
+      # PEM files for a GitLab on a private CA (CODE_INTEL_GITLAB_CA_CERT) and for
+      # serving HTTPS (CODE_INTEL_TLS_CERT / CODE_INTEL_TLS_KEY).
+      - ./config/code-intel/tls:/etc/code-intel/tls:ro
     environment:
       # The first administrator, created on first start when nobody exists yet.
-      ARGUS_ADMIN_USERNAME: ${ARGUS_ADMIN_USERNAME:-admin}
-      ARGUS_ADMIN_EMAIL: ${ARGUS_ADMIN_EMAIL:?set ARGUS_ADMIN_EMAIL}
-      ARGUS_ADMIN_PASSWORD: ${ARGUS_ADMIN_PASSWORD:?set ARGUS_ADMIN_PASSWORD}
+      CODE_INTEL_ADMIN_USERNAME: ${CODE_INTEL_ADMIN_USERNAME:-admin}
+      CODE_INTEL_ADMIN_EMAIL: ${CODE_INTEL_ADMIN_EMAIL:?set CODE_INTEL_ADMIN_EMAIL}
+      CODE_INTEL_ADMIN_PASSWORD: ${CODE_INTEL_ADMIN_PASSWORD:?set CODE_INTEL_ADMIN_PASSWORD}
       # The gateway, administered with the master key: people, keys, budgets.
-      ARGUS_GATEWAY_URL: http://litellm:4000
+      CODE_INTEL_GATEWAY_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
-      ARGUS_PUBLIC_GATEWAY_URL: ${ARGUS_PUBLIC_GATEWAY_URL:-http://localhost:4000/v1}
-      ARGUS_EMBED_URL: http://llamacpp-embed:8080
-      ARGUS_EMBED_MODEL: ${ARGUS_EMBED_MODEL:-nomic-embed-text}
-      ARGUS_LLAMACPP_HEALTH_URL: http://llamacpp:8080/health
+      CODE_INTEL_PUBLIC_GATEWAY_URL: ${CODE_INTEL_PUBLIC_GATEWAY_URL:-http://localhost:4000/v1}
+      CODE_INTEL_EMBED_URL: http://llamacpp-embed:8080
+      CODE_INTEL_EMBED_MODEL: ${CODE_INTEL_EMBED_MODEL:-nomic-embed-text}
+      CODE_INTEL_LLAMACPP_HEALTH_URL: http://llamacpp:8080/health
       # GitLab: the code index's source and the source of each person's access.
-      ARGUS_GITLAB_URL: ${ARGUS_GITLAB_URL:-}
-      ARGUS_GITLAB_TOKEN: ${ARGUS_GITLAB_TOKEN:-}
-      ARGUS_GITLAB_AUTH: ${ARGUS_GITLAB_AUTH:-}
-      ARGUS_GITLAB_USERNAME: ${ARGUS_GITLAB_USERNAME:-}
-      ARGUS_GITLAB_PASSWORD: ${ARGUS_GITLAB_PASSWORD:-}
-      ARGUS_GITLAB_CA_CERT: ${ARGUS_GITLAB_CA_CERT:-}
-      ARGUS_GITLAB_VERIFY: ${ARGUS_GITLAB_VERIFY:-}
+      CODE_INTEL_GITLAB_URL: ${CODE_INTEL_GITLAB_URL:-}
+      CODE_INTEL_GITLAB_TOKEN: ${CODE_INTEL_GITLAB_TOKEN:-}
+      CODE_INTEL_GITLAB_AUTH: ${CODE_INTEL_GITLAB_AUTH:-}
+      CODE_INTEL_GITLAB_USERNAME: ${CODE_INTEL_GITLAB_USERNAME:-}
+      CODE_INTEL_GITLAB_PASSWORD: ${CODE_INTEL_GITLAB_PASSWORD:-}
+      CODE_INTEL_GITLAB_CA_CERT: ${CODE_INTEL_GITLAB_CA_CERT:-}
+      CODE_INTEL_GITLAB_VERIFY: ${CODE_INTEL_GITLAB_VERIFY:-}
       # Seconds between index passes; 0 = only when an administrator starts one.
-      ARGUS_INDEX_INTERVAL: ${ARGUS_INDEX_INTERVAL:-900}
-      ARGUS_INDEX_STALE_AFTER: ${ARGUS_INDEX_STALE_AFTER:-3600}
+      CODE_INTEL_INDEX_INTERVAL: ${CODE_INTEL_INDEX_INTERVAL:-900}
+      CODE_INTEL_INDEX_STALE_AFTER: ${CODE_INTEL_INDEX_STALE_AFTER:-3600}
       # GitLab push webhook secret; empty = no webhook route.
-      ARGUS_WEBHOOK_TOKEN: ${ARGUS_WEBHOOK_TOKEN:-}
+      CODE_INTEL_WEBHOOK_TOKEN: ${CODE_INTEL_WEBHOOK_TOKEN:-}
       # For scripts that call /admin/* without a session.
-      ARGUS_ADMIN_TOKEN: ${ARGUS_ADMIN_TOKEN:-}
-      ARGUS_PACK_INDEX_URL: ${ARGUS_PACK_INDEX_URL:-}
-      ARGUS_TLS_CERT: ${ARGUS_TLS_CERT:-}
-      ARGUS_TLS_KEY: ${ARGUS_TLS_KEY:-}
+      CODE_INTEL_ADMIN_TOKEN: ${CODE_INTEL_ADMIN_TOKEN:-}
+      CODE_INTEL_PACK_INDEX_URL: ${CODE_INTEL_PACK_INDEX_URL:-}
+      CODE_INTEL_TLS_CERT: ${CODE_INTEL_TLS_CERT:-}
+      CODE_INTEL_TLS_KEY: ${CODE_INTEL_TLS_KEY:-}
       # The "Source" link beside the version (the AGPL); empty = this project's. A modified version sets its own.
-      ARGUS_SOURCE_URL: ${ARGUS_SOURCE_URL:-}
+      CODE_INTEL_SOURCE_URL: ${CODE_INTEL_SOURCE_URL:-}
     command:
       - serve
       - --config
-      - /etc/argus/config.yaml
+      - /etc/code-intel/config.yaml
       - --host
       - 0.0.0.0
       - --port
@@ -559,14 +559,14 @@ services:
       - --allowed-host
       - "127.0.0.1:*"
       - --allowed-host
-      - "${ARGUS_HOSTNAME:-localhost}:*"
+      - "${CODE_INTEL_HOSTNAME:-localhost}:*"
     depends_on:
       litellm:
         condition: service_healthy
       llamacpp-embed:
         condition: service_started
     healthcheck:
-      test: ["CMD", "argus", "healthcheck"]
+      test: ["CMD", "code-intel", "healthcheck"]
       interval: 30s
       timeout: 10s
       start_period: 60s

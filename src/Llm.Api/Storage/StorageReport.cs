@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
+using Branding;
 namespace Llm.Api.Storage;
 
 /// <summary>A database on the stack's Postgres and what it holds.</summary>
@@ -28,10 +29,10 @@ public sealed record KeepRule(string What, string Rule);
 
 /// <summary>
 /// The storage page's picture: the disks, the databases and their largest tables, the chat's files, the model
-/// library, Argus's index and packs, the backups, logs and metrics, how long each is kept, what the app cannot
+/// library, code-intel's index and packs, the backups, logs and metrics, how long each is kept, what the app cannot
 /// see, and how each grew (the daily samples). Each part answers on its own: one missing says why, the rest stand.
 /// </summary>
-public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, StorageFiles files, StoragePlaces places, StorageCache cache, ArgusAdmin argus,
+public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, StorageFiles files, StoragePlaces places, StorageCache cache, CodeIntelAdmin codeIntel,
     PromDatasource prom, LokiDatasource loki, IConfiguration config, IOptions<DashboardOptions> dashboards, IOptionsMonitor<StorageOptions> options,
     IOptionsMonitor<Retention.RetentionOptions> retention, IOptionsMonitor<Gateway.AnswerCacheOptions> answerCache, TimeProvider clock, ILogger<StorageReport> logger)
 {
@@ -40,7 +41,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
     [
         "Docker's images and its build cache: `docker system df -v` on the host lists them, and `docker image prune` removes the unused ones.",
         "The containers' own logs: Docker keeps at most 5 files of 20 MB for each container (the stack's logging options), about 100 MB each at most.",
-        "The volumes the app does not mount (postgres, argus, prometheus, loki, audio, alertmanager, acme): their contents are measured here by what runs in them (the databases, Argus, Prometheus), not as folders.",
+        $"The volumes the app does not mount (postgres, code-intel, prometheus, loki, audio, alertmanager, acme): their contents are measured here by what runs in them (the databases, {Brand.CodeIntel}, Prometheus), not as folders.",
         "The speech server's models (the audio volume), fetched from Hugging Face by the speech server itself.",
     ];
 
@@ -73,7 +74,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
 
     public StorageOptions Settings => options.CurrentValue;
 
-    /// <summary>The whole page; <paramref name="fresh"/>: the folders (and Argus's) measured again now.</summary>
+    /// <summary>The whole page; <paramref name="fresh"/>: the folders (and code-intel's) measured again now.</summary>
     public async Task<JsonObject> BuildAsync(bool fresh, CancellationToken ct)
     {
         if (fresh)
@@ -82,7 +83,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         }
         // What needs no database runs beside what does (one DbContext answers one query at a time).
         var disksTask = DisksAsync(ct);
-        var argusTask = ArgusAsync(fresh, ct);
+        var codeIntelTask = CodeIntelAsync(fresh, ct);
         var metricsTask = MetricsAsync(ct);
         var logsTask = LogsAsync(ct);
         var backupsTask = Task.Run(places.Backups, ct);
@@ -106,7 +107,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
                 groups = groups.Value, people = people.Value?.Take(10), problem = groups.Problem ?? people.Problem,
             }),
             ["library"] = Node(new { report = library.Value, problem = library.Problem }),
-            ["argus"] = await argusTask,
+            ["code-intel"] = await codeIntelTask,
             ["backups"] = Node(await backupsTask),
             ["logs"] = Node(await logsTask),
             ["metrics"] = Node(await metricsTask),
@@ -244,35 +245,35 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         : name switch
         {
             "langfuse" => "Langfuse: traces",
-            "argus" => "Argus",
+            "code-intel" => $"{Brand.CodeIntel}",
             "postgres" => "Postgres's own (usually empty)",
             _ => null,
         };
 
-    /// <summary>Argus's disk (its index, GitLab mirrors, trees and packs) and its packs, as Argus reports them.</summary>
-    public async Task<JsonObject> ArgusAsync(bool fresh, CancellationToken ct)
+    /// <summary>code-intel's disk (its index, GitLab mirrors, trees and packs) and its packs, as code-intel reports them.</summary>
+    public async Task<JsonObject> CodeIntelAsync(bool fresh, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
             return new JsonObject { ["configured"] = false };
         }
         var result = new JsonObject { ["configured"] = true };
         try
         {
-            result["report"] = await argus.GetAsync(fresh ? "storage?fresh" : "storage", ct);
+            result["report"] = await codeIntel.GetAsync(fresh ? "storage?fresh" : "storage", ct);
         }
-        catch (ArgusException ex)
+        catch (CodeIntelException ex)
         {
-            result["problem"] = ex.Status == 404 ? "This Argus does not report its storage (an older version)." : ex.Message;
+            result["problem"] = ex.Status == 404 ? $"This {Brand.CodeIntel} does not report its storage (an older version)." : ex.Message;
         }
         try
         {
-            var packs = await argus.GetAsync("packs", ct);
+            var packs = await codeIntel.GetAsync("packs", ct);
             result["packs"] = packs?["packs"]?.DeepClone();
             result["library"] = packs?["library"]?.DeepClone();
             result["libraryDir"] = packs?["library_dir"]?.DeepClone();
         }
-        catch (ArgusException ex)
+        catch (CodeIntelException ex)
         {
             result["packsProblem"] = ex.Message;
         }

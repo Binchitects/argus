@@ -6,7 +6,7 @@ using Llm.Api.Code;
 
 namespace Llm.Tests;
 
-/// <summary>Code review: a merge request read through Argus as the person, findings on lines checked by a second pass, a summary, a room to discuss it.</summary>
+/// <summary>Code review: a merge request read through code-intel as the person, findings on lines checked by a second pass, a summary, a room to discuss it.</summary>
 [Collection(nameof(AppCollection))]
 public sealed class ReviewTests(AppFixture app)
 {
@@ -21,10 +21,10 @@ public sealed class ReviewTests(AppFixture app)
     {
         const string diff = "@@ -1,3 +1,4 @@\\n int count(int *a, int n) {\\n-  for (i = 0; i < n; i++)\\n+  for (i = 0; i <= n; i++) // [bug]\\n+  total += a[i];\\n }\\n";
         const string other = "@@ -10,2 +10,3 @@\\n x = 1;\\n+y = z[k + 1]; // [bug] [harmless]\\n }\\n";
-        app.Argus.Answers["mr_get"] = """{"iid": 7, "title": "Count faster", "author": "dev", "source_branch": "fast", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/7", "description": "Speeds up counting.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "bbb"}}""";
-        app.Argus.Answers["mr_diff"] = $$"""{"project": "g/app", "iid": 7, "files": [{"old_path": "count.c", "new_path": "count.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{diff}}"}, {"old_path": "z.c", "new_path": "z.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{other}}"}]}""";
-        app.Argus.Answers["ci_status"] = """{"project": "g/app", "pipeline": {"id": 1, "status": "failed"}, "failed_jobs": [{"id": 9, "name": "test"}]}""";
-        app.Argus.Answers["mr_list"] = """{"result": [{"iid": 7, "title": "Count faster", "state": "opened"}]}""";
+        app.CodeIntel.Answers["mr_get"] = """{"iid": 7, "title": "Count faster", "author": "dev", "source_branch": "fast", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/7", "description": "Speeds up counting.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "bbb"}}""";
+        app.CodeIntel.Answers["mr_diff"] = $$"""{"project": "g/app", "iid": 7, "files": [{"old_path": "count.c", "new_path": "count.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{diff}}"}, {"old_path": "z.c", "new_path": "z.c", "new_file": false, "deleted_file": false, "renamed_file": false, "diff": "{{other}}"}]}""";
+        app.CodeIntel.Answers["ci_status"] = """{"project": "g/app", "pipeline": {"id": 1, "status": "failed"}, "failed_jobs": [{"id": 9, "name": "test"}]}""";
+        app.CodeIntel.Answers["mr_list"] = """{"result": [{"iid": 7, "title": "Count faster", "state": "opened"}]}""";
     }
 
     private static async Task<JsonElement> DoneAsync(TestBrowser b, Guid id)
@@ -68,7 +68,7 @@ public sealed class ReviewTests(AppFixture app)
         Assert.Equal(("z.c", 11, false), (findings[1].GetProperty("path").GetString(), findings[1].GetProperty("line").GetInt32(), findings[1].GetProperty("verified").GetBoolean()));
         Assert.Equal("The caller checks the bound.", findings[1].GetProperty("verifyNote").GetString());
         // Read as the person, and asked as them, tagged review.
-        Assert.All(app.Argus.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"), c => Assert.Equal(email, c.Email));
+        Assert.All(app.CodeIntel.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"), c => Assert.Equal(email, c.Email));
         var asked = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         Assert.Equal(5, asked.Count);
         Assert.All(asked, r => Assert.Equal("review", r.Body["metadata"]!["tags"]![0]!.GetValue<string>()));
@@ -93,7 +93,7 @@ public sealed class ReviewTests(AppFixture app)
     private void Repository()
     {
         // Its product's code: two C files (the larger one read first), a test and a vendored file left out, a README read for what it is.
-        app.Argus.Handlers["files_at"] = args => JsonSerializer.Serialize(new
+        app.CodeIntel.Handlers["files_at"] = args => JsonSerializer.Serialize(new
         {
             project = args.GetProperty("project").GetString(), @ref = args.TryGetProperty("ref", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : "main", sha = "c0de", total = 5, bytes = 9000,
             languages = new { c = new { files = 3, bytes = 8000 } },
@@ -107,13 +107,13 @@ public sealed class ReviewTests(AppFixture app)
             },
             more = 0,
         });
-        app.Argus.Handlers["file_at"] = args => args.GetProperty("path").GetString() switch
+        app.CodeIntel.Handlers["file_at"] = args => args.GetProperty("path").GetString() switch
         {
             "README.md" => """{"start_line": 1, "end_line": 1, "total_lines": 1, "content": "A counter library.\n"}""",
             "src/count.c" => """{"start_line": 1, "end_line": 3, "total_lines": 3, "content": "int count(int *a, int n) {\n  for (i = 0; i <= n; i++) total += a[i]; // [bug]\n}\n"}""",
             _ => """{"start_line": 1, "end_line": 1, "total_lines": 1, "content": "int ok(void) { return 1; }\n"}""",
         };
-        app.Argus.Handlers["dependency_path"] = args => JsonSerializer.Serialize(new
+        app.CodeIntel.Handlers["dependency_path"] = args => JsonSerializer.Serialize(new
         {
             from = args.GetProperty("from").GetString(), to = args.GetProperty("to").GetString(), direction = $"{args.GetProperty("from").GetString()} depends on {args.GetProperty("to").GetString()}",
             paths = new[] { new { length = 1, confidence = 0.95, steps = new[] { new { from = args.GetProperty("from").GetString(), to = args.GetProperty("to").GetString(), confidence = 0.95, tier = "strong", by = new[] { "package:nuget Lib" } } } } },
@@ -138,10 +138,10 @@ public sealed class ReviewTests(AppFixture app)
         var finding = Assert.Single(done.GetProperty("findings").EnumerateArray());
         Assert.Equal(("src/count.c", 2), (finding.GetProperty("path").GetString(), finding.GetProperty("line").GetInt32()));
         // Read as the person at the branch: the test and the vendored file never.
-        var read = app.Argus.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at")
+        var read = app.CodeIntel.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at")
             .Select(c => c.Params!.Value.GetProperty("arguments").GetProperty("path").GetString()).ToList();
         Assert.Equal(["README.md", "src/count.c", "src/util.c"], read);
-        Assert.All(app.Argus.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at"),
+        Assert.All(app.CodeIntel.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at"),
             c => Assert.Equal("develop", c.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString()));
     }
 
@@ -217,7 +217,7 @@ public sealed class ReviewTests(AppFixture app)
         var told = bell.GetProperty("items").EnumerateArray().First(n => n.GetProperty("title").GetString() == "Weekly lib review");
         Assert.Equal(link, told.GetProperty("link").GetString());
         Assert.Contains("Verdict: changes suggested", told.GetProperty("body").GetString(), StringComparison.Ordinal);
-        Assert.Contains(app.Argus.McpCalls, c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "files_at");
+        Assert.Contains(app.CodeIntel.McpCalls, c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "files_at");
     }
 
     [Fact]
@@ -285,7 +285,7 @@ public sealed class ReviewTests(AppFixture app)
         // With everyone: each of them, while GitLab lets them read the project.
         await StatusAssert.Is(HttpStatusCode.OK, await Share(me, new { reach = "Company" }));
         await StatusAssert.Is(HttpStatusCode.OK, await third.GetAsync($"/api/code/reviews/{id}"));
-        app.Argus.Unreadable[$"{thirdEmail}|g/app"] = true;
+        app.CodeIntel.Unreadable[$"{thirdEmail}|g/app"] = true;
         try
         {
             await StatusAssert.Is(HttpStatusCode.NotFound, await third.GetAsync($"/api/code/reviews/{id}"));
@@ -293,7 +293,7 @@ public sealed class ReviewTests(AppFixture app)
         }
         finally
         {
-            app.Argus.Unreadable.TryRemove($"{thirdEmail}|g/app", out _);
+            app.CodeIntel.Unreadable.TryRemove($"{thirdEmail}|g/app", out _);
         }
 
         // Taken back: theirs alone again; audited each time.
@@ -310,15 +310,15 @@ public sealed class ReviewTests(AppFixture app)
     {
         const string app_py = "@@ -1,2 +1,3 @@\\n import os\\n+os.system(\\\"ping \\\" + host)\\n def main(): pass\\n";
         const string lock_ = "@@ -5,3 +5,3 @@\\n   \\\"node_modules/qs\\\": {\\n-    \\\"version\\\": \\\"6.11.0\\\"\\n+    \\\"version\\\": \\\"6.10.1\\\"\\n   },\\n";
-        app.Argus.Answers["mr_get"] = """{"iid": 8, "title": "Ping the host", "author": "dev", "source_branch": "ping", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/8", "description": "Adds a ping.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "ccc"}}""";
-        app.Argus.Answers["mr_diff"] = $$"""{"project": "g/app", "iid": 8, "files": [{"old_path": "app.py", "new_path": "app.py", "diff": "{{app_py}}"}, {"old_path": "web/package-lock.json", "new_path": "web/package-lock.json", "diff": "{{lock_}}"}]}""";
-        app.Argus.Answers["ci_status"] = """{"project": "g/app", "note": "No pipeline."}""";
+        app.CodeIntel.Answers["mr_get"] = """{"iid": 8, "title": "Ping the host", "author": "dev", "source_branch": "ping", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/8", "description": "Adds a ping.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "ccc"}}""";
+        app.CodeIntel.Answers["mr_diff"] = $$"""{"project": "g/app", "iid": 8, "files": [{"old_path": "app.py", "new_path": "app.py", "diff": "{{app_py}}"}, {"old_path": "web/package-lock.json", "new_path": "web/package-lock.json", "diff": "{{lock_}}"}]}""";
+        app.CodeIntel.Answers["ci_status"] = """{"project": "g/app", "note": "No pipeline."}""";
         const string old = """{"ecosystem": "npm", "package": "minimist", "version": "1.2.5", "direct": false, "via": "x", "file": "web/package-lock.json", "line": 30, "advisory": "GHSA-xvch-5gv4-984h", "aliases": [], "severity": "critical", "cwes": [], "exploited": false, "summary": "Prototype pollution in minimist", "fixed_in": "1.2.6", "upgrade_to": "1.2.6", "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h"}""";
         const string added = """{"ecosystem": "npm", "package": "qs", "version": "6.10.1", "direct": true, "via": null, "file": "web/package-lock.json", "line": 6, "advisory": "GHSA-hrpp-h998-j3pp", "aliases": ["CVE-2022-24999"], "severity": "high", "cwes": ["CWE-1321"], "exploited": false, "summary": "qs vulnerable to Prototype Pollution.", "fixed_in": "6.10.3", "upgrade_to": "6.10.3", "url": "https://github.com/advisories/GHSA-hrpp-h998-j3pp"}""";
-        app.Argus.Handlers["deps_check"] = args => args.TryGetProperty("iid", out _)
+        app.CodeIntel.Handlers["deps_check"] = args => args.TryGetProperty("iid", out _)
             ? $$"""{"findings": [{{old}}, {{added}}], "advisories": [{"as_of": "2026-10-28"}]}"""
             : $$"""{"findings": [{{old}}], "advisories": [{"as_of": "2026-10-28"}]}""";
-        app.Argus.Handlers["scan_at"] = _ => """
+        app.CodeIntel.Handlers["scan_at"] = _ => """
             {"tools": [{"name": "opengrep", "ran": true}], "more": 0, "findings": [
               {"tools": ["opengrep", "bandit"], "rules": ["python-command-from-strings"], "kind": "code", "path": "app.py", "line": 2, "cwe": "CWE-78", "severity": "high", "title": "A shell runs a command built from data", "message": "Pass the program and its arguments as a list."},
               {"tools": ["opengrep"], "rules": ["python-weak-hash"], "kind": "code", "path": "app.py", "line": 3, "cwe": "CWE-328", "severity": "low", "title": "MD5 is broken", "message": "Use SHA-256."}]}
@@ -339,14 +339,14 @@ public sealed class ReviewTests(AppFixture app)
             Assert.Contains("CWE-78, opengrep, bandit", command.GetProperty("body").GetString(), StringComparison.Ordinal);
             Assert.DoesNotContain(security, f => f.GetProperty("title").GetString()!.Contains("minimist", StringComparison.Ordinal));
             // The change's files alone were scanned, as its person, at the merge request's head.
-            var scan = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == email);
+            var scan = app.CodeIntel.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == email);
             var args = scan.Params!.Value.GetProperty("arguments");
             Assert.Equal((8, false, "app.py\nweb/package-lock.json"), (args.GetProperty("iid").GetInt32(), args.GetProperty("history").GetBoolean(), args.GetProperty("paths").GetString()));
         }
         finally
         {
-            app.Argus.Handlers.TryRemove("deps_check", out _);
-            app.Argus.Handlers.TryRemove("scan_at", out _);
+            app.CodeIntel.Handlers.TryRemove("deps_check", out _);
+            app.CodeIntel.Handlers.TryRemove("scan_at", out _);
         }
     }
 
@@ -358,7 +358,7 @@ public sealed class ReviewTests(AppFixture app)
         var (_, email, me) = await PersonAsync(admin);
         var chat = (await me.JsonAsync(await me.PostAsync("/api/chat/conversations", new { title = "Review" }))).GetProperty("id").GetGuid();
         await me.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{chat}", UriKind.Relative), new { tools = new[] { "reviews" } });
-        var before = app.Argus.McpCalls.Count;
+        var before = app.CodeIntel.McpCalls.Count;
 
         var done = await ToolAsync(me, chat, """Review it [call review_merge_request {"project": "g/app", "iid": "!7"}]""");
         Assert.False(done.GetProperty("isError").GetBoolean(), done.GetProperty("text").GetString());
@@ -367,7 +367,7 @@ public sealed class ReviewTests(AppFixture app)
         // The finding the second pass refuted is left out, and counted.
         Assert.Equal(["count.c"], review.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("path").GetString()));
         Assert.Equal(1, review.GetProperty("doubted").GetInt32());
-        Assert.Contains(app.Argus.McpCalls.Skip(before), c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff" && c.Email == email);
+        Assert.Contains(app.CodeIntel.McpCalls.Skip(before), c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff" && c.Email == email);
 
         var again = await ToolAsync(me, chat, $$"""Again [call review_get {"id": "{{review.GetProperty("id").GetString()}}"}]""");
         Assert.Equal(review.GetProperty("summary").GetString(), JsonDocument.Parse(again.GetProperty("text").GetString()!).RootElement.GetProperty("summary").GetString());

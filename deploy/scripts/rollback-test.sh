@@ -107,7 +107,7 @@ DOMAIN="$PROJECT.localhost"
 {
   echo "DOMAIN=$DOMAIN"
   echo "ADMIN_EMAIL=admin@example.test"
-  for key in ADMIN_PASSWORD DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY; do echo "$key=$(secret)"; done
+  for key in ADMIN_PASSWORD DB_PASSWORD APP_KEY ENGINE_KEY CODE_INTEL_KEY; do echo "$key=$(secret)"; done
   echo "GATEWAY_KEY=sk-$(secret)"
   echo "HTTPS_PORT=$PORT"
   echo "MODELS_DIR=$TP_MODELS"

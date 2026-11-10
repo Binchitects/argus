@@ -57,25 +57,25 @@ public sealed class ChatToolsTests(AppFixture app)
     {
         await using var f = NewApp(settings: new() { ["Chat:ToolTextChars"] = "200" });
         var (b, _, email) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = true, tools = new[] { "argus", "calculator", "time" } });
+        var id = await NewChatAsync(b, new { useCodeIntel = true, tools = new[] { "code-intel", "calculator", "time" } });
 
-        var events = await SendAsync(b, id, """Where is ParseHeader? [call load_tools {"names":["argus"]}]""");
+        var events = await SendAsync(b, id, """Where is ParseHeader? [call load_tools {"names":["code-intel"]}]""");
         var requests = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         // First: load_tools only, and a line for each tool in the system prompt.
         Assert.Equal([OnDemandTools.Function], requests[0].Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         var system = requests[0].Body["messages"]![0]!["content"]!.GetValue<string>();
-        Assert.Contains("[argus]", system, StringComparison.Ordinal);
+        Assert.Contains("[code-intel]", system, StringComparison.Ordinal);
         Assert.Contains("[calculator]", system, StringComparison.Ordinal);
-        Assert.DoesNotContain(FakeArgus.Instructions, system, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeCodeIntel.Instructions, system, StringComparison.Ordinal);
         Assert.Equal("Loaded: find_symbol. Call them from now on.", Event(events, "tool_result").GetProperty("text").GetString());
-        // Then: Argus whole, its notes in, its line out; the rest still listed.
+        // Then: code-intel whole, its notes in, its line out; the rest still listed.
         Assert.Equal(["find_symbol", OnDemandTools.Function], requests[1].Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         var after = requests[1].Body["messages"]![0]!["content"]!.GetValue<string>();
-        Assert.Contains(FakeArgus.Instructions, after, StringComparison.Ordinal);
-        Assert.DoesNotContain("[argus]", after, StringComparison.Ordinal);
+        Assert.Contains(FakeCodeIntel.Instructions, after, StringComparison.Ordinal);
+        Assert.DoesNotContain("[code-intel]", after, StringComparison.Ordinal);
         Assert.Contains("[calculator]", after, StringComparison.Ordinal);
 
-        // The next turn starts with Argus loaded: the same prompt start as the round before.
+        // The next turn starts with code-intel loaded: the same prompt start as the round before.
         await SendAsync(b, id, "And its callers?");
         var next = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body;
         Assert.Equal(requests[1].Body["tools"]!.ToJsonString(), next["tools"]!.ToJsonString());
@@ -108,7 +108,7 @@ public sealed class ChatToolsTests(AppFixture app)
     public async Task The_round_after_a_tools_result_thinks_at_the_level_set_for_it_never_above_the_chats()
     {
         var (b, _, _) = await PersonAsync(app.Factory);
-        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, thinking = "xhigh" });
         var marker = "between-" + Guid.NewGuid().ToString("N")[..8];
         await SendAsync(b, id, $$"""{{marker}} [call calculate {"expression":"1+1"}]""");
         var asks = app.Model.Requests.Select(r => r.Body)
@@ -133,7 +133,7 @@ public sealed class ChatToolsTests(AppFixture app)
     public async Task The_calculator_and_the_clock_answer_for_the_model()
     {
         var (b, _, _) = await PersonAsync(app.Factory);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var events = await SendAsync(b, id, """Work it out: [call calculate {"expression":"2^10 + sqrt(16) + 1_000"}]""");
         var result = Event(events, "tool_result");
         Assert.Equal("calculator", Event(events, "tool_call").GetProperty("tool").GetString());
@@ -284,22 +284,22 @@ public sealed class ChatToolsTests(AppFixture app)
     public async Task A_chat_has_its_own_tools_among_those_the_person_may_use()
     {
         var (b, _, email) = await PersonAsync(app.Factory);
-        Assert.Equal(["argus", "decks", "research", "vector", "calculator", "time", "files", "canvas", "plans", "reviews", "ask", "agents", "memory", "skills"], await ToolsInConfigAsync(b));
+        Assert.Equal(["code-intel", "decks", "research", "vector", "calculator", "time", "files", "canvas", "plans", "reviews", "ask", "agents", "memory", "skills"], await ToolsInConfigAsync(b));
         var id = await NewChatAsync(b, new { tools = new[] { "calculator" } });
         await SendAsync(b, id, "hello");
         Assert.Equal(["calculate"], FunctionsSentFor(email));
         var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
         Assert.Equal(["calculator"], chat.GetProperty("tools").EnumerateArray().Select(t => t.GetString()));
-        Assert.False(chat.GetProperty("useArgus").GetBoolean());
+        Assert.False(chat.GetProperty("useCodeIntel").GetBoolean());
 
-        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { tools = new[] { "time", "argus" } }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { tools = new[] { "time", "code-intel" } }));
         await SendAsync(b, id, "again");
         Assert.Equal(["find_symbol", "current_time", "days_between"], FunctionsSentFor(email));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { tools = new[] { "rockets" } }));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/chat/conversations", new { tools = new[] { "image" } }));
 
-        // useArgus still switches Argus in the chat's list.
-        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { useArgus = false }));
+        // useCodeIntel still switches the code-intelligence tool in the chat's list.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { useCodeIntel = false }));
         Assert.Equal(["time"], (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("tools").EnumerateArray().Select(t => t.GetString()));
     }
 
@@ -380,7 +380,7 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal("https://pets.test/v1", row.GetProperty("server").GetProperty("url").GetString());
 
         var (b, _, _) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false, tools = new[] { toolId } });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, tools = new[] { toolId } });
         // A read runs at once, with the key and the arguments in place.
         var listed = Event(await SendAsync(b, id, """Which pets? [call pets__list_pets {"limit":1}]"""), "tool_result");
         Assert.Equal("HTTP 200 OK\n[{\"name\":\"Rex\"}]", listed.GetProperty("text").GetString());
@@ -407,7 +407,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.NoContent, await SetToolAsync(admin, "calculator", new { enabled = true, audience = "Everyone", onByDefault = true, askFirst = true }));
         var (b, _, _) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
 
         async Task<List<JsonElement>> AnswerAsync(bool allow)
         {
@@ -452,7 +452,7 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.DoesNotContain("FLUX.2-klein-4B", config.GetProperty("models").EnumerateArray().Select(m => m.GetProperty("name").GetString()));
         Assert.Contains("image", config.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("id").GetString()));
 
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var before = app.Model.ImageRequests.Count;
         var events = await SendAsync(b, id, """Draw: [call generate_image {"prompt":"A red fox in the snow","size":"768x768"}]""");
         var sent = app.Model.ImageRequests.Skip(before).Single();
@@ -967,7 +967,7 @@ public sealed class ChatToolsTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await SetToolAsync(admin, "time", new { enabled = true, audience = "Everyone", groups = Array.Empty<Guid>(), onByDefault = false, askFirst = true }));
         var (b, _, email) = await PersonAsync(f);
         Assert.Contains("code", await ToolsInConfigAsync(b));
-        var id = await NewChatAsync(b, new { useArgus = true, tools = new[] { "code", "calculator", "time", "argus" } });
+        var id = await NewChatAsync(b, new { useCodeIntel = true, tools = new[] { "code", "calculator", "time", "code-intel" } });
         var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new
         {
             content = "Sum it [call run_code {\"code\":\"# call calculate {\\\"expression\\\": \\\"6*7\\\"}\\n# call current_time {}\\n# call nothing_here {}\\n# call find_symbol {\\\"name\\\": \\\"ParseHeader\\\"}\"}]",
@@ -978,13 +978,13 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("text").GetString());
         var output = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement;
         var lines = output.GetProperty("stdout").GetString()!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        // The functions it may call: the calculator's and Argus's, not the time tool's (it asks first), nor its own.
+        // The functions it may call: the calculator's and code-intel's, not the time tool's (it asks first), nor its own.
         Assert.Equal(["calculate", "find_symbol"], lines[0]["functions: ".Length..].Split(',').Order());
         Assert.Contains("\"ok\":true", lines[1], StringComparison.Ordinal);
         Assert.Contains("42", lines[1], StringComparison.Ordinal);
         Assert.Contains("There is no function current_time to call from code", lines[2], StringComparison.Ordinal);
         Assert.Contains("There is no function nothing_here", lines[3], StringComparison.Ordinal);
-        // A tool behind an MCP server (Argus) answers a program's call as it answers the model's.
+        // A tool behind an MCP server (code-intel) answers a program's call as it answers the model's.
         Assert.Contains("\"ok\":true", lines[4], StringComparison.Ordinal);
         Assert.Contains("src/parse.c", lines[4], StringComparison.Ordinal);
         Assert.Equal("calculate, find_symbol", output.GetProperty("calls").GetString());

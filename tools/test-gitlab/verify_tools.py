@@ -39,7 +39,7 @@ Run after seed.py (or let run.sh do all of it):
 
     python tools/test-gitlab/verify_tools.py
 
-Exits non-zero on any failed check. Set ARGUS_TEST_WORK to keep the index off a
+Exits non-zero on any failed check. Set CODE_INTEL_TEST_WORK to keep the index off a
 filesystem SQLite cannot use; run.sh always sets it.
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ import httpx
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-WORK = pathlib.Path(os.environ.get("ARGUS_TEST_WORK") or (HERE / "work"))
+WORK = pathlib.Path(os.environ.get("CODE_INTEL_TEST_WORK") or (HERE / "work"))
 SEEDED = HERE / "seeded.json"
 HOST, PORT = "127.0.0.1", 7762
 BASE = f"http://{HOST}:{PORT}"
@@ -195,7 +195,7 @@ CONTRACTS: dict[str, dict] = {
                                            "pattern": "DecodeFrame"}, "kind": dict},
 }
 
-#: The merge request and commit tools (src/Argus/Server/Tools.Review.cs).
+#: The merge request and commit tools (src/CodeIntel/Server/Tools.Review.cs).
 REVIEW_TOOLS = {"mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions",
                 "ci_status", "job_log", "compare_refs", "file_at", "grep_at"}
 
@@ -242,17 +242,17 @@ _KNOWN_PROJECTS = tuple(PATH_BY_REPO)
 # embedding backend AND an index that has actually been embedded. Declared here
 # so the contract says which of the two it is looking at, rather than quietly
 # counting an unexercised tool as covered.
-EMBED_BACKEND = os.environ.get("ARGUS_OLLAMA_URL", "").strip()
+EMBED_BACKEND = os.environ.get("CODE_INTEL_OLLAMA_URL", "").strip()
 
 
 def embed_reason() -> str:
-    return (f"ARGUS_OLLAMA_URL={EMBED_BACKEND}" if EMBED_BACKEND else
-            "no embedding backend: set ARGUS_OLLAMA_URL to the stack's ollama")
+    return (f"CODE_INTEL_OLLAMA_URL={EMBED_BACKEND}" if EMBED_BACKEND else
+            "no embedding backend: set CODE_INTEL_OLLAMA_URL to the stack's ollama")
 
 
 def start_server() -> subprocess.Popen:
     proc = subprocess.Popen(
-        [sys.executable, "-m", "argus.cli", "serve",
+        [sys.executable, "-m", "code-intel.cli", "serve",
          "--config", str(WORK / "config.yaml"),
          "--host", HOST, "--port", str(PORT),
          "--allowed-host", f"{HOST}:{PORT}", "--allowed-host", HOST],
@@ -468,7 +468,7 @@ async def main_async() -> int:
     seeded = json.loads(SEEDED.read_text(encoding="utf-8"))
     users = seeded["users"]
 
-    print("== starting argus serve ==")
+    print("== starting code-intel serve ==")
     proc = start_server()
     try:
         print("\n== the door ==")
@@ -528,7 +528,7 @@ async def main_async() -> int:
             NO_PACKS: ("no documentation pack is installed in this fixture, and "
                        "building one needs a checkout of a real documentation repo"),
             NO_VECTORS: (f"the vector index is empty: {embed_reason()} and "
-                         f"`argus embed` must have run (verify.py does it)"),
+                         f"`code-intel embed` must have run (verify.py does it)"),
             NO_CI: "the test GitLab registers no CI runner, so no job has a log",
         }
 

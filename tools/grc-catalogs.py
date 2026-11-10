@@ -14,8 +14,8 @@ its source changes: run this, then compliance-docs.py.
 What is taken: identifiers and titles, and NIST's baselines. The texts themselves stay at their sources.
 
 --texts writes, instead, the texts that may be shared (NIST's, which are public domain, and the AI Act's, whose reuse the
-EU authorises) as a page per clause in its own words, with OUT/index.json listing them: the work directory of Argus's `grc`
-knowledge pack (argus pack build --source grc --work-dir OUT). ISO's, PCI DSS's, the CCM's and the Common Criteria's texts
+EU authorises) as a page per clause in its own words, with OUT/index.json listing them: the work directory of code-intel's `grc`
+knowledge pack (code-intel pack build --source grc --work-dir OUT). ISO's, PCI DSS's, the CCM's and the Common Criteria's texts
 are not shared, so they are not in it.
 """
 from __future__ import annotations

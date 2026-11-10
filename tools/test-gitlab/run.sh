@@ -27,7 +27,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/tools/test-gitlab/docker-compose.yml"
-CONTAINER="argus-test-gitlab"
+CONTAINER="code-intel-test-gitlab"
 BASE="http://localhost:8929"
 
 # First boot runs `gitlab-ctl reconfigure` from scratch: on the reference host
@@ -70,7 +70,7 @@ teardown() {
   # 3 would then be re-fetched from the new project 3's URL while still holding
   # the old project's objects. For a fixture this size, rebuilding costs about
   # two seconds.
-  docker volume rm argus-test-work >/dev/null 2>&1 || true
+  docker volume rm code-intel-test-work >/dev/null 2>&1 || true
 }
 
 if [ "$DOWN_ONLY" = 1 ]; then
@@ -154,7 +154,7 @@ if [ "$SKIP_VERIFY" = 1 ]; then
 fi
 
 # The verifiers (verify_tools.py, the per-tool contract) drove the retired
-# Python Argus in-process. Until they drive the .NET service, this harness
-# brings the GitLab up and seeds it, which the chat's Argus browser tests need.
-warn "not verified: the verifiers are not yet ported to the .NET Argus (see README)."
+# Python code-intel in-process. Until they drive the .NET service, this harness
+# brings the GitLab up and seeds it, which the chat's code-intel browser tests need.
+warn "not verified: the verifiers are not yet ported to the .NET code-intel (see README)."
 warn "The GitLab is seeded; tools/test-gitlab/seeded.json has its people and tokens."

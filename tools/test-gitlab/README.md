@@ -1,9 +1,9 @@
 # Test GitLab — end-to-end verification harness
 
 > **State:** `run.sh` brings the GitLab up and seeds it (projects, people, and
-> their tokens in `seeded.json`), which is what the chat's Argus browser tests
-> use. Its per-tool verifier (`verify_tools.py`) drove the retired Python Argus
-> in-process; `src/Argus` is its .NET port, conformance-tested against it. Until
+> their tokens in `seeded.json`), which is what the chat's Farzan Graph browser tests
+> use. Its per-tool verifier (`verify_tools.py`) drove the retired Python Farzan Graph
+> in-process; `src/CodeIntel` is its .NET port, conformance-tested against it. Until
 > the verifier drives the .NET service, `run.sh` skips it and says so.
 
 A disposable GitLab CE instance for proving things unit tests structurally cannot.
@@ -16,11 +16,11 @@ short of a real GitLab could answer them:
 **Q1 — does the service token actually see private projects?**
 `gitlab.list_projects` calls `/projects` with `membership=false`. For a *non-admin*
 token that returns only **public** projects. If your repositories are private and
-the service token is not a member, Argus would index a fraction of the estate and
+the service token is not a member, Farzan Graph would index a fraction of the estate and
 report success. Every capacity figure, every "which repo owns this" answer, and
 every coverage claim rests on this being right.
 
-**Q2 — can developer A read developer B's code through Argus?**
+**Q2 — can developer A read developer B's code through Farzan Graph?**
 Every test to date proves the *code* filters: the allowlist reaches each query
 first-positional, an empty allowlist returns nothing, the fixtures collide so the
 allowlist is the only discriminator. None of that proves the *system* filters,
@@ -38,7 +38,7 @@ Three **private** projects with genuine cross-repo `#include`s:
 
 `DecodeFrame` is defined in one repo and called from both others on purpose: a
 broken filter shows up as **extra rows**, not as an error. And `driver-shim` has
-no members at all — if either developer can reach it through Argus, the design
+no members at all — if either developer can reach it through Farzan Graph, the design
 has failed, and the check says so rather than passing quietly.
 
 Three **merge requests** feed the review checks (their iids are in `seeded.json`
@@ -50,8 +50,8 @@ under `merge_requests`):
 | `etl-decoder` | `review/pipeline-guard` | a one-line guard, for `dev_beta` to read |
 | `driver-shim` | `review/shim-only` | a change marked `SHIM_ONLY`, which no developer may see through any merge request tool |
 
-The same fixture runs without a GitLab in Argus's tests
-(`tests/Argus.Tests/FakeGitLabMr.cs`, `ReviewFixture`).
+The same fixture runs without a GitLab in Farzan Graph's tests
+(`tests/CodeIntel.Tests/FakeGitLabMr.cs`, `ReviewFixture`).
 
 ## Running it
 
@@ -125,10 +125,10 @@ tools, which need a documentation pack installed and fail with an actionable
 message when there is none — the absence of a pack is not something an empty
 result should be allowed to hide.
 
-When it is ported, it keeps two settings: `ARGUS_TEST_WORK` moves the mirrors
+When it is ported, it keeps two settings: `CODE_INTEL_TEST_WORK` moves the mirrors
 and index out of the checkout (SQLite in WAL mode cannot open its shared-memory
 file on some bind-mounted filesystems; on an NTFS checkout indexing dies with
-`disk I/O error`), and `ARGUS_TEST_GITLAB_URL` reaches the same GitLab from a
+`disk I/O error`), and `CODE_INTEL_TEST_GITLAB_URL` reaches the same GitLab from a
 different network position (`http://host.docker.internal:8929` from `llm-net`).
 
 ## Tear down

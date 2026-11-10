@@ -75,7 +75,7 @@ public sealed class TalkTests(AppFixture app)
     {
         var (f, b, _) = await NewAppAsync();
         await using var _f = f;
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var spoken = "spoken-" + Guid.NewGuid().ToString("N")[..8];
         await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = spoken, spoken = true })).Content.ReadAsStringAsync();
         var asked = app.Model.Requests.Last(r => r.Body.ToJsonString().Contains(spoken, StringComparison.Ordinal)).Body;

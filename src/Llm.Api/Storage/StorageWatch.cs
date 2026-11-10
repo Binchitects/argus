@@ -31,8 +31,8 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
     /// <summary>Samples older than this are dropped.</summary>
     public const int KeepDays = 400;
 
-    /// <summary>What Argus keeps besides its packs: its index, mirrors, trees and the rest.</summary>
-    private static readonly string[] ArgusParts = ["index_bytes", "mirrors_bytes", "trees_bytes", "other_bytes"];
+    /// <summary>What code-intel keeps besides its packs: its index, mirrors, trees and the rest.</summary>
+    private static readonly string[] CodeIntelParts = ["index_bytes", "mirrors_bytes", "trees_bytes", "other_bytes"];
 
     /// <summary>A disk past the share: since when, its alert's labels and words, and whether it is the host's.</summary>
     private sealed record Raised(DateTimeOffset Since, Dictionary<string, string> Labels, string Summary, string Description, bool Host);
@@ -214,10 +214,10 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             {
                 samples["backups"] = backups.Bytes + backups.OtherBytes;
             }
-            if ((await report.ArgusAsync(fresh: false, ct))["report"] is JsonObject argus && argus["index_bytes"] is not null)
+            if ((await report.CodeIntelAsync(fresh: false, ct))["report"] is JsonObject codeIntel && codeIntel["index_bytes"] is not null)
             {
-                samples["argus"] = ArgusParts.Sum(k => argus[k]?.GetValue<long>() ?? 0);
-                samples["packs"] = argus["packs_bytes"]?.GetValue<long>() ?? 0;
+                samples["code-intel"] = CodeIntelParts.Sum(k => codeIntel[k]?.GetValue<long>() ?? 0);
+                samples["packs"] = codeIntel["packs_bytes"]?.GetValue<long>() ?? 0;
             }
             if ((await report.MetricsAsync(ct)).Bytes is { } metrics)
             {
@@ -229,7 +229,7 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             db.StorageSamples.AddRange(samples.Select(s => new StorageSample { Day = today, Key = s.Key, Bytes = s.Value }));
             await db.SaveChangesAsync(ct);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or DatasourceException or ArgusException or DbUpdateException
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or DatasourceException or CodeIntelException or DbUpdateException
             or Npgsql.NpgsqlException or IOException or InvalidOperationException && !ct.IsCancellationRequested)
         {
             LogSkipped(logger, "what takes room", ex.Message);

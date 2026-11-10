@@ -1,7 +1,7 @@
 """
 deploy/config/traefik/routes.yml in the stack's own Traefik: the routes as Traefik renders them from the environment, every
 request asked about at the app's /api/authz/address first (Settings → Network access), and IP_ALLOW kept by Traefik itself.
-A fake app answers the forward auth by the path asked for and says what it saw, a fake web and Argus answer the rest; a
+A fake app answers the forward auth by the path asked for and says what it saw, a fake web and code-intel answer the rest; a
 client container on the same network makes the requests, so Traefik sees its address.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ ROUTES = REPO / "deploy" / "config" / "traefik" / "routes.yml"
 COMPOSE = REPO / "deploy" / "docker-compose.yml"
 PYTHON = "python:3.13-slim"
 
-# The web, the app and Argus: /api/authz/address refuses the paths under /refused (with a sentence, as the app does) and
+# The web, the app and code-intel: /api/authz/address refuses the paths under /refused (with a sentence, as the app does) and
 # lets the rest in; anything else is answered with who answered it. Every forward auth asked is kept, to be read back.
 FAKE = r'''
 import http.server, json, threading
@@ -89,9 +89,9 @@ class TraefikRoutesTests(unittest.TestCase):
         docker("network", "create", cls.net)
         cls.fake = f"routes-app-{cls.tag}"
         cls.start_fake()
-        # The web and Argus apart from the app, so the app being down is told from theirs.
+        # The web and code-intel apart from the app, so the app being down is told from theirs.
         docker("run", "-d", "--name", f"routes-web-{cls.tag}", "--network", cls.net, "--network-alias", "web", "--network-alias",
-               "argus", "-v", f"{cls.dir}:/t:ro", PYTHON, "python", "-u", "/t/fake.py")
+               "code-intel", "-v", f"{cls.dir}:/t:ro", PYTHON, "python", "-u", "/t/fake.py")
 
     @classmethod
     def start_fake(cls):
@@ -136,11 +136,11 @@ class TraefikRoutesTests(unittest.TestCase):
     def test_every_host_asks_the_app_about_the_caller_first_and_a_refusal_is_what_the_caller_gets(self):
         self.start_traefik()
         got = self.get([("arena.test", "/"), ("arena.test", "/api/me"), ("gateway.arena.test", "/v1/models"),
-                        ("argus.arena.test", "/mcp"), ("arena.test", "/refused/page"), ("gateway.arena.test", "/refused/v1"),
-                        ("argus.arena.test", "/refused/mcp")])
+                        ("code-intel.arena.test", "/mcp"), ("arena.test", "/refused/page"), ("gateway.arena.test", "/refused/v1"),
+                        ("code-intel.arena.test", "/refused/mcp")])
         self.assertEqual([g[0] for g in got[:4]], [200, 200, 200, 200], got)
         self.assertEqual(got[0][1], "8080 arena.test /")
-        self.assertEqual(got[3][1], "7700 argus.arena.test /mcp")
+        self.assertEqual(got[3][1], "7700 code-intel.arena.test /mcp")
         self.assertEqual(got[4:], [[403, "refused by the test"]] * 3)
         asked = self.asked()
         self.assertEqual({a["uri"] for a in asked} >= {"/", "/api/me", "/v1/models", "/mcp", "/refused/page"}, True, asked)
@@ -169,12 +169,12 @@ class TraefikRoutesTests(unittest.TestCase):
         self.start_traefik(allow=f"10.255.255.0/24, {subnet} ,192.0.2.1")
         self.assertEqual([g[0] for g in self.get([("arena.test", "/"), ("arena.test", "/refused/x")])], [200, 403])
 
-    def test_while_the_app_is_down_nothing_comes_in_not_even_the_web_or_argus(self):
+    def test_while_the_app_is_down_nothing_comes_in_not_even_the_web_or_code_intel(self):
         self.start_traefik()
         docker("stop", "-t", "1", self.fake)
         try:
-            got = self.get([("arena.test", "/"), ("argus.arena.test", "/mcp")])
-            # Refused, never let through: the web and Argus are up, the app that would say is not.
+            got = self.get([("arena.test", "/"), ("code-intel.arena.test", "/mcp")])
+            # Refused, never let through: the web and code-intel are up, the app that would say is not.
             self.assertTrue(all(g[0] >= 500 for g in got), got)
         finally:
             docker("rm", "-f", self.fake, check=False)

@@ -9,6 +9,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>A code review of several whole repositories: their paths (2 to <see cref="CodeReviewBatches.MostRepositories"/>), one ref for all or none, and whether to look across them.</summary>
@@ -16,7 +17,7 @@ public sealed record NewReviewBatch(string[] Projects, string? Ref = null, bool 
 
 /// <summary>
 /// Code reviews of several whole repositories at once (Code Studio → Review → Several repositories): each repository
-/// reviewed whole as its own review, as the person through Argus, then looked at across them; seen by them and by
+/// reviewed whole as its own review, as the person through code-intel, then looked at across them; seen by them and by
 /// reviews admins.
 /// </summary>
 public static class CodeReviewBatches
@@ -57,13 +58,13 @@ public static class CodeReviewBatches
         }));
     }
 
-    private static async Task<IResult> StartAsync(NewReviewBatch body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, ReviewEngine engine,
+    private static async Task<IResult> StartAsync(NewReviewBatch body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, ReviewEngine engine,
         Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus is not set up here: reviews read the code through it.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not set up here: reviews read the code through it.");
         }
         var projects = (body.Projects ?? []).Select(x => (x ?? "").Trim().Trim('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (projects.Count < 2 || projects.Count > MostRepositories || projects.Any(x => x.Length > 500))

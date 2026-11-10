@@ -1,4 +1,4 @@
-// The context menu: "Ask Argus Arena about …" on a selection or a page opens the app's
+// The context menu: "Ask Arena about …" on a selection or a page opens the app's
 // /ask with it. Chrome runs this as a service worker (lib.js imported here); Firefox
 // as a background script, after lib.js (manifest.json lists both).
 if (typeof importScripts === 'function' && typeof ArenaLib === 'undefined') importScripts('lib.js')
@@ -6,8 +6,8 @@ if (typeof importScripts === 'function' && typeof ArenaLib === 'undefined') impo
 const ext = globalThis.browser ?? globalThis.chrome
 
 ext.runtime.onInstalled.addListener(() => {
-  ext.contextMenus.create({ id: 'ask-selection', title: 'Ask Argus Arena about “%s”', contexts: ['selection'] })
-  ext.contextMenus.create({ id: 'ask-page', title: 'Ask Argus Arena about this page', contexts: ['page'] })
+  ext.contextMenus.create({ id: 'ask-selection', title: 'Ask Arena about “%s”', contexts: ['selection'] })
+  ext.contextMenus.create({ id: 'ask-page', title: 'Ask Arena about this page', contexts: ['page'] })
 })
 
 /** The page's title, address and text (or the selection), read in the tab (the click allowed it: activeTab). */

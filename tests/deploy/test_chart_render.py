@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-CHART = REPO / "deploy" / "helm" / "argus-arena"
+CHART = REPO / "deploy" / "helm" / "arena"
 KIND = REPO / "deploy" / "helm" / "kind-values.yaml"
 ON = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true",
       "vllm.enabled=true", "sglang.enabled=true", "valkey.enabled=true", "availability.autoscale.enabled=true", "domain=arena.example.test"]

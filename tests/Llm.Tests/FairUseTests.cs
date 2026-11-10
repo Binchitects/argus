@@ -218,7 +218,7 @@ public sealed class FairUseTests(AppFixture app)
         var name = "kq" + Guid.NewGuid().ToString("N")[..10];
         var person = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
         var b = await new TestBrowser(f).SignedInAsync(name, person.GetProperty("password").GetString()!);
-        async Task<Guid> ChatAsync() => (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        async Task<Guid> ChatAsync() => (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var (one, two) = (await ChatAsync(), await ChatAsync());
         async Task<List<JsonElement>> AskAsync(Guid chat, string text) =>
             [.. (await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = text })).Content.ReadAsStringAsync())

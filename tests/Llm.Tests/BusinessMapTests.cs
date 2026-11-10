@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace Llm.Tests;
 
 /// <summary>
-/// Argus's business map: a project mapped by a model with Argus's read-only tools into what it does for the business (each
-/// item with the sources it read), shown to those who may read the project, and used by the chat's Argus to explain the
+/// code-intel's business map: a project mapped by a model with code-intel's read-only tools into what it does for the business (each
+/// item with the sources it read), shown to those who may read the project, and used by the chat's code-intel to explain the
 /// business as the company's senior technical expert.
 /// </summary>
 [Collection(nameof(AppCollection))]
@@ -15,7 +15,7 @@ public sealed class BusinessMapTests(AppFixture app)
     /// <summary>Its own app and database: the maps are the company's, and must not leak into other tests.</summary>
     private WebApplicationFactory<Program> NewApp() =>
         app.Create(app.ConnectionStringFor("business_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-business-tests", ["Argus:GitlabUrl"] = "https://gitlab.test" });
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-business-tests", ["CodeIntel:GitlabUrl"] = "https://gitlab.test" });
 
     private static async Task<(TestBrowser Browser, string Email)> PersonAsync(WebApplicationFactory<Program> f)
     {
@@ -44,7 +44,7 @@ public sealed class BusinessMapTests(AppFixture app)
     [Fact]
     public async Task A_project_is_mapped_with_what_it_does_for_the_business_each_item_with_its_sources()
     {
-        app.Argus.Answers["issue_list"] = """{"result": []}""";
+        app.CodeIntel.Answers["issue_list"] = """{"result": []}""";
         await using var f = NewApp();
         var (b, email) = await PersonAsync(f);
         var project = "group/shop-" + Guid.NewGuid().ToString("N")[..6];
@@ -69,8 +69,8 @@ public sealed class BusinessMapTests(AppFixture app)
         Assert.Equal(["The page calls cancel", "Payment is refunded", "Stock is put back"], profile.GetProperty("processes")[0].GetProperty("steps").EnumerateArray().Select(s => s.GetString()));
         Assert.Equal(1, system.GetProperty("counts").GetProperty("entities").GetInt32());
 
-        // It read with Argus's tools, as the person who asked; its requests are theirs, tagged business.
-        Assert.Contains(app.Argus.McpCalls, c => c.Method == "tools/call" && c.Email == email && c.Params?.GetProperty("name").GetString() == "find_symbol");
+        // It read with code-intel's tools, as the person who asked; its requests are theirs, tagged business.
+        Assert.Contains(app.CodeIntel.McpCalls, c => c.Method == "tools/call" && c.Email == email && c.Params?.GetProperty("name").GetString() == "find_symbol");
         Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "business");
         var listed = (await b.JsonAsync(await b.GetAsync("/api/code/business"))).GetProperty("systems").EnumerateArray();
         Assert.Contains(listed, s => s.GetProperty("project").GetString() == project);
@@ -86,15 +86,15 @@ public sealed class BusinessMapTests(AppFixture app)
     [Fact]
     public async Task A_map_is_only_for_those_who_may_read_its_project_and_only_admins_remove_one()
     {
-        app.Argus.Answers["issue_list"] = """{"result": []}""";
+        app.CodeIntel.Answers["issue_list"] = """{"result": []}""";
         await using var f = NewApp();
         var (b, _) = await PersonAsync(f);
         var project = "group/vault-" + Guid.NewGuid().ToString("N")[..6];
         var id = (await b.JsonAsync(await b.PostAsync("/api/code/business", new { project }))).GetProperty("id").GetString()!;
         await MappedAsync(b, id);
 
-        // Someone Argus does not show the project to sees nothing of its map, and cannot map it.
-        app.Argus.Unreadable[project] = true;
+        // Someone code-intel does not show the project to sees nothing of its map, and cannot map it.
+        app.CodeIntel.Unreadable[project] = true;
         try
         {
             var (c, _) = await PersonAsync(f);
@@ -105,7 +105,7 @@ public sealed class BusinessMapTests(AppFixture app)
         }
         finally
         {
-            app.Argus.Unreadable.TryRemove(project, out _);
+            app.CodeIntel.Unreadable.TryRemove(project, out _);
         }
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.Http.DeleteAsync(new Uri($"/api/code/business/{id}", UriKind.Relative)));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -116,7 +116,7 @@ public sealed class BusinessMapTests(AppFixture app)
     [Fact]
     public async Task A_mapper_that_never_reports_fails_and_says_so()
     {
-        app.Argus.Answers["issue_list"] = """{"result": []}""";
+        app.CodeIntel.Answers["issue_list"] = """{"result": []}""";
         await using var f = NewApp();
         var (b, _) = await PersonAsync(f);
         var id = (await b.JsonAsync(await b.PostAsync("/api/code/business", new { project = "group/silent" }))).GetProperty("id").GetString()!;
@@ -126,16 +126,16 @@ public sealed class BusinessMapTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_chats_Argus_explains_the_business_from_the_map_as_the_companys_senior_expert()
+    public async Task The_chats_CodeIntel_explains_the_business_from_the_map_as_the_companys_senior_expert()
     {
-        app.Argus.Answers["issue_list"] = """{"result": []}""";
+        app.CodeIntel.Answers["issue_list"] = """{"result": []}""";
         await using var f = NewApp();
         var (b, email) = await PersonAsync(f);
         var project = "group/refunds-" + Guid.NewGuid().ToString("N")[..6];
         var id = (await b.JsonAsync(await b.PostAsync("/api/code/business", new { project }))).GetProperty("id").GetString()!;
         await MappedAsync(b, id);
 
-        var chat = await b.PostAsync("/api/chat/conversations", new { tools = new[] { "argus" } });
+        var chat = await b.PostAsync("/api/chat/conversations", new { tools = new[] { "code-intel" } });
         var chatId = (await b.JsonAsync(chat)).GetProperty("id").GetString()!;
         var sent = await b.PostAsync($"/api/chat/conversations/{chatId}/messages", new { content = """Why do refunds round half up? [call business_explain {"question":"why do refunds round half up"}]""" });
         Assert.True(sent.IsSuccessStatusCode, await sent.Content.ReadAsStringAsync());

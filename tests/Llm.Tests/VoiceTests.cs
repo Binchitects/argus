@@ -150,7 +150,7 @@ public sealed class VoiceTests(AppFixture app)
         var talk = await b.Http.PostAsync(new Uri("/api/chat/transcribe", UriKind.Relative), form);
         await StatusAssert.Is(HttpStatusCode.Forbidden, talk);
         // The chat's answers have their own credit: they go on.
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.OK, await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "Still answering?" }));
     }
 
@@ -856,7 +856,7 @@ public sealed class VoiceTests(AppFixture app)
         var routes = File.ReadAllText(Path.Combine(deploy, "config", "traefik", "routes.yml"));
         // The whole of gateway.DOMAIN goes to the app, speech and pictures with it, in both.
         Assert.Matches(@"gateway:\n\s+rule: Host\(`gateway\.\{\{ \$domain \}\}`\)\n\s+service: app\n", routes);
-        var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "argus-arena", "templates", "ingress.yaml"));
+        var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "arena", "templates", "ingress.yaml"));
         var gateway = ingress[ingress.LastIndexOf("printf \"gateway.%s\"", StringComparison.Ordinal)..];
         Assert.Contains("{ path: /, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }", gateway[..gateway.IndexOf("- host:", 1, StringComparison.Ordinal)], StringComparison.Ordinal);
         Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions", "/v1/images/generations", "/images/generations"], KeySpeech.Paths);

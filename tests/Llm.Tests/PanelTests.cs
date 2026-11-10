@@ -23,7 +23,7 @@ public sealed class PanelTests(AppFixture app)
         var pat = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
         var other = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var assistant = (await pat.JsonAsync(await pat.PostAsync("/api/assistants", new { name = "Release manager", instructions = "You plan releases and care about dates." }))).GetProperty("id").GetGuid();
-        var chat = (await pat.JsonAsync(await pat.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await pat.JsonAsync(await pat.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
 
         await StatusAssert.Is(HttpStatusCode.BadRequest, await pat.PostAsync($"/api/chat/conversations/{chat}/panel", new { question = "Ship?", panelists = new[] { new { role = "The expert" } } }));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await pat.PostAsync($"/api/chat/conversations/{chat}/panel", new { question = "Ship?", panelists = new[] { new { role = "The expert" }, new { role = "The wizard" } } }));

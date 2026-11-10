@@ -9,7 +9,7 @@ namespace Llm.Tests;
 public sealed class SupplierTests(AppFixture app)
 {
     private WebApplicationFactory<Program> NewApp() => app.Create(app.ConnectionStringFor("sup_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-        new Dictionary<string, string?> { ["Argus:GitlabUrl"] = "https://gitlab.example.test" });
+        new Dictionary<string, string?> { ["CodeIntel:GitlabUrl"] = "https://gitlab.example.test" });
 
     private static async Task<string> CheckAsync(TestBrowser admin) =>
         (await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"))).GetProperty("checks").EnumerateArray()

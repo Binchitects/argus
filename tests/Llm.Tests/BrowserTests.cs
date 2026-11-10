@@ -36,7 +36,7 @@ public sealed class BrowserTests(AppFixture app)
     private static JsonElement Result(List<JsonElement> events) => events.First(e => e.GetProperty("type").GetString() == "tool_result");
 
     private static async Task<Guid> ChatAsync(TestBrowser b) =>
-        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { "browser" } }))).GetProperty("id").GetGuid();
+        (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { "browser" } }))).GetProperty("id").GetGuid();
 
     [Fact]
     public async Task The_model_browses_shown_live_sending_only_when_allowed_and_never_typing_a_secret()
@@ -139,7 +139,7 @@ public sealed class BrowserTests(AppFixture app)
         gateway.Models.Add(new GatewayModel("Seeing-Model", 32768, 4096, Vision: true, Tools: true, Thinking: false, null, null, null));
         await using var f = NewApp(browser, gateway);
         var (b, _) = await PersonAsync(f);
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { "browser" }, model = "Seeing-Model" }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false, tools = new[] { "browser" }, model = "Seeing-Model" }))).GetProperty("id").GetGuid();
         var before = app.Model.Requests.Count;
         Assert.False(Result(await SendAsync(b, chat, """[call browser_open {"url":"https://shop.test/"}]""")).GetProperty("isError").GetBoolean());
         // The request after the step: the call's result, then the screen.

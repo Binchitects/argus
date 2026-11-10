@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 A stand-in for curl on PATH, for the installer's tests: the app's /api/info and
-Argus's metrics answer with the version of the image the fake engine
+code-intel's metrics answer with the version of the image the fake engine
 (FAKE_STATE) runs for them: the tag of the reference it was loaded as, when that
 is a version, else FAKE_OLD_VERSION. No running container: no answer (exit 7).
 FAKE_CURL_LATE=N: the first N asks of /api/info get no answer, as while Traefik
@@ -47,13 +47,13 @@ def main() -> int:
         v = running("app")
         if v is None:
             return 7
-        print(json.dumps({"name": "Argus Arena", "version": v}))
+        print(json.dumps({"name": "Arena", "version": v}))
         return 0
     if url.endswith("/admin/metrics"):
-        v = running("argus")
+        v = running("code-intel")
         if v is None:
             return 7
-        print(f'argus_index_build_info{{version="{v}"}} 1')
+        print(f'code_intel_index_build_info{{version="{v}"}} 1')
         return 0
     return 7
 

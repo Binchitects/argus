@@ -1,6 +1,6 @@
-"""A working agent loop against a live Argus MCP server.
+"""A working agent loop against a live code-intel MCP server.
 
-This is the client half of the measurements in docs/argus/pack-measurements.md, in a
+This is the client half of the measurements in docs/code-intel/pack-measurements.md, in a
 form Hermes can copy. It connects over MCP, reads the tool schemas and the
 server's instructions from the server itself, and drives an Ollama model with
 NATIVE function calling.
@@ -15,7 +15,7 @@ extra prose crowded out the output format. The same instruction under
 /api/chat with a `tools` schema improved things instead. There is no format to
 break when the model emits a structured tool_calls entry.
 
-**The server's own instructions as the system message.** Argus sends an
+**The server's own instructions as the system message.** code-intel sends an
 `instructions` block at connect time (server.SERVER_INSTRUCTIONS). Passing it
 through took tool use from 3 of 20 questions to 8, and accuracy from 12/20 to
 14/20. An agent that ignores it leaves that on the table.

@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 
-IMAGE_DEFAULT = "argus:server"   # any glibc image with bash, git, grep, rg
+IMAGE_DEFAULT = "code-intel:server"   # any glibc image with bash, git, grep, rg
 
 TASKS = [
     {

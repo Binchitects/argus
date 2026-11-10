@@ -3,8 +3,8 @@ bin/
 obj/
 *.user
 TestResults/
-# sqlite-vec for Argus, fetched by tools/fetch-sqlite-vec.sh; the linux-x64 one is kept here, so a
-# checkout builds Argus with no reach to PyPI
+# sqlite-vec for code-intel, fetched by tools/fetch-sqlite-vec.sh; the linux-x64 one is kept here, so a
+# checkout builds code-intel with no reach to PyPI
 /native/*
 !/native/runtimes/
 /native/runtimes/*
@@ -15,11 +15,11 @@ src/Llm.Api/wwwroot/
 # The web apps (each also has its own .gitignore)
 src/web/node_modules/
 src/web/dist/
-src/argus-web/node_modules/
-src/argus-web/dist/
-src/argus-web/test-results/
-src/argus-web/playwright-report/
-src/argus-web/e2e/.work/
+src/code-intel-web/node_modules/
+src/code-intel-web/dist/
+src/code-intel-web/test-results/
+src/code-intel-web/playwright-report/
+src/code-intel-web/e2e/.work/
 # Code Arena's web interface, built from src/web (vite.code-arena.config.ts) and embedded in the program
 src/CodeArena/web/
 

@@ -1,6 +1,6 @@
 namespace Llm.Api.Chat;
 
-/// <summary>Configuration section "Chat" (most of it defaults from the Stack and Argus sections).</summary>
+/// <summary>Configuration section "Chat" (most of it defaults from the Stack and code-intel sections).</summary>
 public sealed class ChatOptions
 {
     /// <summary>LiteLLM, reached inside the network. The master key comes from Gateway:MasterKey.</summary>
@@ -52,7 +52,7 @@ public sealed class ChatOptions
     /// <summary>Sub-agents of one answer that run at once (the Sub-agents tool); the others wait their turn.</summary>
     public int AgentsAtOnce { get; set; } = 3;
 
-    /// <summary>Longest one tool call (Argus, an MCP server) may take; a server can have its own.</summary>
+    /// <summary>Longest one tool call (code-intel, an MCP server) may take; a server can have its own.</summary>
     public TimeSpan ToolCallTimeout { get; set; } = TimeSpan.FromMinutes(60);
 
     /// <summary>Answers one person may have running at once, across their chats; more wait their turn.</summary>
@@ -97,11 +97,11 @@ public sealed class ChatOptions
     /// <summary>Longest one API key's request waits for its turn before it is refused (429).</summary>
     public TimeSpan ApiQueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
-    /// <summary>GitLab as people's browsers reach it, for links from Argus's answers; empty: ARGUS_GITLAB_URL.</summary>
+    /// <summary>GitLab as people's browsers reach it, for links from code-intel's answers; empty: CODE_INTEL_GITLAB_URL.</summary>
     public string? GitlabLinkUrl { get; set; }
 
-    /// <summary>ARGUS_CHAT_CLIENT_TOKEN: the credential Argus accepts for the chat, with the person's email beside it.</summary>
-    public string? ArgusChatToken { get; set; }
+    /// <summary>CODE_INTEL_CHAT_CLIENT_TOKEN: the credential code-intel accepts for the chat, with the person's email beside it.</summary>
+    public string? CodeIntelChatToken { get; set; }
 }
 
 public sealed record ThinkingPreset(string Level, string Label);

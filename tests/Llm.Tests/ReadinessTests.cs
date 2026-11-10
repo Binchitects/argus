@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>Readiness for each framework, its auditor's package, and the checks' daily history.</summary>
@@ -50,7 +51,7 @@ public sealed class ReadinessTests(AppFixture app)
         Assert.DoesNotContain("ai-systems.csv", p.Keys);
 
         // The scheme's drafts.
-        Assert.StartsWith("# Argus Arena: Security Target", (await PackageAsync(admin, "commoncriteria"))["security-target.md"], StringComparison.Ordinal);
+        Assert.StartsWith($"# {Brand.Product}: Security Target", (await PackageAsync(admin, "commoncriteria"))["security-target.md"], StringComparison.Ordinal);
         Assert.StartsWith("subcategory,outcome,", (await PackageAsync(admin, "nistcsf"))["profile.csv"], StringComparison.Ordinal);
         await admin.PostAsync("/api/admin/compliance/ai-systems", new { name = "CV screener", kind = "assistant", @class = "high", highRiskArea = "employment and workers management", role = "deployer", purpose = "Reads CVs" });
         var act = await PackageAsync(admin, "euaiact");

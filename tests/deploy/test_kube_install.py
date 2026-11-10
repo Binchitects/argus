@@ -19,7 +19,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "deploy" / "scripts" / "kube-install.sh"
-CHART = REPO / "deploy" / "helm" / "argus-arena"
+CHART = REPO / "deploy" / "helm" / "arena"
 
 FAKE_KUBECTL = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -81,7 +81,7 @@ if a[:3] == ["apply", "-f", "-"]:
     save(); sys.exit(0)
 if a[:2] == ["get", "--raw"]:
     if s.get("installed") and not s.get("app_down"):
-        out({"name": "Argus Arena", "version": "7.3.0"})
+        out({"name": "Arena", "version": "7.3.0"})
     sys.exit(1)
 if a[:2] == ["delete", "pvc"] or a[:2] == ["delete", "secret"]:
     sys.exit(0)
@@ -219,7 +219,7 @@ class KubeInstall(unittest.TestCase):
         self.assertIn('cert-manager.io/cluster-issuer: "letsencrypt"', values)
         self.assertIn('sharedStorageClass: "nfs", sharedAccessMode: ReadWriteMany', values)
         self.assertNotIn("llamacpp: { enabled: false }", values, "a GPU node: the GPU servers stay on")
-        self.assertIn("the app answers: Argus Arena 7.3.0", r.stdout)
+        self.assertIn("the app answers: Arena 7.3.0", r.stdout)
         self.assertEqual(0o600, (self.keep / "arena-values.yaml").stat().st_mode & 0o777)
 
     def test_Without_GPUs_the_GPU_servers_are_left_out_and_secrets_already_there_are_kept(self):
@@ -296,7 +296,7 @@ class KubeInstall(unittest.TestCase):
         (bundle / "images").mkdir(parents=True)
         (bundle / "deploy" / "scripts").mkdir(parents=True)
         shutil.copy(SCRIPT, bundle / "deploy" / "scripts" / "kube-install.sh")
-        shutil.copytree(CHART, bundle / "deploy" / "helm" / "argus-arena")
+        shutil.copytree(CHART, bundle / "deploy" / "helm" / "arena")
         shutil.copy(REPO / "deploy" / "features", bundle / "deploy" / "features")
         rows = [("arena-app:7.3.0", "app.tar.gz"), ("arena-web:7.3.0", "web.tar.gz"), ("pgvector/pgvector:0.8.0-pg16", "pg.tar.gz"),
                 ("ghcr.io/berriai/litellm:main-stable", "litellm.tar.gz")]
@@ -339,7 +339,7 @@ class KubeInstall(unittest.TestCase):
         r = self.run_it("requirements", "--kubernetes", "--cluster-issuer", "letsencrypt", "--shared-storage-class", "nfs",
                         script=REPO / "deploy" / "scripts" / "installer.sh")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("The cluster has what Argus Arena needs.", r.stdout)
+        self.assertIn("The cluster has what Arena needs.", r.stdout)
 
 
 if __name__ == "__main__":

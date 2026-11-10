@@ -2,11 +2,11 @@
   "uid": "stack-indexing",
   "permission": "monitoring.read",
   "area": "system",
-  "title": "Indexing: Argus code index",
-  "description": "Every index pass, what it did, and what failed. Fed by `argus index` writing one JSON line per event to the container log, which Promtail ships to Loki.",
+  "title": "Indexing: Farzan Graph code index",
+  "description": "Every index pass, what it did, and what failed. Fed by `code-intel index` writing one JSON line per event to the container log, which Promtail ships to Loki.",
   "tags": [
     "stack",
-    "argus",
+    "code-intel",
     "indexing"
   ],
   "timezone": "browser",
@@ -34,7 +34,7 @@
     {
       "type": "stat",
       "title": "Index runs",
-      "description": "Completed passes in the selected range. Each one is an `argus index` run.",
+      "description": "Completed passes in the selected range. Each one is an `code-intel index` run.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -52,7 +52,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({container=\"argus\", event=\"index_end\"} [$__range]))",
+          "expr": "sum(count_over_time({container=\"code-intel\", event=\"index_end\"} [$__range]))",
           "queryType": "range"
         }
       ],
@@ -100,7 +100,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({container=\"argus\", event=\"index_end\", outcome=\"error\"} [$__range]))",
+          "expr": "sum(count_over_time({container=\"code-intel\", event=\"index_end\", outcome=\"error\"} [$__range]))",
           "queryType": "range"
         }
       ],
@@ -161,7 +161,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({container=\"argus\", event=\"index_repo\", outcome=~\"failed|mirror_failed\"} [$__range]))",
+          "expr": "sum(count_over_time({container=\"code-intel\", event=\"index_repo\", outcome=~\"failed|mirror_failed\"} [$__range]))",
           "queryType": "range"
         }
       ],
@@ -222,7 +222,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({container=\"argus\", event=\"index_repo\", outcome=\"up_to_date\"} [$__range]))",
+          "expr": "sum(count_over_time({container=\"code-intel\", event=\"index_repo\", outcome=\"up_to_date\"} [$__range]))",
           "queryType": "range"
         }
       ],
@@ -270,7 +270,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(sum_over_time({container=\"argus\", event=\"index_repo\"} | json | unwrap indexed [$__range]))",
+          "expr": "sum(sum_over_time({container=\"code-intel\", event=\"index_repo\"} | json | unwrap indexed [$__range]))",
           "queryType": "range"
         }
       ],
@@ -318,7 +318,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "max_over_time({container=\"argus\", event=\"index_end\"} | json | unwrap duration_ms [$__range]) / 1000",
+          "expr": "max_over_time({container=\"code-intel\", event=\"index_end\"} | json | unwrap duration_ms [$__range]) / 1000",
           "queryType": "range"
         }
       ],
@@ -379,7 +379,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (outcome) (count_over_time({container=\"argus\", event=\"index_end\"} [$__auto]))",
+          "expr": "sum by (outcome) (count_over_time({container=\"code-intel\", event=\"index_end\"} [$__auto]))",
           "legendFormat": "{{outcome}}",
           "queryType": "range"
         }
@@ -435,7 +435,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (outcome) (count_over_time({container=\"argus\", event=\"index_repo\"} [$__auto]))",
+          "expr": "sum by (outcome) (count_over_time({container=\"code-intel\", event=\"index_repo\"} [$__auto]))",
           "legendFormat": "{{outcome}}",
           "queryType": "range"
         }
@@ -491,7 +491,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (reason) (count_over_time({container=\"argus\", event=\"index_end\", outcome=\"error\"} | json | reason=~\".+\" [$__auto]))",
+          "expr": "sum by (reason) (count_over_time({container=\"code-intel\", event=\"index_end\", outcome=\"error\"} | json | reason=~\".+\" [$__auto]))",
           "legendFormat": "{{reason}}",
           "queryType": "range"
         }
@@ -547,7 +547,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "quantile_over_time(0.95, {container=\"argus\", event=\"index_repo\"} | json | unwrap duration_ms [$__auto]) / 1000",
+          "expr": "quantile_over_time(0.95, {container=\"code-intel\", event=\"index_repo\"} | json | unwrap duration_ms [$__auto]) / 1000",
           "legendFormat": "p95",
           "queryType": "range"
         }
@@ -604,7 +604,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum_over_time({container=\"argus\", event=\"index_repo\"} | json | unwrap indexed [$__auto])",
+          "expr": "sum_over_time({container=\"code-intel\", event=\"index_repo\"} | json | unwrap indexed [$__auto])",
           "legendFormat": "files",
           "queryType": "range"
         }
@@ -672,7 +672,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=\"argus\", event=~\"index_repo|index_end\"} | json | outcome=~\"failed|mirror_failed|timed_out|symbols_failed|error\"",
+          "expr": "{container=\"code-intel\", event=~\"index_repo|index_end\"} | json | outcome=~\"failed|mirror_failed|timed_out|symbols_failed|error\"",
           "queryType": "range"
         }
       ],
@@ -708,7 +708,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=\"argus\", event=~\"index_.*\"} | json",
+          "expr": "{container=\"code-intel\", event=~\"index_.*\"} | json",
           "queryType": "range"
         }
       ],
@@ -744,7 +744,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=\"argus\", event=\"\"} |~ \"up to date|indexed=|FAILED|repo graph|includes:|no repos matched\"",
+          "expr": "{container=\"code-intel\", event=\"\"} |~ \"up to date|indexed=|FAILED|repo graph|includes:|no repos matched\"",
           "queryType": "range"
         }
       ],
@@ -761,7 +761,7 @@
     },
     {
       "type": "row",
-      "title": "Index health, from Argus's own metrics (argus_index_*, Prometheus)",
+      "title": "Index health, from Farzan Graph's own metrics (code_intel_index_*, Prometheus)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -774,7 +774,7 @@
     {
       "type": "stat",
       "title": "Scrape",
-      "description": "1 when Argus could read its index on the last scrape. 0 means Argus answered but its index is unreadable -- a different incident from Argus being down (that shows as the target down in Stack Health).",
+      "description": "1 when Farzan Graph could read its index on the last scrape. 0 means Farzan Graph answered but its index is unreadable -- a different incident from Farzan Graph being down (that shows as the target down in Stack Health).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -791,7 +791,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "min(argus_index_scrape_ok)",
+          "expr": "min(code_intel_index_scrape_ok)",
           "refId": "A",
           "instant": true
         }
@@ -811,7 +811,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -864,7 +864,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(argus_index_repos)",
+          "expr": "max(code_intel_index_repos)",
           "refId": "A",
           "instant": true
         }
@@ -884,7 +884,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -902,7 +902,7 @@
     {
       "type": "stat",
       "title": "Stale",
-      "description": "Repositories with no pass within ARGUS_INDEX_STALE_AFTER (default 3600s), or never indexed. The ArgusIndexStale alert fires on the same series.",
+      "description": "Repositories with no pass within CODE_INTEL_INDEX_STALE_AFTER (default 3600s), or never indexed. The CodeIntelIndexStale alert fires on the same series.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -919,7 +919,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(argus_index_stale_repos)",
+          "expr": "max(code_intel_index_stale_repos)",
           "refId": "A",
           "instant": true
         }
@@ -939,7 +939,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -978,7 +978,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(argus_index_errored_repos)",
+          "expr": "max(code_intel_index_errored_repos)",
           "refId": "A",
           "instant": true
         }
@@ -998,7 +998,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1037,7 +1037,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(time() - (argus_index_last_run_timestamp_seconds > 0))",
+          "expr": "max(time() - (code_intel_index_last_run_timestamp_seconds > 0))",
           "refId": "A",
           "instant": true
         }
@@ -1057,7 +1057,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1100,7 +1100,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(argus_index_symbols)",
+          "expr": "sum(code_intel_index_symbols)",
           "refId": "A",
           "instant": true
         }
@@ -1120,7 +1120,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "noValue": "no data (is the argus profile on and ARGUS_ADMIN_TOKEN set?)",
+          "noValue": "no data (is the code-intel profile on and CODE_INTEL_ADMIN_TOKEN set?)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1148,7 +1148,7 @@
         "w": 24,
         "h": 10
       },
-      "description": "One row per repository and branch. Age is time since Argus last checked it (a pass that found nothing to do counts). Timed out and symbols failed mean the index for that repository is incomplete, so an empty tool answer there means 'not extracted yet', not 'does not exist'.",
+      "description": "One row per repository and branch. Age is time since Farzan Graph last checked it (a pass that found nothing to do counts). Timed out and symbols failed mean the index for that repository is incomplete, so an empty tool answer there means 'not extracted yet', not 'does not exist'.",
       "targets": [
         {
           "datasource": {
@@ -1158,7 +1158,7 @@
           "refId": "A",
           "instant": true,
           "format": "table",
-          "expr": "time() - (argus_index_last_run_timestamp_seconds > 0)"
+          "expr": "time() - (code_intel_index_last_run_timestamp_seconds > 0)"
         },
         {
           "datasource": {
@@ -1168,7 +1168,7 @@
           "refId": "B",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_files"
+          "expr": "code_intel_index_files"
         },
         {
           "datasource": {
@@ -1178,7 +1178,7 @@
           "refId": "C",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_symbols"
+          "expr": "code_intel_index_symbols"
         },
         {
           "datasource": {
@@ -1188,7 +1188,7 @@
           "refId": "D",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_stale"
+          "expr": "code_intel_index_stale"
         },
         {
           "datasource": {
@@ -1198,7 +1198,7 @@
           "refId": "E",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_errored"
+          "expr": "code_intel_index_errored"
         },
         {
           "datasource": {
@@ -1208,7 +1208,7 @@
           "refId": "F",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_timed_out"
+          "expr": "code_intel_index_timed_out"
         },
         {
           "datasource": {
@@ -1218,7 +1218,7 @@
           "refId": "G",
           "instant": true,
           "format": "table",
-          "expr": "argus_index_symbols_failed"
+          "expr": "code_intel_index_symbols_failed"
         }
       ],
       "transformations": [
@@ -1471,7 +1471,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "max(argus_index_stale_repos)",
+          "expr": "max(code_intel_index_stale_repos)",
           "legendFormat": "stale"
         },
         {
@@ -1480,7 +1480,7 @@
             "uid": "prometheus"
           },
           "refId": "B",
-          "expr": "max(argus_index_errored_repos)",
+          "expr": "max(code_intel_index_errored_repos)",
           "legendFormat": "errored"
         },
         {
@@ -1489,7 +1489,7 @@
             "uid": "prometheus"
           },
           "refId": "C",
-          "expr": "max(argus_index_repos)",
+          "expr": "max(code_intel_index_repos)",
           "legendFormat": "total"
         }
       ],
@@ -1535,7 +1535,7 @@
             "uid": "prometheus"
           },
           "refId": "A",
-          "expr": "sum by (repo) (argus_index_symbols)",
+          "expr": "sum by (repo) (code_intel_index_symbols)",
           "legendFormat": "{{repo}}"
         }
       ],

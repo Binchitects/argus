@@ -12,6 +12,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>A review to start: a merge request (project and number), or what one ref has over another (from, to).</summary>
@@ -27,9 +28,9 @@ public sealed record ReviewShare(Core.Access.Reach Reach = Core.Access.Reach.Pri
 public sealed record CodeQuestion(string Question, string? Project = null, string? Ref = null, int? Iid = null);
 
 /// <summary>
-/// Code review and the online code assistant: merge requests read through Argus with the person's own read-only access
+/// Code review and the online code assistant: merge requests read through code-intel with the person's own read-only access
 /// (GitLab's rights stay theirs), reviews by the model with findings on lines, discussed in a room; and questions about a
-/// repository, branch or merge request answered in a chat with Argus. Nothing is written to the code host.
+/// repository, branch or merge request answered in a chat with code-intel. Nothing is written to the code host.
 /// </summary>
 public static class CodeEndpoints
 {
@@ -51,49 +52,49 @@ public static class CodeEndpoints
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    private static IResult NoArgus() => AuthEndpoints.Problem(503, "argus", "Argus is not set up here: it reads the code for reviews and the code assistant.");
+    private static IResult NoCodeIntel() => AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not set up here: it reads the code for reviews and the code assistant.");
 
-    /// <summary>One Argus tool's answer as the person; a refusal (no access, no such project) as a problem.</summary>
-    private static async Task<(JsonNode? Answer, IResult? Problem)> ArgusAsync(ArgusMcp argus, AppUser me, string tool, JsonObject args, CancellationToken ct)
+    /// <summary>One code-intel tool's answer as the person; a refusal (no access, no such project) as a problem.</summary>
+    private static async Task<(JsonNode? Answer, IResult? Problem)> CodeIntelAsync(CodeIntelMcp codeIntel, AppUser me, string tool, JsonObject args, CancellationToken ct)
     {
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return (null, NoArgus());
+            return (null, NoCodeIntel());
         }
         try
         {
-            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
+            var session = await codeIntel.ConnectAsync(me.Id, me.Email!, ct);
             var (text, isError) = await session.CallAsync(tool, args, null, ct);
             if (isError)
             {
-                return (null, AuthEndpoints.Problem(ArgusMcp.IsNoAccess(text) ? 404 : 400, "argus", text.Length > 600 ? text[..600] : text));
+                return (null, AuthEndpoints.Problem(CodeIntelMcp.IsNoAccess(text) ? 404 : 400, "code-intel", text.Length > 600 ? text[..600] : text));
             }
             return (JsonNode.Parse(text), null);
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or JsonException or TaskCanceledException)
         {
-            return (null, AuthEndpoints.Problem(503, "argus", "Argus could not be reached: try again in a moment."));
+            return (null, AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} could not be reached: try again in a moment."));
         }
     }
 
     /// <summary>A project's merge requests (open by default), as the person may read them.</summary>
-    private static async Task<IResult> MergeRequestsAsync(string project, string? state, ClaimsPrincipal p, UserManager<AppUser> users, ArgusMcp argus, CancellationToken ct)
+    private static async Task<IResult> MergeRequestsAsync(string project, string? state, ClaimsPrincipal p, UserManager<AppUser> users, CodeIntelMcp codeIntel, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var (answer, problem) = await ArgusAsync(argus, me, "mr_list", new JsonObject { ["project"] = project, ["state"] = state ?? "opened", ["limit"] = 50 }, ct);
+        var (answer, problem) = await CodeIntelAsync(codeIntel, me, "mr_list", new JsonObject { ["project"] = project, ["state"] = state ?? "opened", ["limit"] = 50 }, ct);
         return problem ?? Results.Ok(answer is JsonObject o && o["result"] is JsonArray rows ? rows : answer);
     }
 
     /// <summary>One merge request with its diff, and the person's reviews of it.</summary>
-    private static async Task<IResult> MergeRequestAsync(string project, int iid, ClaimsPrincipal p, UserManager<AppUser> users, ArgusMcp argus, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> MergeRequestAsync(string project, int iid, ClaimsPrincipal p, UserManager<AppUser> users, CodeIntelMcp codeIntel, AppDbContext db, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var (mr, problem) = await ArgusAsync(argus, me, "mr_get", new JsonObject { ["project"] = project, ["iid"] = iid }, ct);
+        var (mr, problem) = await CodeIntelAsync(codeIntel, me, "mr_get", new JsonObject { ["project"] = project, ["iid"] = iid }, ct);
         if (problem is not null)
         {
             return problem;
         }
-        var (diff, diffProblem) = await ArgusAsync(argus, me, "mr_diff", new JsonObject { ["project"] = project, ["iid"] = iid }, ct);
+        var (diff, diffProblem) = await CodeIntelAsync(codeIntel, me, "mr_diff", new JsonObject { ["project"] = project, ["iid"] = iid }, ct);
         var reviews = await db.CodeReviews.AsNoTracking().Where(r => r.UserId == me.Id && r.Project == project && r.Iid == iid)
             .OrderByDescending(r => r.CreatedAt).Select(r => new { r.Id, r.Status, r.Verdict, r.Risk, r.HeadSha, r.CreatedAt }).ToListAsync(ct);
         return Results.Ok(new { mr, files = diffProblem is null ? diff?["files"] : null, reviews });
@@ -107,9 +108,9 @@ public static class CodeEndpoints
 
     /// <summary>
     /// The person's reviews, those of the rooms they are in, and those shared with them of projects they may read themselves
-    /// (each project asked of Argus once, as the person); newest first.
+    /// (each project asked of code-intel once, as the person); newest first.
     /// </summary>
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, ArgusMcp argus, CancellationToken ct)
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CodeIntelMcp codeIntel, CancellationToken ct)
     {
         var me = await Me(p, users);
         var rooms = await RoomAccess.RoomsOfAsync(db, me, ct);
@@ -121,7 +122,7 @@ public static class CodeEndpoints
         var readable = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var project in shared.Select(r => r.Project).Distinct().Take(20))
         {
-            readable[project] = await ReadsAsync(argus, me, project, ct);
+            readable[project] = await ReadsAsync(codeIntel, me, project, ct);
         }
         list = [.. list.Where(r => !shared.Contains(r) || readable.GetValueOrDefault(r.Project))];
         var counts = await db.ReviewFindings.AsNoTracking().Where(f => list.Select(r => r.Id).Contains(f.ReviewId) && f.Verified != false && f.State == ReviewFinding.Open)
@@ -133,9 +134,9 @@ public static class CodeEndpoints
         }));
     }
 
-    /// <summary>Whether the person may read a project themselves: Argus, as them, lists its merge requests.</summary>
-    private static async Task<bool> ReadsAsync(ArgusMcp argus, AppUser me, string project, CancellationToken ct) =>
-        (await ArgusAsync(argus, me, "mr_list", new JsonObject { ["project"] = project, ["state"] = "all", ["limit"] = 1 }, ct)).Problem is null;
+    /// <summary>Whether the person may read a project themselves: code-intel, as them, lists its merge requests.</summary>
+    private static async Task<bool> ReadsAsync(CodeIntelMcp codeIntel, AppUser me, string project, CancellationToken ct) =>
+        (await CodeIntelAsync(codeIntel, me, "mr_list", new JsonObject { ["project"] = project, ["state"] = "all", ["limit"] = 1 }, ct)).Problem is null;
 
     private static async Task<Dictionary<Guid, string>> NamesAsync(AppDbContext db, IEnumerable<Guid> ids, CancellationToken ct)
     {
@@ -148,10 +149,10 @@ public static class CodeEndpoints
         r.Status == CodeReview.Done && (r.Reach == Core.Access.Reach.Company || r.SharePeople.Contains(me.Id) || (r.Reach == Core.Access.Reach.Groups && r.ShareGroups.Any(m.Groups.Contains)));
 
     /// <summary>
-    /// A review the person may see: theirs, one of a room they are in, or any for a reviews admin; with <paramref name="argus"/>,
+    /// A review the person may see: theirs, one of a room they are in, or any for a reviews admin; with <paramref name="code-intel"/>,
     /// also one shared with them, while they may read its project themselves (to read only).
     /// </summary>
-    private static async Task<CodeReview?> SeenAsync(AppDbContext db, AccessService access, AppUser me, Guid id, CancellationToken ct, ArgusMcp? argus = null)
+    private static async Task<CodeReview?> SeenAsync(AppDbContext db, AccessService access, AppUser me, Guid id, CancellationToken ct, CodeIntelMcp? codeIntel = null)
     {
         var r = await db.CodeReviews.Include(x => x.Findings).SingleOrDefaultAsync(x => x.Id == id, ct);
         if (r is null)
@@ -166,16 +167,16 @@ public static class CodeEndpoints
         {
             return r;
         }
-        return argus is not null && SharedWith(r, me, await access.MembershipAsync(me, ct)) && await ReadsAsync(argus, me, r.Project, ct) ? r : null;
+        return codeIntel is not null && SharedWith(r, me, await access.MembershipAsync(me, ct)) && await ReadsAsync(codeIntel, me, r.Project, ct) ? r : null;
     }
 
-    private static async Task<IResult> StartAsync(NewReview body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, ReviewEngine engine,
+    private static async Task<IResult> StartAsync(NewReview body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, ReviewEngine engine,
         Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return NoArgus();
+            return NoCodeIntel();
         }
         var project = (body.Project ?? "").Trim().Trim('/');
         if (project.Length is 0 or > 500)
@@ -234,10 +235,10 @@ public static class CodeEndpoints
         return Results.Accepted($"/api/code/reviews/{review.Id}", new { review.Id });
     }
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, ArgusMcp argus, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CodeIntelMcp codeIntel, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await SeenAsync(db, access, me, id, ct, argus) is not { } r)
+        if (await SeenAsync(db, access, me, id, ct, codeIntel) is not { } r)
         {
             return Results.NotFound();
         }
@@ -385,7 +386,7 @@ public static class CodeEndpoints
     }
 
     /// <summary>
-    /// The online code assistant: a chat with Argus on, the question with where it is about (a project, a branch, a merge
+    /// The online code assistant: a chat with code-intel on, the question with where it is about (a project, a branch, a merge
     /// request), answered as the person (their read access). Returns the chat, which the page opens and the answer streams in.
     /// </summary>
     private static async Task<IResult> AskAsync(CodeQuestion body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access,
@@ -397,14 +398,14 @@ public static class CodeEndpoints
         {
             return AuthEndpoints.Problem(400, "question", "Ask something first.");
         }
-        if (!await registry.MayUseAsync(await access.MembershipAsync(me, ct), "argus", ct))
+        if (!await registry.MayUseAsync(await access.MembershipAsync(me, ct), "code-intel", ct))
         {
-            return AuthEndpoints.Problem(403, "argus", "The code tool (Argus) is not among your tools: ask an admin.");
+            return AuthEndpoints.Problem(403, "code-intel", $"The code tool ({Brand.CodeIntel}) is not among your tools: ask an admin.");
         }
         var where = body.Project is { Length: > 0 } project
             ? $"About the project {project}" + (body.Iid is { } iid ? $", merge request !{iid}" : body.Ref is { Length: > 0 } r ? $", at {r}" : "") + ":\n\n"
             : "";
-        var c = new Conversation { UserId = me.Id, Title = ChatService.TitleFrom(question), Tools = ["argus"] };
+        var c = new Conversation { UserId = me.Id, Title = ChatService.TitleFrom(question), Tools = ["code-intel"] };
         db.Conversations.Add(c);
         await db.SaveChangesAsync(ct);
         return Results.Ok(new { id = c.Id, message = where + question });

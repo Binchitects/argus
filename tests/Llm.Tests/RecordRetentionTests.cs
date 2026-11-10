@@ -71,7 +71,7 @@ public sealed class RecordRetentionTests(AppFixture app)
     public void Loki_is_set_to_keep_logs_for_ninety_days_in_compose_and_in_the_chart()
     {
         var root = Path.GetFullPath(Path.Combine(AppFixture.PluginsPath, ".."));
-        foreach (var file in new[] { "deploy/config/loki.yml", "deploy/helm/argus-arena/files/loki.yml" })
+        foreach (var file in new[] { "deploy/config/loki.yml", "deploy/helm/arena/files/loki.yml" })
         {
             Assert.Equal("90 days", Llm.Api.Storage.StorageReport.LokiKeeps(File.ReadAllText(Path.Combine(root, file))));
         }

@@ -19,6 +19,10 @@
 # the signed builds out. installer.sh runs it on install, upgrade and repair when a CA or a
 # certificate is there.
 set -eu
+# The product's name people read: PRODUCT_NAME, else branding.env (deploy/'s, or the repository's at its root).
+brand_name() { for f in "$(dirname "$0")/../branding.env" "$(dirname "$0")/../../branding.env" "$(dirname "$0")/branding.env"; do if [ -f "$f" ]; then sed -n "s/^$1=//p" "$f" | head -n1; return 0; fi; done; }
+PRODUCT="${PRODUCT_NAME:-$(brand_name PRODUCT_NAME)}"; PRODUCT="${PRODUCT:-Farzan Arena}"
+
 cd "$(dirname "$0")/.."
 
 check=0
@@ -77,7 +81,7 @@ keyUsage=critical,digitalSignature
 extendedKeyUsage=codeSigning
 EOF
   openssl req -new -nodes -newkey rsa:3072 -keyout "$work/code-signing.key" -out "$work/code-signing.csr" \
-    -subj "/O=Argus Arena/CN=Code Arena (${domain:-this stack})" 2>/dev/null
+    -subj "/O=$PRODUCT/CN=Code Arena (${domain:-this stack})" 2>/dev/null
   openssl x509 -req -in "$work/code-signing.csr" -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -CAserial "$work/ca.srl" \
     -out "$work/code-signing.crt" -days 1095 -sha256 -extfile "$work/ext" 2>/dev/null
   mv "$work/code-signing.key" signing/code-signing.key

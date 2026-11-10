@@ -1,10 +1,10 @@
-# Argus Arena for the browser
+# Farzan Arena for the browser
 
 A browser extension (Manifest V3, plain JavaScript, Chrome, Edge and Firefox) that
-asks Argus Arena about the page you are on, or what you selected on it.
+asks Farzan Arena about the page you are on, or what you selected on it.
 
-- **Right-click** a selection: *Ask Argus Arena about "…"*; or anywhere on a
-  page: *Ask Argus Arena about this page*.
+- **Right-click** a selection: *Ask Farzan Arena about "…"*; or anywhere on a
+  page: *Ask Farzan Arena about this page*.
 - **The toolbar button**: *Ask about the selection* or *Ask about this page*.
 
 Both open the app's `/ask` page in a new tab, with the page's title, address and

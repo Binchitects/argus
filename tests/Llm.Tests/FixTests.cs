@@ -165,7 +165,7 @@ public sealed class FixTests(AppFixture app)
         app.Mcp.FixFiles["app/views.py"] = $"from flask import request\n\ndef find(cursor):\n    name = request.args['name']\n{sink}\n    return cursor.fetchall()\n";
         var sent = new System.Collections.Concurrent.ConcurrentQueue<JsonElement>();
         // The scanners find the query built from a string while it is there, and eval wherever it is.
-        app.Argus.ScanFiles = body =>
+        app.CodeIntel.ScanFiles = body =>
         {
             sent.Enqueue(body.Clone());
             var hits = new List<string>();
@@ -227,14 +227,14 @@ public sealed class FixTests(AppFixture app)
             Assert.Contains("The security review reads line 5 as no longer vulnerable.", description, StringComparison.Ordinal);
 
             // No scanners installed: the check says so, and the fix is still ready.
-            app.Argus.ScanFiles = null;
+            app.CodeIntel.ScanFiles = null;
             var unscanned = await DoneAsync(kim, f, (await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = finding, ask = misses }))).GetProperty("id").GetGuid());
             Assert.Equal("ready", unscanned.GetProperty("status").GetString());
             Assert.Contains("No security scanners are installed here", unscanned.GetProperty("checks").GetProperty("scanners").GetProperty("error").GetString(), StringComparison.Ordinal);
         }
         finally
         {
-            app.Argus.ScanFiles = null;
+            app.CodeIntel.ScanFiles = null;
             app.Mcp.FixFiles.Remove("app/views.py");
         }
     }

@@ -1,13 +1,13 @@
-# Argus Arena in your own pipeline: a review of each merge request, posted as
+# Arena in your own pipeline: a review of each merge request, posted as
 # one comment, and an explanation when a pipeline fails. Both jobs call the
 # gateway with the arena CLI (clients/arena/arena: Python 3, no packages).
 # Setup and examples: docs/ci.md.
 #
-# Include it from the Argus Arena repository in your GitLab, and say where the
+# Include it from the Arena repository in your GitLab, and say where the
 # jobs get the CLI:
 #
 #   include:
-#     - project: platform/argus-arena          # where that repository is
+#     - project: platform/arena          # where that repository is
 #       ref: main                              # or the release tag you run
 #       file: clients/gitlab-ci/arena-review.yml
 #   variables:
@@ -17,7 +17,7 @@
 #
 # The CLI comes from ARENA_CLI when it is set (a path in your repository or the
 # image, or an https address); otherwise from the image, with arena on its
-# PATH; otherwise from ARENA_PROJECT (and ARENA_REF, main): the Argus Arena
+# PATH; otherwise from ARENA_PROJECT (and ARENA_REF, main): the Arena
 # repository in this GitLab, read with ARENA_GITLAB_TOKEN, which must be able
 # to read it (a project access token is a member of its own project only).
 #
@@ -58,7 +58,7 @@
       if not source:
           project = env.get("ARENA_PROJECT", "").strip()
           if not project:
-              sys.exit("arena: set ARENA_PROJECT (the Argus Arena repository in this GitLab) or ARENA_CLI; see docs/ci.md")
+              sys.exit("arena: set ARENA_PROJECT (the Arena repository in this GitLab) or ARENA_CLI; see docs/ci.md")
           source = "%s/projects/%s/repository/files/clients%%2Farena%%2Farena/raw?ref=%s" % (
               env["CI_API_V4_URL"], urllib.parse.quote(project, safe=""), urllib.parse.quote(env.get("ARENA_REF") or "main", safe=""))
       elif not source.startswith(("https://", "http://")):

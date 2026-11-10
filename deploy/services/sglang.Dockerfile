@@ -40,6 +40,6 @@ COPY sglang/serve.py /sglang/
 COPY gpu-probe.py /gpu-probe.py
 
 LABEL org.opencontainers.image.title="arena-sglang" \
-      org.opencontainers.image.description="SGLang ${SGLANG_VERSION} with Argus Arena's supervisor"
+      org.opencontainers.image.description="SGLang ${SGLANG_VERSION} with Arena's supervisor"
 
 ENTRYPOINT ["/bin/sh", "/vllm/supervisor.sh"]

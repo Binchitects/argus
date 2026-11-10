@@ -8,7 +8,7 @@ namespace Llm.Api.Identity;
 
 /// <summary>
 /// Startup: the built-in roles are as this version has them; the first admin comes
-/// from .env when nobody exists yet; the directory Argus reads is current.
+/// from .env when nobody exists yet; the directory code-intel reads is current.
 /// </summary>
 public sealed partial class IdentityBootstrap(
     AppDbContext db,

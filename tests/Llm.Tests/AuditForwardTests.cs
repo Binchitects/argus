@@ -141,7 +141,7 @@ public sealed class AuditForwardTests(AppFixture app)
             {
                 all = [.. frames];
             }
-            Assert.All(all, m => Assert.Matches(@"^<1(10|08)>1 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z \S+ argus-arena - audit - \{", m));
+            Assert.All(all, m => Assert.Matches(@"^<1(10|08)>1 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z \S+ arena - audit - \{", m));
             Assert.Contains(all, m => m.StartsWith("<108>", StringComparison.Ordinal) && m.Contains("\"success\":false", StringComparison.Ordinal));
             Assert.Equal("ok", (await CheckAsync(admin)).GetProperty("state").GetString());
         }

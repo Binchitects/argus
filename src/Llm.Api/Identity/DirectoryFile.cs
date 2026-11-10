@@ -6,7 +6,7 @@ using YamlDotNet.Serialization;
 namespace Llm.Api.Identity;
 
 /// <summary>
-/// Writes the hash-free list of people Argus reads (email -> username):
+/// Writes the hash-free list of people code-intel reads (email -> username):
 /// <c>users: {name: {email: ...}}</c>. Replaced atomically, so a reader never sees half a file.
 /// </summary>
 public sealed class DirectoryFile(AppDbContext db, IOptions<AuthOptions> options, ILogger<DirectoryFile> logger)

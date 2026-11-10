@@ -1,4 +1,4 @@
-"""Deployment acceptance test -- does this Argus actually serve agents?
+"""Deployment acceptance test -- does this code-intel actually serve agents?
 
 Run against a deployment BEFORE pointing developers at it. Every check is a
 property an operator would otherwise discover through a confused agent:
@@ -178,7 +178,7 @@ async def run(url: str, token: str, report: Report) -> None:
                 # connection pays costs no later call does -- opening the
                 # index, the first audit write, cold OS caches -- and
                 # measured here that was 10.7s against a 79ms steady-state
-                # median. Reporting the cold number as "how fast is Argus"
+                # median. Reporting the cold number as "how fast is code-intel"
                 # would be wrong by two orders of magnitude, and reporting it
                 # without saying so would send an operator profiling a
                 # non-problem.
@@ -213,12 +213,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8099/mcp")
     parser.add_argument("--token", required=True,
-                        help="Your API key (sk-...) for the platform's Argus, or a GitLab PAT for a standalone one")
+                        help="Your API key (sk-...) for the platform's code-intel, or a GitLab PAT for a standalone one")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     report = Report()
-    print(f"Argus deployment acceptance -- {args.url}")
+    print(f"code-intel deployment acceptance -- {args.url}")
     asyncio.run(run(args.url, args.token, report))
 
     if args.json:

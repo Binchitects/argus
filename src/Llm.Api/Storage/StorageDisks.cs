@@ -3,6 +3,7 @@ using Llm.Api.Dashboards;
 using Llm.Api.Models;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Storage;
 
 /// <summary>A disk: the host's, as node-exporter reports it, or one only the app sees (a folder it mounts).</summary>
@@ -81,8 +82,8 @@ public sealed class StorageDisks(PromDatasource prom, IOptions<StorageOptions> s
     {
         yield return ("The model library", engine.Value.LibraryDir);
         yield return ("Backups", storage.Value.BackupDir);
-        // The app's own root is Docker's: its images, and the named volumes (the database, Argus, Prometheus, Loki).
-        yield return ("Docker's data: images and volumes (the database, Argus, Prometheus, Loki)", storage.Value.DockerDir);
+        // The app's own root is Docker's: its images, and the named volumes (the database, code-intel, Prometheus, Loki).
+        yield return ($"Docker's data: images and volumes (the database, {Brand.CodeIntel}, Prometheus, Loki)", storage.Value.DockerDir);
     }
 
     /// <summary>A folder's filesystem: its size and free space, or null when it is not there.</summary>

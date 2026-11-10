@@ -11,6 +11,7 @@ using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Schedules;
 
 /// <summary>
@@ -153,7 +154,7 @@ public sealed partial class TaskRunner(AppDbContext db, AnswerJobs jobs, Mailer 
         {
             try
             {
-                await gitlab.CommentAsync(target, $"{text}\n\n---\n*{task.Name}, by Argus Arena for {owner.DisplayName}: [the chat]({link})*", ct);
+                await gitlab.CommentAsync(target, $"{text}\n\n---\n*{task.Name}, by {Brand.Product} for {owner.DisplayName}: [the chat]({link})*", ct);
                 delivered.Add("commented in GitLab");
                 await audit.WriteAsync("task.gitlab_comment", task.Name, detail: $"project {target.Project}, {target.Kind} {target.Id}", actor: owner);
             }

@@ -3,6 +3,7 @@ using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Compliance;
 
 public sealed class SupplierException(string message) : Exception(message);
@@ -20,10 +21,10 @@ public sealed record SupplierSuggestion(string Source, string Name, string Kind,
 /// <summary>
 /// The supplier register (Admin → Compliance → Suppliers): each supplier with the data it receives, where, its certifications
 /// and agreements, its risk and a review its risk sets (six months high, a year medium, two years low); and the services
-/// Arena connects to (cloud model servers, tool servers, knowledge connectors, the GitLab Argus reads, Hugging Face) that
+/// Arena connects to (cloud model servers, tool servers, knowledge connectors, the GitLab code-intel reads, Hugging Face) that
 /// it does not hold yet.
 /// </summary>
-public sealed class Suppliers(AppDbContext db, IOptionsMonitor<Operations.ArgusOptions> argus, Identity.Audit audit, TimeProvider clock)
+public sealed class Suppliers(AppDbContext db, IOptionsMonitor<Operations.CodeIntelOptions> codeIntel, Identity.Audit audit, TimeProvider clock)
 {
     public static readonly string[] Risks = ["low", "medium", "high"];
 
@@ -57,9 +58,9 @@ public sealed class Suppliers(AppDbContext db, IOptionsMonitor<Operations.ArgusO
         {
             all.Add(new($"knowledge:{k.Id}", k.Name, "connector", $"Company knowledge from {k.Kind} ({Host(k.Location.Split('\n')[0])})"));
         }
-        if (argus.CurrentValue.GitlabUrl is { Length: > 0 } gitlab)
+        if (codeIntel.CurrentValue.GitlabUrl is { Length: > 0 } gitlab)
         {
-            all.Add(new("gitlab", $"GitLab ({Host(gitlab)})", "software", "The code Argus indexes, read with a read-only token"));
+            all.Add(new("gitlab", $"GitLab ({Host(gitlab)})", "software", $"The code {Brand.CodeIntel} indexes, read with a read-only token"));
         }
         all.Add(new("huggingface", "Hugging Face", "model", "The models an admin downloads (Admin → Models)"));
         return [.. all.Where(s => !known.Contains(s.Source))];

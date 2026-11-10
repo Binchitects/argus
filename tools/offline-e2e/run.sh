@@ -5,7 +5,7 @@
 # service healthy, the site and the API answering, the admin signing in, the admin overview, and
 # the installer's own status and verify.
 #
-#   tools/offline-e2e/run.sh --bundle dist/argus-arena-VERSION-offline.run
+#   tools/offline-e2e/run.sh --bundle dist/arena-VERSION-offline.run
 #     --first RUN         install RUN first (as it is, a failure allowed), then the bundle over it:
 #                         an install cut off by an earlier release, carried on by this one
 #     --upgrade-from RUN  install RUN (with --hosts), write what people keep there
@@ -35,7 +35,7 @@
 #     --reuse             keep the test host's disk from the last run (default: a fresh host each run)
 #     --cpu-only          no GPU in the test host (the features that need one are off)
 #     --with LIST         features on beside the defaults, as installer.sh --with takes them (all: every one); with
-#                         argus or the scanners, installed with a GitLab address where nothing answers; never
+#                         code-intel or the scanners, installed with a GitLab address where nothing answers; never
 #                         power-limits: the test host shares this machine's GPU and CPU, whose caps are the machine's
 #     --without LIST      features the bundle was made without (arenactl bundle --without): not asked of it; the
 #                         old release of --upgrade-from is asked only for the features its tag's deploy/features has
@@ -103,7 +103,7 @@ fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -q -t "$IMAGE" "$here" >/dev/null || fail "building the test host's image failed"
 # A fresh host: nothing of an earlier run on its disk (its files are root's: removed from a container).
 if [[ $REUSE -eq 0 ]]; then
-  docker run --rm -v "$DIR:/e2e" "$IMAGE" sh -c 'rm -rf /e2e/docker /e2e/containerd /e2e/srv /e2e/bundle/.argus-arena-unpack.* && mkdir -p /e2e/docker /e2e/containerd /e2e/srv' \
+  docker run --rm -v "$DIR:/e2e" "$IMAGE" sh -c 'rm -rf /e2e/docker /e2e/containerd /e2e/srv /e2e/bundle/.arena-unpack.* && mkdir -p /e2e/docker /e2e/containerd /e2e/srv' \
     || fail "could not clear the test host's disk in $DIR"
 fi
 
@@ -120,10 +120,10 @@ if [[ -n "$MODEL" ]]; then
     sh -c "mkdir -p /e2e/srv/models && cp /src/$(basename "$MODEL") /e2e/srv/models/" || fail "could not copy $MODEL onto the test host"
   MODEL_FLAGS=(--models-dir /srv/models --model "$(basename "$MODEL")" --hosts)
 fi
-# Argus and the scanners need a GitLab to install with: an address where nothing answers, and a made-up token (the
+# code-intel and the scanners need a GitLab to install with: an address where nothing answers, and a made-up token (the
 # test host has no network). Every install takes it.
 GITLAB_FLAGS=()
-if [[ ",$WITH," == *,argus,* || ",$WITH," == *,scanners,* ]]; then
+if [[ ",$WITH," == *,code-intel,* || ",$WITH," == *,scanners,* ]]; then
   (umask 077; openssl rand -hex 20 > "$DIR/bundle/e2e-gitlab-token")
   GITLAB_FLAGS=(--gitlab-url http://host.docker.internal:8929 --gitlab-token-file /bundle/e2e-gitlab-token)
 fi
@@ -133,7 +133,7 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   OLD_FLAGS=(${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"}); [[ " ${OLD_FLAGS[*]} " == *" --hosts "* ]] || OLD_FLAGS+=(--hosts)
   cp -f "$here/data.py" "$DIR/bundle/data.py"
   rm -f "$DIR/bundle/data.json"
-  OLD_VERSION="$(basename "$UPGRADE_FROM" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
+  OLD_VERSION="$(basename "$UPGRADE_FROM" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
   # The old release installs only the features it has: those in its own deploy/features (its tag's).
   OLD_WITH="$WITH"
   if old_features="$(git -C "$here/../.." show "v$OLD_VERSION:deploy/features" 2>/dev/null)"; then
@@ -142,7 +142,7 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   # Features the old release cannot install (a bug of its own, fixed since): left out of it, turned on by the upgrade.
   [[ -n "$OLD_WITHOUT" ]] && OLD_WITH="$(tr ',' '\n' <<< "$OLD_WITH" | grep -vxF -f <(tr ',' '\n' <<< "$OLD_WITHOUT") | paste -sd, -)"
 fi
-NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
+NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
 
 gpu=(); [[ $CPU -eq 0 ]] && gpu=(--device nvidia.com/gpu=all)
 say "==> the test host ($NAME: no network, its own Docker in $DIR)"
@@ -265,7 +265,7 @@ interrupted_run() {   # interrupted_run RUN.run SECONDS
   tail -n 12 "$LOG/interrupted.log" | sed 's/^/    /' | tee -a "$LOG/run.log"
   H test ! -e /srv/arena/deploy || fail "deploy/ is left after the stopped install"
   [[ "$(H sh -c 'docker ps -aq | wc -l')" == 0 ]] || fail "containers are left after the stopped install"
-  H sh -c 'ls -d /bundle/.argus-arena-unpack* >/dev/null 2>&1' && fail "the .run's unpacked folder is left"
+  H sh -c 'ls -d /bundle/.arena-unpack* >/dev/null 2>&1' && fail "the .run's unpacked folder is left"
   H sh -c 'ls -A /srv/arena/data 2>/dev/null | grep -q .' && fail "data folders are left"
   local images_after; images_after="$(H sh -c 'docker images -q 2>/dev/null | sort -u | wc -l' 2>/dev/null || echo 0)"
   [[ "$images_after" -le "$images_before" ]] || fail "images are left ($images_before before, $images_after after)"
@@ -289,7 +289,7 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   # Stopped by an older release's bundle: what it did to the model library is that release's (7.7.0 took it).
   [[ -n "$CUT_BY" && -n "$models_owner" ]] && models_owner="$(H stat -c %u:%g /srv/models)"
   upgrade_run "$RUN" upgrade ""
-  H sh -c 'ls -d /bundle/.argus-arena-unpack* >/dev/null 2>&1' && fail "an unpacked bundle is left in /bundle: $(H sh -c 'ls -d /bundle/.argus-arena-unpack*' | paste -sd' ' -)"
+  H sh -c 'ls -d /bundle/.arena-unpack* >/dev/null 2>&1' && fail "an unpacked bundle is left in /bundle: $(H sh -c 'ls -d /bundle/.arena-unpack*' | paste -sd' ' -)"
   [[ -z "$models_owner" || "$(H stat -c %u:%g /srv/models)" == "$models_owner" ]] || fail "the upgrade changed the model library's owner ($models_owner before)"
   if [[ $FAIL_UPGRADE -eq 1 ]]; then
     [[ $RC -eq 4 ]] || fail "the failed upgrade did not roll back by itself (exit $RC, not 4)"
@@ -330,7 +330,7 @@ unhealthy="$(H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -vE
 say "  containers: $(H docker ps -q | wc -l) up, none unhealthy"
 if [[ -n "$FIRST" ]]; then
   # What the first release's cut-off install loaded of its own is gone (what this one carries is kept).
-  old_version="$(basename "$FIRST" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
+  old_version="$(basename "$FIRST" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
   left_images="$(H sh -c "docker images --format '{{.Repository}}:{{.Tag}}' | grep -E ':$old_version\$' || true")"
   [[ -z "$left_images" ]] || fail "the cut-off $old_version install's images are left: $(printf '%s' "$left_images" | paste -sd' ' -)"
   say "  none of $old_version's own images is left"

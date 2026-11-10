@@ -1,0 +1,8 @@
+# code-intel in this stack. GITLAB_URL and GITLAB_TOKEN in .env say which GitLab.
+gitlab:
+  url: https://gitlab.example.com
+index:
+  data_dir: /var/lib/code-intel
+  db_path: /var/lib/code-intel/index.db
+packs:
+  dir: /var/lib/code-intel/packs

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>Tasks that events run: GitLab's (a merge request, a failed pipeline), with the answer commented back; and any system's JSON.</summary>
@@ -61,7 +62,7 @@ public sealed class TriggerTests(AppFixture app)
         var b = await PersonAsync(f);
         var made = await b.JsonAsync(await b.PostAsync("/api/tasks", new
         {
-            name = "Review", prompt = "Review this merge request.", trigger = "gitlab", events = new[] { "merge_request" }, replyInGitLab = true, useArgus = false, tools = Array.Empty<string>(),
+            name = "Review", prompt = "Review this merge request.", trigger = "gitlab", events = new[] { "merge_request" }, replyInGitLab = true, useCodeIntel = false, tools = Array.Empty<string>(),
         }));
         var id = made.GetProperty("id").GetString()!;
         var url = made.GetProperty("hookUrl").GetString()!;
@@ -90,7 +91,7 @@ public sealed class TriggerTests(AppFixture app)
         Assert.Contains("+int DecodeFrame(long x);", question, StringComparison.Ordinal);
         var comment = app.Mcp.GitLabCalls.Last(c => c.Method == "POST" && c.PathAndQuery == "/api/v4/projects/7/merge_requests/3/notes");
         Assert.Contains("Answer to: Review this merge", comment.Body, StringComparison.Ordinal);
-        Assert.Contains("by Argus Arena", comment.Body, StringComparison.Ordinal);
+        Assert.Contains($"by {Brand.Product}", comment.Body, StringComparison.Ordinal);
 
         // A new secret: the old one stops working.
         var rotated = (await b.JsonAsync(await b.PostAsync($"/api/tasks/{id}/secret", new { }))).GetProperty("hookToken").GetString();

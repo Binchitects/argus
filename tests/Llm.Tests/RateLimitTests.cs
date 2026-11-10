@@ -538,7 +538,7 @@ public sealed class RateLimitTests(AppFixture app)
         var before = app.Model.Requests.Count;
         for (var i = 0; i < 2; i++)
         {
-            var id = (await me.JsonAsync(await me.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+            var id = (await me.JsonAsync(await me.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
             var stream = await (await me.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
             Assert.Contains("\"done\"", stream, StringComparison.Ordinal);
         }

@@ -131,7 +131,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         var why = (await admin.JsonAsync(refused)).GetProperty("error").GetString();
         Assert.Contains("./arenactl repair --with chat-models", why, StringComparison.Ordinal);
         // On a host with no network, the offline installer of this release does it.
-        Assert.Contains($"sh argus-arena-{Llm.Api.AppInfo.Current.Version}-offline.run repair --with chat-models", why, StringComparison.Ordinal);
+        Assert.Contains($"sh arena-{Llm.Api.AppInfo.Current.Version}-offline.run repair --with chat-models", why, StringComparison.Ordinal);
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "flash");
         Assert.Equal(("vllm", "hf/acme/Flash@abc123", JsonValueKind.Null), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("move").ValueKind));
     }

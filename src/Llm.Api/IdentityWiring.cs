@@ -269,14 +269,14 @@ public static class IdentityWiring
         services.AddHttpClient<Dashboards.AlertmanagerClient>(c => c.Timeout = TimeSpan.FromSeconds(15));
 
         services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
-        services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
+        services.Configure<Operations.CodeIntelOptions>(config.GetSection("CodeIntel"));
         // The features that are on (deploy/features), and which of the stack's modules answer.
         services.AddSingleton<Operations.Features>();
         services.AddSingleton<Operations.Modules>();
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddSingleton<Oidc.AddressFilter>();
-        services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
-        services.AddScoped<Operations.ArgusWebhook>();
+        services.AddHttpClient<Operations.CodeIntelAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
+        services.AddScoped<Operations.CodeIntelWebhook>();
 
         services.Configure<Chat.ChatOptions>(config.GetSection("Chat"));
         services.Configure<Quality.QualityOptions>(config.GetSection("Quality"));
@@ -303,9 +303,9 @@ public static class IdentityWiring
         services.AddSingleton<Chat.ChatKey>();
         services.AddSingleton<Chat.ChatModels>();
         // A tool call may run for an hour (Chat:ToolCallTimeout): each request sets its own limit.
-        services.AddHttpClient<Chat.ArgusMcp>(c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
+        services.AddHttpClient<Chat.CodeIntelMcp>(c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
         services.AddHttpClient(Chat.Tools.ToolRegistry.McpClient, c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(Chat.Mcp.Handler);
-        services.AddScoped<Chat.Tools.ArgusTool>();
+        services.AddScoped<Chat.Tools.CodeIntelTool>();
         services.AddScoped<Chat.Tools.ImageTool>();
         services.AddScoped<Chat.Tools.VideoTool>();
         services.AddScoped<Chat.Tools.SpeechTool>();
@@ -491,10 +491,10 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Models.MediaControl>());
         services.AddSingleton<Models.GpuShare>();
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
-        services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
-        if (Operations.Features.On(config, "argus"))
+        services.Configure<Operations.CodeIntelIndexOptions>(config.GetSection("CodeIntelIndex"));
+        if (Operations.Features.On(config, "code-intel"))
         {
-            services.AddHostedService<Operations.ArgusIndexSchedule>();
+            services.AddHostedService<Operations.CodeIntelIndexSchedule>();
         }
         services.Configure<Schedules.MailOptions>(config.GetSection("Mail"));
         services.AddSingleton<Schedules.Mailer>();

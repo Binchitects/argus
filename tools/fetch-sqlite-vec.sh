@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch the sqlite-vec loadable extension the .NET Argus loads into SQLite.
+# Fetch the sqlite-vec loadable extension the .NET code-intel loads into SQLite.
 #
 # The version is the one the Python implementation depends on (pyproject:
 # sqlite-vec), so both read and write vec0 tables with the same code: a pack or
@@ -11,7 +11,7 @@
 #   tools/fetch-sqlite-vec.sh            # every platform
 #   tools/fetch-sqlite-vec.sh linux-x64  # just one
 #
-# Output: native/runtimes/<rid>/native/vec0.{so,dll,dylib}, which the Argus
+# Output: native/runtimes/<rid>/native/vec0.{so,dll,dylib}, which the code-intel
 # project copies next to the executable.
 set -euo pipefail
 

@@ -8,7 +8,7 @@ namespace Llm.Tests;
 
 /// <summary>
 /// A GitLab on the company's own CA: a person links their GitLab token (and with it Fix it, Code Studio, their apps)
-/// over a real TLS connection once the CA is given, in Settings or at install, without a restart; Argus is given the
+/// over a real TLS connection once the CA is given, in Settings or at install, without a restart; code-intel is given the
 /// same CA in the file it reads; and a certificate of another CA, or for another name, is still refused.
 /// </summary>
 [Collection(nameof(AppCollection))]
@@ -32,7 +32,7 @@ public sealed class CompanyCaTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "NET-01")]
-    public async Task A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_Argus_gets_it_too()
+    public async Task A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_CodeIntel_gets_it_too()
     {
         using var ca = TestCertificates.Ca("Test Company Root CA");
         using var certificate = TestCertificates.Server(ca, "localhost");
@@ -58,7 +58,7 @@ public sealed class CompanyCaTests(AppFixture app)
         var linked = await kim.JsonAsync(await Link(kim));
         Assert.Equal("kim", linked.GetProperty("account").GetString());
 
-        // Argus reads the same CA from the file beside the directory, written as the CA changed.
+        // code-intel reads the same CA from the file beside the directory, written as the CA changed.
         var shared = await File.ReadAllTextAsync(Path.Combine(directory, CompanyCa.FileName));
         Assert.Contains(TestCertificates.Pem(ca).Trim().Split('\n')[1], shared, StringComparison.Ordinal);
 

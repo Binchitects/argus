@@ -1,10 +1,10 @@
-# Connecting an agent to Argus Arena
+# Connecting an agent to Farzan Arena
 
 ## Code Arena: our own agent
 
 The simplest client is our own: **Code Arena**, one file with nothing to
 install, that talks only to the Arena (the model through the gateway, and all
-of the chat's tools, Argus included, through `https://DOMAIN/mcp` as you).
+of the chat's tools, Farzan Graph included, through `https://DOMAIN/mcp` as you).
 Download it from **Your account → Connect your tools → Code Arena (our own
 agent)**, then:
 
@@ -16,40 +16,40 @@ cd my-project && code-arena
 
 Its source is `src/CodeArena`; everything else is in
 [docs/code-arena.md](../docs/code-arena.md). The rest of this page is for
-other clients, connecting to Argus directly.
+other clients, connecting to Farzan Graph directly.
 
 ## Other clients
 
 One directory per client, each holding the smallest file that makes that client
-work. Argus speaks standard MCP, so most of this is your client's own syntax
+work. Farzan Graph speaks standard MCP, so most of this is your client's own syntax
 around the same two facts: **the URL** and **your API key** (the app's **Your
 account → API key**, `sk-...`, the same key as for the gateway). Keep it in
 `LLM_SERVICE_API_KEY`, as the app's **Connect your tools** page does.
 
-Argus asks the app whose the key is and answers as that person's GitLab account,
+Farzan Graph asks the app whose the key is and answers as that person's GitLab account,
 within their own GitLab access. It does not take GitLab tokens: give out no
-GitLab token for it. (A standalone Argus, outside the platform, still takes each
+GitLab token for it. (A standalone Farzan Graph, outside the platform, still takes each
 developer's GitLab token; the stdio forms below run one locally.)
 
-Also here, for the gateway rather than Argus: `arena/`, a command-line client
+Also here, for the gateway rather than Farzan Graph: `arena/`, a command-line client
 (`arena ask`, `arena review`, `arena explain-failure`), and `gitlab-ci/`, a
 template that reviews merge requests and explains failed pipelines in your own
 GitLab pipeline. See [docs/ci.md](../docs/ci.md).
 
 | client | file | status |
 |---|---|---|
-| [DeepSeek Harness](#deepseek-harness) | `deepseek-harness/argus-mcp.patch.yml` | **executed**, v2.1.2 |
+| [DeepSeek Harness](#deepseek-harness) | `deepseek-harness/code-intel-mcp.patch.yml` | **executed**, v2.1.2 |
 | [Qwen Code](#qwen-code) | `qwen-code/settings.example.json` | **executed**, qwen 0.23.3 on v2.1.2 |
 | [Claude Code](#claude-code) | `claude-code/add.sh` | transcribed, **not executed here** |
 | [Continue](#continue) | `continue/config.example.yaml` | transcribed, **not executed here** |
 | [anything else](#anything-else) | `generic-mcp/http.json`, `generic-mcp/stdio.json` | the HTTP shape is verified by the two above; stdio is exercised by the test suite |
 
-Not an agent: `browser-extension/` asks Argus Arena about the page you are on
+Not an agent: `browser-extension/` asks Farzan Arena about the page you are on
 (see [its README](browser-extension/README.md) and [docs/integrations.md](../docs/integrations.md)).
 
 Say what you ran. The two that say "executed" were driven end to end against a
 live stack: the harness called `find_symbol`, got `root/eal-core` back, and
-Argus logged the call against the right person (`user=dev_alpha, outcome=ok`).
+Farzan Graph logged the call against the right person (`user=dev_alpha, outcome=ok`).
 That was with a GitLab token; the files are the same with the API key in its
 place. The other three are written from each client's own documentation and are
 correct as far as that goes, but nobody has run them from this repository.
@@ -58,8 +58,8 @@ correct as far as that goes, but nobody has run them from this repository.
 
 ## Arena MCP: every chat tool of yours, with your API key
 
-Argus alone is above and below. **Arena MCP** is the other server: everything a
-person has in the chat (Argus too, then with no GitLab token; the web, Python,
+Farzan Graph alone is above and below. **Arena MCP** is the other server: everything a
+person has in the chat (Farzan Graph too, then with no GitLab token; the web, Python,
 pictures, the MCP servers, APIs and plugins the admins added), at
 `https://<domain>/mcp`, signed in with **their gateway API key** (Your account →
 API key). Details: [docs/mcp.md](../docs/mcp.md).
@@ -75,12 +75,12 @@ qwen mcp add arena https://<domain>/mcp -t http \
 ```
 
 Any other client takes the same `url` and `headers` shape as `generic-mcp/http.json`,
-with the API key in place of the GitLab token. Two differences from Argus:
+with the API key in place of the GitLab token. Two differences from Farzan Graph:
 
 - **No `--trust` here.** A tool an admin set to ask first is marked
   `destructiveHint` and says to ask: the client is the only one who can ask
   you. Trust the server only where none of your tools asks first.
-- **The host is the bare domain**, not `argus.<domain>`. The TLS note below
+- **The host is the bare domain**, not `code-intel.<domain>`. The TLS note below
   applies the same way.
 
 Tested in the suite with the app's own MCP client (`tests/Llm.Tests/ArenaMcpTests.cs`);
@@ -101,14 +101,14 @@ export NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt"
 The equivalents for the others: `curl --cacert deploy/certs/ca.crt`, Python's
 `SSL_CERT_FILE=deploy/certs/ca.crt` (and `REQUESTS_CA_BUNDLE` for requests),
 git's `http.sslCAInfo` setting, or the CA trusted system-wide
-(`sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt
+(`sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/arena.crt
 && sudo update-ca-certificates`).
 Clients that offer an "insecure" switch (Qwen Code's `--insecure`) work too, but
 that turns off verification for **every** connection the process makes, not just
 this one.
 
-**The hostname.** Use the name the reverse proxy forwards, `argus.<domain>` by
-default. Argus's DNS-rebinding guard compares the inbound `Host` header against
+**The hostname.** Use the name the reverse proxy forwards, `code-intel.<domain>` by
+default. Farzan Graph's DNS-rebinding guard compares the inbound `Host` header against
 a fixed allowlist, and a mismatch is `421 Invalid Host Header` on every `/mcp`
 call while `/healthz` still answers 200 -- so the service looks healthy and only
 the tool calls fail.
@@ -120,8 +120,8 @@ the tool calls fail.
 ```bash
 LLM_SERVICE_API_KEY=<your API key> \
 NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt" \
-  dsh --profile headless --patch clients/deepseek-harness/argus-mcp.patch.yml \
-  "Use the mcp__argus__find_symbol tool, with name=DecodeFrame."
+  dsh --profile headless --patch clients/deepseek-harness/code-intel-mcp.patch.yml \
+  "Use the mcp__code-intel__find_symbol tool, with name=DecodeFrame."
 ```
 
 Two details in that file are load-bearing and neither is guessable:
@@ -130,7 +130,7 @@ Two details in that file are load-bearing and neither is guessable:
   of a server that does not exist yet, and dsh rejects the patch with
   `id is required for non-insert patches`.
 - **`!!js` is required** around the token template. Without it the backticks
-  arrive as literal text and Argus answers 401. Taking the key from
+  arrive as literal text and Farzan Graph answers 401. Taking the key from
   `process.env` keeps it out of the file, so the file can live in this repository.
 
 `--profile headless "task"` is how to exercise an MCP server from a script: no
@@ -140,13 +140,13 @@ browser, no server left running, the tool calls visible in the transcript.
 
 ```bash
 # let the CLI write it (this is how the sample was produced)
-qwen mcp add argus https://argus.llm.localhost/mcp -t http \
+qwen mcp add code-intel https://code-intel.llm.localhost/mcp -t http \
   -H "Authorization: Bearer $LLM_SERVICE_API_KEY" --trust \
   --description 'Organisation code index'
 
 NODE_EXTRA_CA_CERTS="$PWD/deploy/certs/ca.crt" \
   qwen --approval-mode yolo \
-  "Use the argus MCP tool find_symbol to look up the symbol DecodeFrame."
+  "Use the code-intel MCP tool find_symbol to look up the symbol DecodeFrame."
 ```
 
 Or merge `qwen-code/settings.example.json` into `~/.qwen/settings.json`
@@ -159,7 +159,7 @@ added. A **project**-scope one starts as `Pending approval` and is not
 connected until:
 
 ```bash
-qwen mcp approve argus
+qwen mcp approve code-intel
 ```
 
 That is deliberate on Qwen Code's part -- a server declared in a repository
@@ -168,7 +168,7 @@ server if you are expecting it to just connect. Both scopes were exercised
 end to end here, and both called `find_symbol` correctly.
 
 **`trust: true` is not optional in a headless run.** Without it Qwen Code asks
-for confirmation before every Argus call, and nothing ever proceeds.
+for confirmation before every Farzan Graph call, and nothing ever proceeds.
 
 **Pointing Qwen Code at the stack's own model**, which is worth doing because it
 needs no cloud key and exercises both halves at once:
@@ -187,7 +187,7 @@ to the app's sign-in and answers with a login redirect that reads as a 401.
 
 `claude-code/add.sh <http|stdio>`: HTTP with your API key in
 `LLM_SERVICE_API_KEY` (the platform), or stdio with a GitLab token in
-`ARGUS_TOKEN` (a local Argus). Not executed here; `claude` is not installed on
+`CODE_INTEL_TOKEN` (a local Farzan Graph). Not executed here; `claude` is not installed on
 the machine this was written on. Check it with `claude mcp list`.
 
 ### Forcing verify-after
@@ -222,7 +222,7 @@ Telling the model to verify does not work; `SERVER_INSTRUCTIONS` already says to
 and this is the model that ignored it. The hook puts the check outside the
 model's judgement.
 
-It calls `argus verify`, which is `docs_verify` with an exit code — hooks are
+It calls `code-intel verify`, which is `docs_verify` with an exit code — hooks are
 shell commands and cannot call an MCP tool, so a command is the only interface
 that works. **Exit 2 is the only blocking outcome**, and only a genuine
 contradiction produces it. Exit 6 means "could not check" — no packs installed,
@@ -245,7 +245,7 @@ renames a field stops checking rather than blocking every answer.
 
 Merge `continue/config.example.yaml` into `~/.continue/config.yaml`. The HTTP
 form takes the same `url`/`headers` shape as everything else; the stdio form
-in it is for a local Argus.
+in it is for a local Farzan Graph.
 
 ## Anything else
 
@@ -257,7 +257,7 @@ object inside alone.
 | | HTTP | stdio |
 |---|---|---|
 | serves | many developers, one server | one client, one process |
-| credential | `Authorization: Bearer <your API key>` per request (a GitLab token for a standalone Argus) | a GitLab token in `ARGUS_TOKEN` |
+| credential | `Authorization: Bearer <your API key>` per request (a GitLab token for a standalone Farzan Graph) | a GitLab token in `CODE_INTEL_TOKEN` |
 | identity | resolved per request | resolved once at startup |
 | needs | a running server, a port, TLS in production | nothing but the command |
 
@@ -268,7 +268,7 @@ object inside alone.
 Two additions an agent should be told about, because both change how it should
 search rather than what it can reach.
 
-**Symbol results now carry `doc`.** Argus reads each symbol's doc comment and
+**Symbol results now carry `doc`.** Farzan Graph reads each symbol's doc comment and
 uses it to match and to answer, so `semantic_search` finds a function by what it
 DOES rather than by what it is named. Every symbol-level result (`find_symbol`,
 `semantic_search`, `code_contracts`, the Explore page) includes it. An agent
@@ -291,7 +291,7 @@ client lets you add system context, repeating those two habits is worthwhile.
 
 ## What a client has to get right to be worth connecting
 
-**Pass the server's `instructions` through to the model.** Argus returns 1,803
+**Pass the server's `instructions` through to the model.** Farzan Graph returns 1,803
 characters at connect time saying that recollection of headers, libraries and
 IRQLs is unreliable. Measured: passing it through took tool use from 3 of 20
 questions to 8, and accuracy from 12/20 to 14/20. A client that drops it leaves
@@ -307,10 +307,10 @@ Most clients do both by default. Hermes needed patches for the first; see
 ## Checking the connection without an agent
 
 ```bash
-python tools/smoke_test.py --url https://argus.<domain>/mcp --token "$LLM_SERVICE_API_KEY"
+python tools/smoke_test.py --url https://code-intel.<domain>/mcp --token "$LLM_SERVICE_API_KEY"
 ```
 
 Seven checks: health, a bad token refused, the MCP handshake, the server
 instructions, tool registration, a pack fact, and the private index answering
 with the right repository count. If that passes and your agent still fails, the
-problem is in the client's configuration, not in Argus.
+problem is in the client's configuration, not in Farzan Graph.

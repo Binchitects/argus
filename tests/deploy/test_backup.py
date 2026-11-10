@@ -256,7 +256,7 @@ class ComposeMountTests(unittest.TestCase):
         if docker is None:
             self.skipTest("no docker compose here")
         self.s.write("docker-compose.yml", self.compose)
-        keys = "".join(f"{k}=x\n" for k in ("APP_KEY", "ARGUS_KEY", "DB_PASSWORD", "ENGINE_KEY", "GATEWAY_KEY"))
+        keys = "".join(f"{k}=x\n" for k in ("APP_KEY", "CODE_INTEL_KEY", "DB_PASSWORD", "ENGINE_KEY", "GATEWAY_KEY"))
         keys += "DATA_DIR=/srv/arena/data\n"
         elsewhere = self.s.dir / "elsewhere"
         for value in ("", "backups", "./backups", "arena-backups", "../kept", str(elsewhere)):

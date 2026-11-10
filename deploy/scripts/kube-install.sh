@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Argus Arena on Kubernetes, with Helm (deploy/helm/argus-arena): what the cluster needs, each checked before
+# Arena on Kubernetes, with Helm (deploy/helm/arena): what the cluster needs, each checked before
 # anything is changed and each said with how to put it right; then the chart installed or upgraded, its secrets
 # made in the cluster (never printed, never in a values file), and the stack checked as it answers. The offline
 # installer runs it for --kubernetes; it runs on its own too, from a bundle or from the repository.
@@ -25,7 +25,7 @@
 # Options:
 #   --namespace NS            (default arena)        --release NAME   (default arena)
 #   --context NAME            kubectl's context      --chart DIR      (default: the chart beside this script)
-#   --domain NAME  --admin-email ADDRESS             (install; DOMAIN, gateway.DOMAIN and argus.DOMAIN)
+#   --domain NAME  --admin-email ADDRESS             (install; DOMAIN, gateway.DOMAIN and code-intel.DOMAIN)
 #   --tls-secret NAME         a kubernetes.io/tls Secret in the namespace for the three names, or
 #   --cluster-issuer NAME     cert-manager's ClusterIssuer, which makes it
 #   --database in-cluster|external   (default in-cluster) with, external: --db-host HOST [--db-port 5432]
@@ -40,7 +40,7 @@
 #   --strict-spread           never two replicas on one node
 #   --registry HOST/PATH      air-gapped: the bundle's images loaded and pushed there, and pulled from it
 #   --pull-secret NAME        the Secret the cluster pulls from that registry with
-#   --gitlab-url URL --gitlab-token-file FILE   Argus's GitLab and its read-only token (read from the file)
+#   --gitlab-url URL --gitlab-token-file FILE   code-intel's GitLab and its read-only token (read from the file)
 #   --with A,B  --without A,B   features (deploy/features) on and off: install and upgrade; each the chart's
 #                             enabled for its service, or app.features for a part of the app. A feature brings
 #                             those it requires; one others need is not turned off without them
@@ -52,6 +52,10 @@
 # Exit codes: 0 done; 1 failed (the log says what); 2 a wrong command or option; 3 refused: a requirement not
 # met, or no confirmation.
 set -uo pipefail
+# The product's name people read: PRODUCT_NAME, else branding.env (deploy/'s, or the repository's at its root).
+brand_name() { local d f; d="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"; for f in "$d/../branding.env" "$d/../../branding.env" "$d/branding.env"; do [[ -f "$f" ]] && { sed -n "s/^$1=//p" "$f" | head -n1; return 0; }; done; }
+PRODUCT="${PRODUCT_NAME:-$(brand_name PRODUCT_NAME)}"; PRODUCT="${PRODUCT:-Farzan Arena}"
+
 umask 077
 
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -134,9 +138,9 @@ for f in "$WITH" "$WITHOUT"; do [[ -z "$f" || "$f" =~ ^[a-z0-9,-]+$ ]] || usage_
 [[ -n "$WITH$WITHOUT" && $CMD != install && $CMD != upgrade ]] && usage_error "--with and --without are for install and upgrade"
 [[ $DATABASE == external && ( -z "$DB_HOST" || -z "$DB_PASSWORD_FILE" ) && $CMD == install ]] && usage_error "--database external needs --db-host and --db-password-file"
 if [[ -z "$CHART" ]]; then
-  for c in "$HERE/../helm/argus-arena" "$HERE/deploy/helm/argus-arena"; do [[ -f "$c/Chart.yaml" ]] && { CHART="$(cd "$c" && pwd)"; break; }; done
+  for c in "$HERE/../helm/arena" "$HERE/deploy/helm/arena"; do [[ -f "$c/Chart.yaml" ]] && { CHART="$(cd "$c" && pwd)"; break; }; done
 fi
-[[ -f "$CHART/Chart.yaml" ]] || usage_error "no chart: --chart DIR (deploy/helm/argus-arena)"
+[[ -f "$CHART/Chart.yaml" ]] || usage_error "no chart: --chart DIR (deploy/helm/arena)"
 # The bundle's images (images/IMAGES: ref, file...), when this runs from one.
 BUNDLE=""
 for b in "$HERE/../.." "$HERE/.."; do [[ -f "$b/images/IMAGES" ]] && { BUNDLE="$(cd "$b" && pwd)"; break; }; done
@@ -205,7 +209,7 @@ check_requirements() {
     if K get clusterissuer "$ISSUER" >/dev/null 2>&1; then ok "cert-manager's ClusterIssuer $ISSUER"; else need "ClusterIssuer $ISSUER: not there (is cert-manager installed? kubectl get clusterissuer)"; fi
   elif [[ -n "$TLS_SECRET" ]]; then
     local type; type="$(KN get secret "$TLS_SECRET" -o jsonpath='{.type}' 2>/dev/null)"
-    if [[ "$type" == kubernetes.io/tls ]]; then ok "TLS Secret $TLS_SECRET"; else need "TLS Secret $TLS_SECRET in $NS: kubectl create secret tls $TLS_SECRET -n $NS --cert=FILE --key=FILE (for DOMAIN, gateway.DOMAIN and argus.DOMAIN)"; fi
+    if [[ "$type" == kubernetes.io/tls ]]; then ok "TLS Secret $TLS_SECRET"; else need "TLS Secret $TLS_SECRET in $NS: kubectl create secret tls $TLS_SECRET -n $NS --cert=FILE --key=FILE (for DOMAIN, gateway.DOMAIN and code-intel.DOMAIN)"; fi
   elif [[ $CMD == upgrade ]]; then note "the release's TLS stays as it was installed"
   else
     need "the TLS: --tls-secret NAME (a kubernetes.io/tls Secret) or --cluster-issuer NAME (cert-manager)"
@@ -252,7 +256,7 @@ print("%d %d" % (sum(cpu(x.get("cpu", "0")) for x in a), sum(mem(x.get("memory",
 # deploy/features: each feature's services, default, needs and the features it requires. In the chart a feature
 # is its service's enabled (CHART_KEY), or, for a part of the app, a name in app.features.
 FEATURES_FILE="$HERE/../features"
-declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [sglang]=sglang [lmdeploy]=lmdeploy [strata]=strata [knowledge]=embed [argus]=argus [pictures]=imagegen [video]=videogen
+declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [sglang]=sglang [lmdeploy]=lmdeploy [strata]=strata [knowledge]=embed [code-intel]=code-intel [pictures]=imagegen [video]=videogen
   [speech]=audio [sandbox]=sandbox [web-search]=searxng [3d]=blender [lean]=lean [studio]=studio [workspaces]=workspaces
   [laya]=laya [scanners]=scanners [monitoring]=monitoring [ha]=valkey)
 FEAT_IDS=() FEATURES_ON=()
@@ -313,14 +317,14 @@ features_values() {   # features_values [replicas]: with the app's replicas too
 # The secrets as a manifest on stdin: never in a command line, a file or the log.
 make_secrets() {
   if KN get secret "$SECRET" >/dev/null 2>&1; then ok "secrets kept: $SECRET (APP_KEY never changes)"; return; fi
-  if [[ $DRY -eq 1 ]]; then note "would make the Secret $SECRET: ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, ARGUS_KEY, WORKSPACES_KEY, GATEWAY_KEY"; return; fi
+  if [[ $DRY -eq 1 ]]; then note "would make the Secret $SECRET: ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, CODE_INTEL_KEY, WORKSPACES_KEY, GATEWAY_KEY"; return; fi
   local db gitlab=""
   db="$(gen_secret)"
   [[ $DATABASE == external ]] && db="$(head -n1 "$DB_PASSWORD_FILE")"
   [[ -n "$GITLAB_TOKEN_FILE" ]] && gitlab="$(head -n1 "$GITLAB_TOKEN_FILE")"
   {
-    printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  labels: { app.kubernetes.io/part-of: argus-arena }\ntype: Opaque\nstringData:\n' "$SECRET"
-    printf '  ADMIN_PASSWORD: "%s"\n  DB_PASSWORD: "%s"\n  APP_KEY: "%s"\n  ENGINE_KEY: "%s"\n  ARGUS_KEY: "%s"\n  WORKSPACES_KEY: "%s"\n  GATEWAY_KEY: "sk-%s"\n' \
+    printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  labels: { app.kubernetes.io/part-of: arena }\ntype: Opaque\nstringData:\n' "$SECRET"
+    printf '  ADMIN_PASSWORD: "%s"\n  DB_PASSWORD: "%s"\n  APP_KEY: "%s"\n  ENGINE_KEY: "%s"\n  CODE_INTEL_KEY: "%s"\n  WORKSPACES_KEY: "%s"\n  GATEWAY_KEY: "sk-%s"\n' \
       "$(gen_secret | cut -c1-24)" "$db" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)"
     [[ -z "$gitlab" ]] || printf '  GITLAB_TOKEN: "%s"\n' "$gitlab"
   } | KN apply -f - >/dev/null || die "could not make the Secret $SECRET"
@@ -412,7 +416,7 @@ app_answers() {   # the app's /api/info through the API server's proxy: no port 
 cmd_requirements() {
   check_requirements
   if [[ $FAIL -gt 0 ]]; then say ""; refuse "$FAIL requirement(s) not met: put them right as said above, then run again"; fi
-  say ""; say "The cluster has what Argus Arena needs."
+  say ""; say "The cluster has what $PRODUCT needs."
 }
 
 cmd_install() {
@@ -477,6 +481,15 @@ cmd_install() {
   if [[ $CMD == upgrade ]]; then
     local images="$DIR/$RELEASE-images.yaml" features="$DIR/$RELEASE-features.yaml" args=(--reset-then-reuse-values)
     if [[ -n "$REGISTRY" ]]; then image_values > "$images"; args+=(-f "$images"); fi
+    # From a release before 8.0: the code-intelligence service's data stays on its claim (arena-argus) and its address
+    # (argus.DOMAIN, which DNS and people's tools know); its values were under argus, its on or off is carried.
+    if K -n "$NS" get pvc arena-argus >/dev/null 2>&1; then
+      args+=(--set codeIntel.claim=arena-argus --set codeIntel.host=argus)
+      if H get values "$RELEASE" -n "$NS" -o json 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if (json.load(sys.stdin) or {}).get("argus", {}).get("enabled") is False else 1)'; then
+        args+=(--set codeIntel.enabled=false)
+      fi
+      note "from before 8.0: the code-intelligence service keeps its data (arena-argus) and its address (argus.$DOMAIN)"
+    fi
     # Asked to change them: the features' values on top of the release's.
     if [[ -n "$WITH$WITHOUT" ]]; then mkdir -p "$DIR" && features_values > "$features" || die "cannot write $features"; args+=(-f "$features"); fi
     if [[ $DRY -eq 1 ]]; then note "would run: helm upgrade $RELEASE $CHART -n $NS ${args[*]} --atomic --wait --timeout ${TIMEOUT}m${USER_VALUES:+ -f $USER_VALUES}"; return 0; fi
@@ -498,17 +511,17 @@ cmd_install() {
 
   step "The stack answers"
   local version
-  if version="$(app_answers)"; then ok "the app answers: Argus Arena $version"
+  if version="$(app_answers)"; then ok "the app answers: $PRODUCT $version"
   else die "the app does not answer through its Service: kubectl -n $NS logs deploy/app"; fi
   say ""
-  say "Argus Arena runs at https://$DOMAIN (the DNS names $DOMAIN, gateway.$DOMAIN and argus.$DOMAIN lead to the ingress)."
+  say "$PRODUCT runs at https://$DOMAIN (the DNS names $DOMAIN, gateway.$DOMAIN and code-intel.$DOMAIN lead to the ingress)."
 }
 
 cmd_status() {
   H status "$RELEASE" -n "$NS" >/dev/null 2>&1 || refuse "no release $RELEASE in $NS"
   H status "$RELEASE" -n "$NS" 2>/dev/null | sed -n '1,8p'
   KN get deployments,statefulsets -o wide 2>/dev/null
-  local version; DRY=1; version="$(app_answers)" && say "The app answers: Argus Arena $version" || say "The app does not answer now."
+  local version; DRY=1; version="$(app_answers)" && say "The app answers: $PRODUCT $version" || say "The app does not answer now."
 }
 
 cmd_remove() {
@@ -521,7 +534,7 @@ cmd_remove() {
   if [[ $DRY -eq 1 ]]; then note "would run helm uninstall $RELEASE -n $NS$( ((PURGE)) && echo ", then remove its PersistentVolumeClaims and the Secret $SECRET")"; return 0; fi
   H uninstall "$RELEASE" -n "$NS" --wait >/dev/null 2>&1 && ok "helm uninstall $RELEASE"
   if [[ $PURGE -eq 1 ]]; then
-    KN delete pvc -l app.kubernetes.io/part-of=argus-arena --wait=false >/dev/null 2>&1
+    KN delete pvc -l app.kubernetes.io/part-of=arena --wait=false >/dev/null 2>&1
     KN delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
     ok "its volumes and secrets removed"
   else

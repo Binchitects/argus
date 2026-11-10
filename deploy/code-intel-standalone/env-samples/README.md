@@ -9,7 +9,7 @@ Each `.env` here is a complete, working deployment for one model on one card.
 
 ## Using one
 
-From `deploy/argus-standalone/`:
+From `deploy/code-intel-standalone/`:
 
 ```bash
 cp env-samples/qwen3.8-flash-next.rtx5090.env .env
@@ -22,7 +22,7 @@ make it; this fills them all at once:
 awk '/^# SECRETS/{s=1} /^# APP/{s=0} s && /^[A-Z0-9_]+=$/{c="openssl rand -hex 24"; c|getline r; close(c); if ($0 ~ /^LITELLM_/) r="sk-" r; $0=$0 r} {print}' .env > .env.new && mv .env.new .env && chmod 600 .env
 ```
 
-Set `ARGUS_ADMIN_EMAIL`, and `LLAMACPP_MODEL_DIR` to a directory on NVMe, then:
+Set `CODE_INTEL_ADMIN_EMAIL`, and `LLAMACPP_MODEL_DIR` to a directory on NVMe, then:
 
 ```bash
 docker compose up -d

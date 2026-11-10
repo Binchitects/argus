@@ -250,7 +250,7 @@ public sealed class SkillTransferTests(AppFixture app)
         var zip = Zip(("review-mr/SKILL.md", Review), ("review-mr/checklist.md", "- tests pass\n- docs updated"));
         Assert.Equal(1, (await b.JsonAsync(await UploadAsync(b, "/api/skills/import", [("s.zip", zip)]))).GetProperty("imported").GetArrayLength());
 
-        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = """Review it [call use_skill {"name":"review-mr","file":"checklist.md"}]""" });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         await res.Content.ReadAsStringAsync();

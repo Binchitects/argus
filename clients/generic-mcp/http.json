@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "argus": {
-      "url": "https://argus.llm.localhost/mcp",
+    "code-intel": {
+      "url": "https://code-intel.llm.localhost/mcp",
       "headers": {
         "Authorization": "Bearer <your API key>"
       }

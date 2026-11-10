@@ -8,12 +8,13 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 
+using Branding;
 namespace Llm.Api.Oidc;
 
 /// <summary>
-/// Whose an API key is, for Argus. A coding agent connects to Argus with the
-/// person's API key (sk-...); Argus asks here, from inside the stack's
-/// network with ARGUS_KEY, and gets the person's email and username (their
+/// Whose an API key is, for code-intel. A coding agent connects to code-intel with the
+/// person's API key (sk-...); code-intel asks here, from inside the stack's
+/// network with CODE_INTEL_KEY, and gets the person's email and username (their
 /// GitLab username). Refused through the proxy. The key is never logged or
 /// kept: the app's keys are read by its hash (<see cref="KeyBook"/>).
 /// </summary>
@@ -30,12 +31,12 @@ public static class KeyCheck
 
     public static void MapKeyCheck(this IEndpointRouteBuilder app)
     {
-        app.MapPost(Path, (HttpContext ctx, KeyBook book, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
-            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, book, users, access, argus.Value, chat.CurrentValue, clock))
-            .AllowAnonymous("Argus and Laya ask whose an API key is: the key itself is checked.");
-        app.MapPost(CodePath, (HttpContext ctx, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat, Access.AccessService access) =>
-                CodeAsync(ctx, users, access, argus.Value, chat.CurrentValue))
-            .AllowAnonymous("Argus asks which repositories a person may read by the app's rules: Argus's own credential is checked.");
+        app.MapPost(Path, (HttpContext ctx, KeyBook book, UserManager<AppUser> users, IOptions<CodeIntelOptions> codeIntel, IOptionsMonitor<ChatOptions> chat,
+            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, book, users, access, codeIntel.Value, chat.CurrentValue, clock))
+            .AllowAnonymous($"{Brand.CodeIntel} and Laya ask whose an API key is: the key itself is checked.");
+        app.MapPost(CodePath, (HttpContext ctx, UserManager<AppUser> users, IOptions<CodeIntelOptions> codeIntel, IOptionsMonitor<ChatOptions> chat, Access.AccessService access) =>
+                CodeAsync(ctx, users, access, codeIntel.Value, chat.CurrentValue))
+            .AllowAnonymous($"{Brand.CodeIntel} asks which repositories a person may read by the app's rules: {Brand.CodeIntel}'s own credential is checked.");
     }
 
     public const string CodePath = "/api/authz/code";
@@ -43,12 +44,12 @@ public static class KeyCheck
     private sealed record CodeBody(string? Email, string[]? Repos);
 
     /// <summary>
-    /// Which of Argus's repositories (by path) a person may read by the app's rules (Admin → Access: code.read, and
-    /// repository rules, on "gitlab:group/project"); GitLab's own rights stay the ceiling in Argus. No repository rules: every one.
+    /// Which of code-intel's repositories (by path) a person may read by the app's rules (Admin → Access: code.read, and
+    /// repository rules, on "gitlab:group/project"); GitLab's own rights stay the ceiling in code-intel. No repository rules: every one.
     /// </summary>
-    private static async Task<IResult> CodeAsync(HttpContext ctx, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat)
+    private static async Task<IResult> CodeAsync(HttpContext ctx, UserManager<AppUser> users, Access.AccessService access, CodeIntelOptions codeIntel, ChatOptions chat)
     {
-        if (Caller(ctx, argus, chat) is { } refused)
+        if (Caller(ctx, codeIntel, chat) is { } refused)
         {
             return refused;
         }
@@ -78,17 +79,17 @@ public static class KeyCheck
         return Results.Ok(new { read = true, allowed = body.Repos.Where(r => m.Check(Core.Access.ResourceKinds.Repo, r.Contains(':', StringComparison.Ordinal) ? r : "gitlab:" + r, Core.Access.Permissions.CodeRead).Allowed) });
     }
 
-    /// <summary>Argus's credential, from inside the stack's network; null when it is right, else the refusal.</summary>
-    private static IResult? Caller(HttpContext ctx, ArgusOptions argus, ChatOptions chat)
+    /// <summary>code-intel's credential, from inside the stack's network; null when it is right, else the refusal.</summary>
+    private static IResult? Caller(HttpContext ctx, CodeIntelOptions codeIntel, ChatOptions chat)
     {
-        string[] credentials = [.. new[] { chat.ArgusChatToken, argus.AdminToken }.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)];
+        string[] credentials = [.. new[] { chat.CodeIntelChatToken, codeIntel.AdminToken }.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)];
         if (credentials.Length == 0)
         {
             return Results.NotFound();
         }
         if (ThroughProxy(ctx.Request.Headers))
         {
-            return Results.Json(new { status = "proxy", error = "Keys are checked only for Argus, inside the stack's network, not through the proxy." },
+            return Results.Json(new { status = "proxy", error = $"Keys are checked only for {Brand.CodeIntel}, inside the stack's network, not through the proxy." },
                 statusCode: StatusCodes.Status403Forbidden);
         }
         var auth = ctx.Request.Headers.Authorization.ToString();
@@ -98,11 +99,11 @@ public static class KeyCheck
             : null;
     }
 
-    private static async Task<IResult> CheckAsync(HttpContext ctx, KeyBook book, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
+    private static async Task<IResult> CheckAsync(HttpContext ctx, KeyBook book, UserManager<AppUser> users, Access.AccessService access, CodeIntelOptions codeIntel, ChatOptions chat,
         TimeProvider clock)
     {
-        // Argus's credentials: the chat's own when set, and ARGUS_KEY (Argus takes it as both).
-        if (Caller(ctx, argus, chat) is { } refused)
+        // code-intel's credentials: the chat's own when set, and CODE_INTEL_KEY (code-intel takes it as both).
+        if (Caller(ctx, codeIntel, chat) is { } refused)
         {
             return refused;
         }

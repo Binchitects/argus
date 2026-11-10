@@ -6,6 +6,7 @@ using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Chat.Tools;
 
 /// <summary>What a tool knows about the answer it helps with, and where a long call reports how far it is.</summary>
@@ -93,7 +94,7 @@ public interface IToolRun
 /// <summary>A tool the chat can use: built in, or an MCP server an admin added.</summary>
 public interface IChatTool
 {
-    /// <summary>"argus", "image", "calculator", "time", or "mcp:{id}".</summary>
+    /// <summary>"code-intel", "image", "calculator", "time", or "mcp:{id}".</summary>
     string Id { get; }
     string Title { get; }
     string Description { get; }
@@ -149,7 +150,7 @@ internal sealed class LocalRun(JsonArray functions, string? instructions, Func<s
 }
 
 /// <summary>
-/// Argus: the organisation's code, searched with the person's own GitLab access, and the business behind it. With the
+/// code-intel: the organisation's code, searched with the person's own GitLab access, and the business behind it. With the
 /// business map (Code Studio → Business map), business_map lists the systems the person may read and what each does for
 /// the business, and business_explain finds the capabilities, entities, rules, processes and terms that answer a
 /// question, with their sources, for the model to confirm in the code, the issues and the wiki before it answers as the
@@ -159,19 +160,19 @@ internal sealed class LocalRun(JsonArray functions, string? instructions, Func<s
 /// It reads the database with a context of its own: it starts beside other tools (a plugin's sign-in reads the request's
 /// context meanwhile), and one context takes one operation at a time.
 /// </remarks>
-public sealed class ArgusTool(ArgusMcp argus, IServiceScopeFactory scopes, Code.Business.BusinessMap map) : IChatTool
+public sealed class CodeIntelTool(CodeIntelMcp codeIntel, IServiceScopeFactory scopes, Code.Business.BusinessMap map) : IChatTool
 {
     public const string MapFunction = "business_map", ExplainFunction = "business_explain";
 
     /// <summary>The most items business_explain gives.</summary>
     public const int MostFound = 12;
 
-    public string Id => "argus";
-    public string Title => "Argus";
+    public string Id => "code-intel";
+    public string Title => $"{Brand.CodeIntel}";
     public string Description => "Knows the code you can read in GitLab and the business behind it: symbols, references, files, repositories, issues, the wiki, and what each system does for the business.";
     public string Icon => "search-code";
 
-    /// <summary>How Argus answers about the business, in every answer it is on for.</summary>
+    /// <summary>How code-intel answers about the business, in every answer it is on for.</summary>
     public const string Expert =
         "You are also the company's technical mind: a senior engineer who knows the code and the business it serves. When a question is about the business " +
         "(what happens when a customer does something, why a rule is the way it is, who uses a system, what a word means here), start with business_explain " +
@@ -180,11 +181,11 @@ public sealed class ArgusTool(ArgusMcp argus, IServiceScopeFactory scopes, Code.
         "you read. Say plainly what you could not confirm.";
 
     public Task<string?> UnavailableAsync(CancellationToken ct) =>
-        Task.FromResult(argus.Enabled ? null : "Argus is not deployed here (the argus profile), or the chat has no token for it.");
+        Task.FromResult(codeIntel.Enabled ? null : $"{Brand.CodeIntel} is not deployed here (the code-intel profile), or the chat has no token for it.");
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await argus.ConnectAsync(context.User.Id, context.Email, ct);
+        var session = await codeIntel.ConnectAsync(context.User.Id, context.Email, ct);
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct));
         bool mapped;
         await using (var scope = scopes.CreateAsyncScope())
@@ -220,7 +221,7 @@ public sealed class ArgusTool(ArgusMcp argus, IServiceScopeFactory scopes, Code.
     private async Task<List<Core.Code.BusinessSystem>> ReadyAsync(AppUser me, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
-        return [.. (await map.VisibleAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), argus, me, ct)).Where(b => b.Status == Core.Code.BusinessSystem.Ready)];
+        return [.. (await map.VisibleAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), codeIntel, me, ct)).Where(b => b.Status == Core.Code.BusinessSystem.Ready)];
     }
 
     private async Task<ToolResult> BusinessMapAsync(AppUser me, CancellationToken ct)

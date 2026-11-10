@@ -8,14 +8,14 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
-/// <summary>Argus asks the app whose an API key is (/api/authz/key): from inside the network, with its credential.</summary>
+/// <summary>code-intel asks the app whose an API key is (/api/authz/key): from inside the network, with its credential.</summary>
 [Collection(nameof(AppCollection))]
 public sealed class KeyCheckTests(AppFixture app)
 {
-    /// <summary>Argus calling http://app:8080 directly: no proxy in between, so no forwarded headers.</summary>
+    /// <summary>code-intel calling http://app:8080 directly: no proxy in between, so no forwarded headers.</summary>
     private HttpClient Inside() => app.Factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://app:8080"), AllowAutoRedirect = false });
 
-    private static async Task<(HttpStatusCode Status, JsonElement Body)> AskAsync(HttpClient http, object? body, string? credential = FakeArgus.ChatToken,
+    private static async Task<(HttpStatusCode Status, JsonElement Body)> AskAsync(HttpClient http, object? body, string? credential = FakeCodeIntel.ChatToken,
         IEnumerable<(string, string)>? headers = null, string path = "/api/authz/key")
     {
         using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = JsonContent.Create(body) };
@@ -42,7 +42,7 @@ public sealed class KeyCheckTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Argus_learns_whose_an_api_key_is_and_the_apps_keys_are_read_once_while_believed()
+    public async Task CodeIntel_learns_whose_an_api_key_is_and_the_apps_keys_are_read_once_while_believed()
     {
         var (_, name, key) = await PersonAsync();
         var http = Inside();
@@ -54,15 +54,15 @@ public sealed class KeyCheckTests(AppFixture app)
         Assert.Equal($"{name}@example.test", body.GetProperty("email").GetString());
         Assert.Equal(name, body.GetProperty("username").GetString());
 
-        // ARGUS_KEY is Argus's credential too; the second answer comes from the app's short memory.
-        (status, body) = await AskAsync(http, new { key }, FakeArgus.Token);
+        // CODE_INTEL_KEY is code-intel's credential too; the second answer comes from the app's short memory.
+        (status, body) = await AskAsync(http, new { key }, FakeCodeIntel.Token);
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(name, body.GetProperty("username").GetString());
         Assert.Equal(reads + 1, book.Reads);
     }
 
     [Fact]
-    public async Task Argus_learns_which_repositories_the_apps_rules_leave_a_person()
+    public async Task CodeIntel_learns_which_repositories_the_apps_rules_leave_a_person()
     {
         var (id, name, _) = await PersonAsync();
         var http = Inside();
@@ -80,7 +80,7 @@ public sealed class KeyCheckTests(AppFixture app)
         Assert.Equal(["team-b/core"], body.GetProperty("allowed").EnumerateArray().Select(r => r.GetString()));
         await admin.Http.DeleteAsync(new Uri($"/api/admin/access/rules/{rule.GetProperty("id").GetGuid()}", UriKind.Relative));
 
-        // Without code.read, nothing; and only Argus, with its credential, from inside, may ask.
+        // Without code.read, nothing; and only code-intel, with its credential, from inside, may ask.
         await admin.PostAsync("/api/admin/access/rules", new { effect = "Deny", subjectKind = "Person", subjectId = id, resourceKind = "feature", resource = "code.read" });
         (_, body) = await AskAsync(http, new { email, repos }, path: "/api/authz/code");
         Assert.False(body.GetProperty("read").GetBoolean());
@@ -136,7 +136,7 @@ public sealed class KeyCheckTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_check_answers_only_argus_inside_the_network()
+    public async Task The_check_answers_only_code_intel_inside_the_network()
     {
         var (_, _, key) = await PersonAsync();
         var http = Inside();
@@ -151,12 +151,12 @@ public sealed class KeyCheckTests(AppFixture app)
         Assert.Equal(HttpStatusCode.Forbidden, (await AskAsync(http, new { key }, headers: [("X-Forwarded-Host", "llm.test")])).Status);
         Assert.Equal(HttpStatusCode.Forbidden, (await AskAsync(http, new { key }, headers: [("X-Real-Ip", "203.0.113.9")])).Status);
 
-        // A wrong credential says so, apart from a refused key: Argus must not take it as the key's fault.
+        // A wrong credential says so, apart from a refused key: code-intel must not take it as the key's fault.
         (status, body) = await AskAsync(http, new { key }, credential: "not-the-credential");
         Assert.Equal((HttpStatusCode.Unauthorized, "credential"), (status, body.GetProperty("status").GetString()));
         Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key }, credential: null)).Status);
         // The key itself is no credential here.
         Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key }, credential: key)).Status);
-        Assert.Equal(HttpStatusCode.BadRequest, (await AskAsync(http, new { }, FakeArgus.ChatToken)).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AskAsync(http, new { }, FakeCodeIntel.ChatToken)).Status);
     }
 }

@@ -11,6 +11,7 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>A review of several repositories: their paths (2 to <see cref="SecurityBatches.MostRepositories"/>), one ref for all or none, and whether to look across them.</summary>
@@ -132,7 +133,7 @@ public static class SecurityCross
 
 /// <summary>
 /// Security reviews of several repositories at once (Security review → Several repositories): started by a person who may
-/// run reviews, each repository read as them through Argus; seen by them and by reviews admins.
+/// run reviews, each repository read as them through code-intel; seen by them and by reviews admins.
 /// </summary>
 public static class SecurityBatches
 {
@@ -175,13 +176,13 @@ public static class SecurityBatches
         }));
     }
 
-    private static async Task<IResult> StartAsync(NewSecurityBatch body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, SecurityReview engine,
+    private static async Task<IResult> StartAsync(NewSecurityBatch body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CodeIntelMcp codeIntel, SecurityReview engine,
         Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!argus.Enabled)
+        if (!codeIntel.Enabled)
         {
-            return AuthEndpoints.Problem(503, "argus", "Argus is not set up here: it reads the code for security reviews.");
+            return AuthEndpoints.Problem(503, "code-intel", $"{Brand.CodeIntel} is not set up here: it reads the code for security reviews.");
         }
         var projects = (body.Projects ?? []).Select(x => (x ?? "").Trim().Trim('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (projects.Count < 2 || projects.Count > MostRepositories)

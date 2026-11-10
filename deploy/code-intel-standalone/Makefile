@@ -17,7 +17,7 @@ down: ## Stop everything, keeping all data
 restart: ## Recreate the chat model's container (after a MODEL change in .env)
 	@docker compose up -d --force-recreate model-init llamacpp litellm
 
-logs: ## Follow logs (make logs S=argus for one service)
+logs: ## Follow logs (make logs S=code-intel for one service)
 	@docker compose logs -f --tail 100 $(S)
 
 health: ## Is every part up and answering?
@@ -36,13 +36,13 @@ pull: ## Pull newer images for the model engine and the gateway
 	@docker compose pull model-init llamacpp llamacpp-embed litellm postgres
 
 build: ## Rebuild the app image (backend + frontend) from this checkout
-	@docker compose build argus
+	@docker compose build code-intel
 
 backup: ## Back up people, conversations, index, packs, gateway database and .env
 	@./scripts/backup.sh
 
 user: ## Account admin from the shell, e.g. make user A="passwd admin"
-	@docker exec -it argus argus user $(A) --config /etc/argus/config.yaml
+	@docker exec -it code-intel code-intel user $(A) --config /etc/code-intel/config.yaml
 
 clean: ## Stop and DELETE all data volumes (destructive)
 	@echo "This deletes every account, conversation, key, budget and the code index."

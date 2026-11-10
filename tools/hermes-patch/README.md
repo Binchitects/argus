@@ -4,7 +4,7 @@ Runs `docs_verify` on a finished answer whether the model wanted it or not,
 and lets it revise only where the documentation contradicts.
 
 ```bash
-cp tools/hermes-patch/argus_verify.py "$HERMES/agent/"
+cp tools/hermes-patch/code_intel_verify.py "$HERMES/agent/"
 ```
 
 Then add to `agent/turn_finalizer.py`, immediately after
@@ -12,17 +12,17 @@ Then add to `agent/turn_finalizer.py`, immediately after
 
 ```python
     try:
-        from agent.argus_verify import apply as _argus_verify_apply
+        from agent.code_intel_verify import apply as _code_intel_verify_apply
 
-        final_response = _argus_verify_apply(agent, final_response)
+        final_response = _code_intel_verify_apply(agent, final_response)
     except Exception:
-        logger.debug("Argus verify-after unavailable", exc_info=True)
+        logger.debug("Farzan Graph verify-after unavailable", exc_info=True)
 ```
 
 Enable per run:
 
 ```bash
-ARGUS_VERIFY_AFTER=1 ARGUS_URL=http://127.0.0.1:8099/mcp ARGUS_TOKEN=... hermes
+CODE_INTEL_VERIFY_AFTER=1 CODE_INTEL_URL=http://127.0.0.1:8099/mcp CODE_INTEL_TOKEN=... hermes
 ```
 
 ## Why here
@@ -34,7 +34,7 @@ different branch.
 
 It is synchronous but may run inside an async gateway where `asyncio.run`
 raises, so the MCP call gets a dedicated thread with its own loop and a
-bounded join. A hung Argus delays a turn; it does not hang one.
+bounded join. A hung Farzan Graph delays a turn; it does not hang one.
 
 ## What it fixes, measured
 
@@ -64,7 +64,7 @@ trade has not been made here.
 
 ## Cost and default
 
-Off unless `ARGUS_VERIFY_AFTER` is set. It adds a round trip to every turn,
+Off unless `CODE_INTEL_VERIFY_AFTER` is set. It adds a round trip to every turn,
 including the ones already answered correctly from memory — ~11 s measured,
 which buys nothing against a model that checks and buys the answer against
 one that does not.

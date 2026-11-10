@@ -13,6 +13,7 @@ using Llm.Core.Identity;
 using Llm.Core.Studio;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Studio;
 
 /// <summary>Why a run ends before its last step: a step that failed, an approval turned down, or a stop step (done or failed).</summary>
@@ -374,7 +375,7 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
                 }
                 try
                 {
-                    await gitlab.CommentAsync(target, $"{input}\n\n---\n*{_workflow.Name}, by Argus Arena for {_owner.DisplayName}*", ct);
+                    await gitlab.CommentAsync(target, $"{input}\n\n---\n*{_workflow.Name}, by {Brand.Product} for {_owner.DisplayName}*", ct);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
                 {

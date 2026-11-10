@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# The sources of Argus's `security` knowledge pack, fetched into one work directory, each part in a folder of its own:
+# The sources of code-intel's `security` knowledge pack, fetched into one work directory, each part in a folder of its own:
 #
 #   tools/fetch-security-sources.sh [DIR]     (DIR: .packwork/docsrc/security)
 #
-# then: argus pack build --source security --work-dir "$PWD/DIR" --out packs/security-1.0.arguspack --version 1.0
+# then: code-intel pack build --source security --work-dir "$PWD/DIR" --out packs/security-1.0.kpack --version 1.0
 #
 # What is fetched, and under what terms (the pack records each):
 #   mitre/        CWE and CAPEC, MITRE's XML (free to use, with MITRE's notice)

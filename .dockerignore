@@ -1,5 +1,5 @@
 # Context of the images built from the repository root: the API
-# (src/Llm.Api/Dockerfile), Argus (src/Argus/Dockerfile) and the web
+# (src/Llm.Api/Dockerfile), code-intel (src/CodeIntel/Dockerfile) and the web
 # (src/web/Dockerfile, which builds docs/ into its manual). They build from
 # source; nothing prebuilt, secret or large crosses into the context.
 .git
@@ -40,13 +40,13 @@ tests/deploy/
 **/obj/
 dist/
 native/
-# sqlite-vec as tools/fetch-sqlite-vec.sh fetched and checked it (Argus takes it in; the script checks it again).
+# sqlite-vec as tools/fetch-sqlite-vec.sh fetched and checked it (code-intel takes it in; the script checks it again).
 !native/runtimes/
 **/node_modules/
-src/argus-web/dist/
-src/argus-web/test-results/
-src/argus-web/playwright-report/
-src/argus-web/e2e/.work/
+src/code-intel-web/dist/
+src/code-intel-web/test-results/
+src/code-intel-web/playwright-report/
+src/code-intel-web/e2e/.work/
 TestResults/
 
 data/

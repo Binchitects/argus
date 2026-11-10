@@ -10,13 +10,14 @@ using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
+using Branding;
 namespace Llm.Api.Code;
 
 /// <summary>A dangerous call untrusted data may reach, by language: what weakness it would be, and git grep's pattern for it.</summary>
 public sealed record Sink(string Kind, string Cwe, string What, string[] Globs, string Pattern);
 
 /// <summary>
-/// A security review of a repository at a ref, as the person who asked (Argus reads it with their read-only access):
+/// A security review of a repository at a ref, as the person who asked (code-intel reads it with their read-only access):
 /// <list type="number">
 /// <item>the sinks, found with git grep (<see cref="Sinks"/>): queries, commands, paths, fetches, deserialisers, HTML,
 /// XML parsers, redirects and code run from text, tests and vendored code left out;</item>
@@ -124,7 +125,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         ["CWE-601"] = "redirect",
     };
 
-    /// <summary>What a scanner found, as Argus's scan_at gives it.</summary>
+    /// <summary>What a scanner found, as code-intel's scan_at gives it.</summary>
     public sealed record ScannerHit(string Kind, string[] Tools, string[] Rules, string Path, int Line, string Cwe, string Severity, string Confidence,
         string Title, string Message, string Code, string? Commit);
 
@@ -265,7 +266,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 ?? throw new ReviewException("Its person is gone.");
             scan.Status = SecurityScan.Running;
             scan.Model = await ModelAsync(services, user, ct);
-            var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(user.Id, user.Email!, ct);
+            var session = await services.GetRequiredService<CodeIntelMcp>().ConnectAsync(user.Id, user.Email!, ct);
             await StepAsync(db, scan, "Checking its packages against known vulnerabilities", ct);
             var packages = await DependenciesAsync(session, scan, ct);
             await StepAsync(db, scan, "Running the security scanners", ct);
@@ -355,7 +356,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     }
 
     /// <summary>
-    /// The repository's packages matched against the advisories (Argus's deps_check, no model) and its bill of materials:
+    /// The repository's packages matched against the advisories (code-intel's deps_check, no model) and its bill of materials:
     /// a finding per package version an advisory affects. Without an advisories pack, or a tool that cannot read the
     /// repository's lock files, the review goes on with its code alone and says so.
     /// </summary>
@@ -380,7 +381,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     }
 
     /// <summary>
-    /// The security scanners on the commit, its history too (Argus's scan_at): what they found, the most severe first.
+    /// The security scanners on the commit, its history too (code-intel's scan_at): what they found, the most severe first.
     /// Without the scanners feature, or when they cannot scan, the review goes on without them and says why.
     /// </summary>
     private static async Task<List<ScannerHit>> ScannersAsync(McpSession session, SecurityScan scan, CancellationToken ct)
@@ -814,7 +815,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     }
 
     private static async Task<JsonObject> CallAsync(McpSession session, string tool, JsonObject args, CancellationToken ct) =>
-        await CallAnyAsync(session, tool, args, ct) as JsonObject ?? throw new ReviewException($"Argus's {tool} answered something else.");
+        await CallAnyAsync(session, tool, args, ct) as JsonObject ?? throw new ReviewException($"{Brand.CodeIntel}'s {tool} answered something else.");
 
     /// <summary>A tool's answer as JSON: an object, or a list (a list tool's rows, as the client unwraps them).</summary>
     private static async Task<JsonNode?> CallAnyAsync(McpSession session, string tool, JsonObject args, CancellationToken ct)
@@ -830,7 +831,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         }
         catch (System.Text.Json.JsonException)
         {
-            throw new ReviewException($"Argus's {tool} answered something else.");
+            throw new ReviewException($"{Brand.CodeIntel}'s {tool} answered something else.");
         }
     }
 

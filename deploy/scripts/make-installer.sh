@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One file per release for hosts with no network: dist/argus-arena-VERSION-offline.run, a
+# One file per release for hosts with no network: dist/arena-VERSION-offline.run, a
 # shell script with the bundle after it, and its .sha256. airgap.sh packs the images, deploy/,
 # the models and the speech models; this adds the installer, the docs, the licences, Code
 # Arena's packages and (if asked) the knowledge packs, and makes the one file.
@@ -16,7 +16,7 @@
 #                      only the embedding model goes in (small, and the embedding server
 #                      waits for it)
 #   --models-dir DIR   the model library (as airgap.sh: MODELS_DIR in .env, else ./models)
-#   --packs            the knowledge packs in packs/ (*.arguspack)
+#   --packs            the knowledge packs in packs/ (*.kpack)
 #   --code-arena DIR   Code Arena's packages (default dist/: code-arena-*.tar.gz and .zip,
 #                      which ./arenactl code-arena makes, and this when there are none)
 #   --without A,B      features (deploy/features) whose images are left out: a smaller bundle;
@@ -28,7 +28,7 @@
 #                      left out, and an upgrade from it keeps every file it finds changed
 #   --images-in-engine the images named, not saved: they stay in the engine, built or pulled there
 #                      (arenactl install, from a checkout); no speech models, Code Arena or .run
-#   --stage-only DIR   the bundle unpacked into DIR/argus-arena-VERSION, not a .run
+#   --stage-only DIR   the bundle unpacked into DIR/arena-VERSION, not a .run
 #   --image-cache DIR  each image packed once, by its id and the name it is saved under (default
 #                      OUT/.image-cache): the next bundle saves and gzips only the images that changed
 #                      or are named anew (the release's own, by version); those this bundle did not use
@@ -36,7 +36,7 @@
 #   --no-image-cache   every image saved and gzipped again
 #   --dry-run          the plan; nothing is written or saved
 #
-# The bundle, argus-arena-VERSION/ inside the file:
+# The bundle, arena-VERSION/ inside the file:
 #   installer.sh   the installer (scripts/installer.sh), at the top
 #   MANIFEST       format, version, commit, created, upgrades-from (the oldest release it
 #                  upgrades: 5.2.0), the engine it was packed with, what it holds
@@ -57,11 +57,15 @@
 # The file is the installer's shell header, then a small tar (the installer, MANIFEST,
 # SHA256SUMS, deploy/, docs/: enough for a dry run, status and remove), then the rest.
 set -uo pipefail
+# The product's name people read: PRODUCT_NAME, else branding.env (deploy/'s, or the repository's at its root).
+brand_name() { local d f; d="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"; for f in "$d/../branding.env" "$d/../../branding.env" "$d/branding.env"; do [[ -f "$f" ]] && { sed -n "s/^$1=//p" "$f" | head -n1; return 0; }; done; }
+PRODUCT="${PRODUCT_NAME:-$(brand_name PRODUCT_NAME)}"; PRODUCT="${PRODUCT:-Farzan Arena}"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
 umask 022
 
-FORMAT="argus-arena-offline 1"
+FORMAT="arena-offline 1"
 # The oldest release an upgrade starts from (installer.sh refuses older ones).
 UPGRADES_FROM=5.2.0
 # The embedding server waits for this file in MODELS_DIR (docker-compose.yml): every bundle has it.
@@ -135,8 +139,8 @@ valid_version "$VERSION" || usage_error "not a version: \"$VERSION\" (VERSION, o
 command -v "$ENGINE" >/dev/null || die "$ENGINE is not installed"
 OUT_DIR="$(abspath "${OUT_ARG:-$REPO/dist}")"
 CA_DIR="$(abspath "${CA_ARG:-$REPO/dist}")"
-RUN="$OUT_DIR/argus-arena-$VERSION-offline.run"
-TOP="argus-arena-$VERSION"
+RUN="$OUT_DIR/arena-$VERSION-offline.run"
+TOP="arena-$VERSION"
 [[ -z "$STAGE_ONLY" && -e "$RUN" ]] && die "$RUN is there already"
 COMMIT="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 [[ $COMMIT != unknown && -n "$(git -C "$REPO" status --porcelain -- deploy 2>/dev/null)" ]] && COMMIT="$COMMIT+changes"
@@ -153,7 +157,7 @@ cleanup() {
 trap cleanup EXIT
 # Compose, for the release as it ships: docker-compose.yml alone, every profile but off, and
 # placeholder secrets (an image never depends on them).
-{ printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY; echo DATA_DIR=/placeholder; } > "$WORK/placeholder.env"
+{ printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY CODE_INTEL_KEY; echo DATA_DIR=/placeholder; } > "$WORK/placeholder.env"
 PROFILES=""
 rc() { (cd "$ROOT" && env -u COMPOSE_FILE COMPOSE_PROFILES="$PROFILES" COMPOSE_PROJECT_NAME="$PROJECT" "$ENGINE" compose --env-file "$WORK/placeholder.env" -f docker-compose.yml "$@"); }
 PROFILES="$(rc config --profiles 2>/dev/null | grep -vx off | paste -sd, -)"
@@ -202,7 +206,7 @@ ca_files
 # A checkout's bundle carries none: the app's image serves Code Arena's builds already.
 [[ $IN_ENGINE -eq 1 ]] && CA_FILES=()
 CA_MAKE=0; [[ ${#CA_FILES[@]} -eq 0 && -z "$CA_ARG" && $IN_ENGINE -eq 0 && -f "$REPO/arenactl" ]] && CA_MAKE=1
-PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.arguspack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
+PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.kpack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
 # The model library, as airgap.sh finds it.
 MODELS_DIR="${MODELS_ARG:-$(sed -n 's/^MODELS_DIR=//p' "$ROOT/.env" 2>/dev/null | tail -n1 | sed -e 's/^"//' -e 's/"$//')}"
 MODELS_DIR="${MODELS_DIR:-./models}"
@@ -229,7 +233,7 @@ fi
 
 if [[ $DRY -eq 1 ]]; then
   say "Would make $RUN and $(basename "$RUN").sha256 (dry run: nothing is written or saved)"
-  say "  Argus Arena $VERSION ($COMMIT), upgrading $UPGRADES_FROM or newer, from $ENGINE's store"
+  say "  $PRODUCT $VERSION ($COMMIT), upgrading $UPGRADES_FROM or newer, from $ENGINE's store"
   say "  the release's own images, tagged arena-SERVICE:$VERSION from $PROJECT-SERVICE:"
   for s in "${BUILT[@]}"; do left "$s" && continue
     if "$ENGINE" image inspect "$PROJECT-$s" >/dev/null 2>&1; then say "    $PROJECT-$s"; else say "    $PROJECT-$s   NOT ON THIS HOST: build it first"; fi
@@ -246,7 +250,7 @@ if [[ $DRY -eq 1 ]]; then
 fi
 
 [[ -n "$STAGE_ONLY" ]] || mkdir -p "$OUT_DIR" || die "cannot make $OUT_DIR"
-say "make-installer: Argus Arena $VERSION ($COMMIT), from $ENGINE's store"
+say "make-installer: $PRODUCT $VERSION ($COMMIT), from $ENGINE's store"
 if [[ $CA_MAKE -eq 1 ]]; then
   say "==> Code Arena's packages of $VERSION: none in $CA_DIR, made now"
   python3 "$REPO/arenactl" code-arena --out "$CA_DIR" || die "Code Arena could not be packed (./arenactl code-arena; ./arenactl doctor --for code-arena says what it needs), or pass --code-arena DIR"
@@ -357,6 +361,13 @@ say "==> the installer, the docs, the licences"
 cp -p "$ROOT/scripts/installer.sh" "$B/installer.sh" && chmod 755 "$B/installer.sh" || die "no scripts/installer.sh"
 echo "$VERSION" > "$B/VERSION"
 for f in LICENSE.md LICENSING.md; do cp -p "$REPO/$f" "$B/$f" || die "no $f in $REPO"; done
+# The names people read, as this bundle's images were built with them: beside installer.sh, and in deploy/
+# for the installation's scripts (make-cert.sh, sign-code-arena.sh, its own installer.sh).
+for f in "$B/branding.env" "$B/deploy/branding.env"; do
+  { grep '^#' "$REPO/branding.env"
+    echo "PRODUCT_NAME=${PRODUCT_NAME:-$(sed -n 's/^PRODUCT_NAME=//p' "$REPO/branding.env")}"
+    echo "CODE_INTEL_NAME=${CODE_INTEL_NAME:-$(sed -n 's/^CODE_INTEL_NAME=//p' "$REPO/branding.env")}"; } > "$f" || die "cannot write $f"
+done
 mkdir -p "$B/docs" && cp -a "$REPO/docs/." "$B/docs/" || die "no docs/ in $REPO"
 # The project's own plans are not documentation for those who run it.
 rm -f "$B/docs/plan.md"
@@ -411,7 +422,7 @@ fi
 case "$EMBEDDING" in
   packed) say "  $EMBED_FILE: $(human "$(stat -L -c %s "$B/models/library/$EMBED_FILE")")" ;;
   missing) say "  WARNING: $EMBED_FILE is not in $MODELS_DIR: the bundle goes without it, and the embedding server" \
-             "of a host installed from it waits until someone brings the file (Argus's and the app's search by meaning need it)" ;;
+             "of a host installed from it waits until someone brings the file (code-intel's and the app's search by meaning need it)" ;;
   *) say "  none: the embedding server is left out" ;;
 esac
 
@@ -470,27 +481,27 @@ UNPACKED="$(human $(( HB + BB_EST )))"
 
 cat > "$WORK/header" <<'HEADER'
 #!/bin/sh
-# Argus Arena @VERSION@ (@COMMIT@), the offline installer: a shell script with the whole
+# Arena @VERSION@ (@COMMIT@), the offline installer: a shell script with the whole
 # release after it. It unpacks itself into a work folder, checks it, runs its installer.sh
 # with the arguments given, and removes the folder again. Nothing comes from the network.
 #
-#   sh argus-arena-@VERSION@-offline.run help
-#   sh argus-arena-@VERSION@-offline.run install --dir /srv/arena
-#   sh argus-arena-@VERSION@-offline.run upgrade --dir /srv/arena
-#   sh argus-arena-@VERSION@-offline.run verify
+#   sh arena-@VERSION@-offline.run help
+#   sh arena-@VERSION@-offline.run install --dir /srv/arena
+#   sh arena-@VERSION@-offline.run upgrade --dir /srv/arena
+#   sh arena-@VERSION@-offline.run verify
 #
 #   --workdir DIR    where it unpacks (default: beside this file, else /var/tmp); @SIZE@ free (what a
 #                    run killed outright left there is removed first)
 #   --keep-workdir   leave the unpacked bundle there: its installer.sh runs it again
 #   --extract DIR    only unpack it into DIR and check it
 #
-# Check the copy first: sha256sum -c argus-arena-@VERSION@-offline.run.sha256
+# Check the copy first: sha256sum -c arena-@VERSION@-offline.run.sha256
 set -u
 HEAD_START=@HEAD_START@
 HEAD_BYTES=@HEAD_BYTES@
 BODY_BYTES=@BODY_BYTES@
-TOP=argus-arena-@VERSION@
-die() { printf 'argus-arena: %s\n' "$*" >&2; exit 1; }
+TOP=arena-@VERSION@
+die() { printf 'arena: %s\n' "$*" >&2; exit 1; }
 for t in bash tar tail head df mktemp tr; do command -v "$t" >/dev/null 2>&1 || die "$t is needed"; done
 self=$0
 case $self in /*) ;; *) self="$(pwd)/$self" ;; esac
@@ -515,20 +526,20 @@ if [ -z "$WORK" ]; then WORK=$(dirname "$self"); [ -w "$WORK" ] || WORK=${TMPDIR
 mkdir -p "$WORK" || die "cannot make $WORK"
 # What a run stopped outright left here (killed, the machine lost): its unpacked bundle, which no process names
 # any more. It would take the room this one unpacks into.
-for old in "$WORK"/.argus-arena-unpack.*; do
+for old in "$WORK"/.arena-unpack.*; do
   [ -d "$old" ] && [ ! -e "$old/.keep" ] || continue
   busy=0
   for c in /proc/[0-9]*/cmdline; do
     case $(tr '\0' ' ' < "$c" 2>/dev/null) in *"$old"*) busy=1; break ;; esac
   done
-  [ "$busy" = 0 ] && rm -rf "$old" && printf 'argus-arena: removed %s, which a run that was cut off left\n' "$old" >&2
+  [ "$busy" = 0 ] && rm -rf "$old" && printf 'arena: removed %s, which a run that was cut off left\n' "$old" >&2
 done
 free=$(df -Pk "$WORK" | awk 'NR == 2 { print $4 }')
 [ "${free:-0}" -ge $((need / 1024 + 1024)) ] || die "$WORK has $((${free:-0} / 1024)) MB free; unpacking needs $((need / 1048576 + 1)) MB: --workdir another folder"
 if [ -n "$EXTRACT" ]; then
   dest=$(cd "$WORK" && pwd); [ -e "$dest/$TOP" ] && die "$dest/$TOP is there already"
 else
-  dest=$(mktemp -d "$WORK/.argus-arena-unpack.XXXXXX") || die "cannot make a folder in $WORK"
+  dest=$(mktemp -d "$WORK/.arena-unpack.XXXXXX") || die "cannot make a folder in $WORK"
   # --keep-workdir: kept on purpose, so a later run leaves it (it removes one a run that was cut off left).
   if [ "$KEEP" = 1 ]; then : > "$dest/.keep"; else trap 'rm -rf "$dest"' EXIT; fi
   trap 'exit 130' INT TERM
@@ -537,18 +548,18 @@ fi
 tail -c +$((HEAD_START + 1)) "$self" | head -c "$HEAD_BYTES" | tar -xf - -C "$dest" \
   || die "unpacking failed: a damaged or cut-off copy? (sha256sum -c ${self##*/}.sha256)"
 if [ "$SMALL" = 0 ]; then
-  printf 'argus-arena: unpacking %s into %s\n' "${self##*/}" "$dest" >&2
+  printf 'arena: unpacking %s into %s\n' "${self##*/}" "$dest" >&2
   tail -c +$((HEAD_START + HEAD_BYTES + 1)) "$self" | head -c "$BODY_BYTES" | tar -xf - -C "$dest" \
     || die "unpacking failed: disk full, or a damaged copy? (sha256sum -c ${self##*/}.sha256)"
 fi
 if [ -n "$EXTRACT" ]; then
   ARENA_BUNDLE_RUN=$self bash "$dest/$TOP/installer.sh" verify --dir "$dest/$TOP" || exit $?
-  printf 'argus-arena: unpacked and checked: bash %s/%s/installer.sh COMMAND ...\n' "$dest" "$TOP" >&2
+  printf 'arena: unpacked and checked: bash %s/%s/installer.sh COMMAND ...\n' "$dest" "$TOP" >&2
   exit 0
 fi
 ARENA_BUNDLE_RUN=$self ARENA_BUNDLE_PARTIAL=$SMALL bash "$dest/$TOP/installer.sh" "$@"
 rc=$?
-[ "$KEEP" = 1 ] && printf 'argus-arena: the unpacked bundle stays in %s/%s\n' "$dest" "$TOP" >&2
+[ "$KEEP" = 1 ] && printf 'arena: the unpacked bundle stays in %s/%s\n' "$dest" "$TOP" >&2
 exit $rc
 HEADER
 sed -i -e "s|@VERSION@|$VERSION|g" -e "s|@COMMIT@|$COMMIT|g" -e "s|@SIZE@|$UNPACKED|g" \

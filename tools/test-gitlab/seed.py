@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Seed the throwaway GitLab with the fixtures Argus verification needs.
+"""Seed the throwaway GitLab with the fixtures code-intel verification needs.
 
 Creates:
   * three PRIVATE projects containing real C/C++ with cross-repo #includes
   * two developers, each a Reporter on exactly one project
   * a personal access token for each developer, plus an admin token
-  * argus_reader: the account Argus indexes with, Reporter on every project,
+  * code_intel_reader: the account code-intel indexes with, Reporter on every project,
     its token read_api + read_repository only (never write, never admin)
   * with SEED_PERSON_EMAIL, a person of the platform: Reporter on eal-core and
     etl-decoder, not driver-shim, the address public so a read-only token finds it
@@ -115,7 +115,7 @@ RELEASE_DECODER_C = (
     " */\n"
     "int DecodeFrame(const char* buf, int len) { return HelperOnly(len); }\n"
 )
-CONTAINER = "argus-test-gitlab"
+CONTAINER = "code-intel-test-gitlab"
 OUT = pathlib.Path(__file__).parent / "seeded.json"
 
 # Cross-repo includes are the whole point of the corpus: eal-core defines a
@@ -211,7 +211,7 @@ MEMBERSHIPS = {"dev_alpha": "eal-core", "dev_beta": "etl-decoder"}
 REPORTER = 20
 
 #: A made-up GitLab token: the shape a review's secret scan must find, and no
-#: real credential. The same value as tests/Argus.Tests/FakeGitLabMr.cs.
+#: real credential. The same value as tests/CodeIntel.Tests/FakeGitLabMr.cs.
 FAKE_SECRET = "glpat-FAKE0fake1FAKE2fake3FAKE"
 
 #: Merge requests for the review checks, one per project: (source branch, title,
@@ -296,7 +296,7 @@ def wait_for_api(timeout_s: int = 1800) -> None:
 def admin_token() -> str:
     """Mint an admin PAT directly, avoiding the web login flow.
 
-    Idempotent by destroying any prior 'argus-seed' token first. GitLab stores
+    Idempotent by destroying any prior 'code-intel-seed' token first. GitLab stores
     only the token *digest*, so a fixed token value cannot simply be re-read on
     a re-run -- a second create collides with
     `index_personal_access_tokens_on_token_digest` and aborts the whole seed.
@@ -304,11 +304,11 @@ def admin_token() -> str:
     out = _rails(
         "u = User.find_by_username('root');"
         "raise 'no root user -- run `gitlab-rake db:seed_fu` first' if u.nil?;"
-        "PersonalAccessToken.where(name: 'argus-seed').destroy_all;"
+        "PersonalAccessToken.where(name: 'code-intel-seed').destroy_all;"
         "t = u.personal_access_tokens.create!("
-        "  name: 'argus-seed', scopes: ['api','read_api','read_repository'],"
+        "  name: 'code-intel-seed', scopes: ['api','read_api','read_repository'],"
         "  expires_at: 365.days.from_now);"
-        "t.set_token('argus-admin-token-0001');"
+        "t.set_token('code-intel-admin-token-0001');"
         "t.save!;"
         "puts t.token"
     )
@@ -336,7 +336,7 @@ def _user(c: "Client", username: str, email: str, public: bool = False) -> int:
     else:
         uid = _ok(r, f"create user {username}").json()["id"]
     if public:
-        # Argus's token is not an admin's: GitLab finds a person by email only when it is public.
+        # code-intel's token is not an admin's: GitLab finds a person by email only when it is public.
         _ok(c.put(f"/users/{uid}", json={"public_email": email}), f"make {email} public")
     return uid
 
@@ -445,7 +445,7 @@ def main() -> int:
     users: dict[str, dict] = {}
     for username, project in MEMBERSHIPS.items():
         r = c.post("/users", json={
-            "email": f"{username}@argus.test", "username": username,
+            "email": f"{username}@code-intel.test", "username": username,
             "name": username,
             # Must clear GitLab's complexity check -- a readable passphrase is
             # rejected with "Password must not contain commonly used
@@ -469,21 +469,21 @@ def main() -> int:
         # Impersonation tokens are the supported way to mint a token *as*
         # another user without knowing their password.
         r = _ok(c.post(f"/users/{uid}/impersonation_tokens", json={
-            "name": f"{username}-argus", "scopes": ["api", "read_api", "read_repository"],
+            "name": f"{username}-code-intel", "scopes": ["api", "read_api", "read_repository"],
             "expires_at": "2027-01-01",
         }), f"mint token for {username}")
         users[username] = {"id": uid, "token": r.json()["token"], "member_of": project}
         print(f"created {username} (id={uid}) -> Reporter on {project}")
 
-    # --- the account Argus indexes with: read only -------------------------
+    # --- the account code-intel indexes with: read only -------------------------
     # Reporter on every project; a token that can read the API and clone, and nothing more.
-    reader_id = _user(c, "argus_reader", "argus_reader@argus.test")
+    reader_id = _user(c, "code_intel_reader", "code_intel_reader@code-intel.test")
     for project, pid in project_ids.items():
-        _member(c, pid, reader_id, f"argus_reader to {project}")
+        _member(c, pid, reader_id, f"code_intel_reader to {project}")
     reader = _ok(c.post(f"/users/{reader_id}/impersonation_tokens", json={
-        "name": "argus-index", "scopes": ["read_api", "read_repository"], "expires_at": "2027-01-01",
+        "name": "code-intel-index", "scopes": ["read_api", "read_repository"], "expires_at": "2027-01-01",
     }), "mint the reader's token").json()["token"]
-    print("created argus_reader -> Reporter on every project, token read_api + read_repository")
+    print("created code_intel_reader -> Reporter on every project, token read_api + read_repository")
 
     # --- a person of the platform, to see per-person access in its chat ------
     person = os.environ.get("SEED_PERSON_EMAIL", "").strip()
@@ -505,7 +505,7 @@ def main() -> int:
     }, indent=2), encoding="utf-8")
     print(f"\nwrote {OUT}")
     print("\nNOTE: no developer is a member of driver-shim. If either developer")
-    print("can reach it through Argus, the access-control design has failed.")
+    print("can reach it through code-intel, the access-control design has failed.")
     return 0
 
 

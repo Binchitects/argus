@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
+using Branding;
 namespace Llm.Api.Media;
 
 /// <summary>
@@ -23,7 +24,7 @@ public static class AiMark
     private static byte[] Xmp(string sourceType) => Encoding.UTF8.GetBytes(
         "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?><x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
         + "<rdf:Description rdf:about=\"\" xmlns:Iptc4xmpExt=\"http://iptc.org/std/Iptc4xmpExt/2008-02-29/\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\""
-        + $" Iptc4xmpExt:DigitalSourceType=\"{sourceType}\" xmp:CreatorTool=\"Argus Arena\"/></rdf:RDF></x:xmpmeta><?xpacket end=\"r\"?>");
+        + $" Iptc4xmpExt:DigitalSourceType=\"{sourceType}\" xmp:CreatorTool=\"{Brand.Product}\"/></rdf:RDF></x:xmpmeta><?xpacket end=\"r\"?>");
 
     /// <summary>The file with the mark, once (a file marked already, or of another type, comes back as it was).</summary>
     /// <param name="composite">A picture of the person's that a model changed, not one it made from words.</param>

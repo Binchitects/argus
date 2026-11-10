@@ -3,6 +3,7 @@ using System.Text.Json;
 using Llm.Api.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 
+using Branding;
 namespace Llm.Tests;
 
 /// <summary>The bell: credit thresholds and system alerts, each said once.</summary>
@@ -100,7 +101,7 @@ public sealed class NotificationsTests(AppFixture app)
         {
             ["Auth:DataKey"] = "a-data-key-for-news-tests",
             ["Mail:Host"] = "127.0.0.1", ["Mail:Port"] = smtp.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), ["Mail:StartTls"] = "false",
-            ["Mail:From"] = "Argus Arena <arena@example.test>",
+            ["Mail:From"] = $"{Brand.Product} <arena@example.test>",
             ["Schedules:WebhookHosts"] = "hooks.example.test",
         });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);

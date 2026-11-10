@@ -44,7 +44,7 @@ public sealed class Hurry
 /// <summary>
 /// One answer to a question in a conversation. The conversation is a tree: the
 /// model reads the path from the first message to the question, streams, calls
-/// the chat's tools (Argus, pictures, MCP servers...) as the person when it wants
+/// the chat's tools (code-intel, pictures, MCP servers...) as the person when it wants
 /// to, and every step is saved as a child of the one before, so the answer is its
 /// own branch. Events go to the browser as they happen (see ChatEndpoints).
 /// </summary>
@@ -261,7 +261,7 @@ public sealed partial class ChatService(
             {
                 await emit(new
                 {
-                    type = "notice", kind = choice.Tool.Id == "argus" ? "argus_unavailable" : "tool_unavailable",
+                    type = "notice", kind = choice.Tool.Id == "code-intel" ? "code_intel_unavailable" : "tool_unavailable",
                     text = $"{choice.Tool.Title} is not available for this answer: {ex.Message}",
                 });
                 return;
@@ -1030,7 +1030,7 @@ public sealed partial class ChatService(
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = safeguards.Untrusted(name, text) });
                 await emit(new
                 {
-                    type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = ArgusMcp.IsNoAccess(text), durationMs = result.DurationMs, cost = result.Cost,
+                    type = "tool_result", id, messageId = result.Id, name, text, isError, declined, noAccess = CodeIntelMcp.IsNoAccess(text), durationMs = result.DurationMs, cost = result.Cost,
                     details = outcome.Details,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });

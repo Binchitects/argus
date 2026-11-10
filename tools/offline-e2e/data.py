@@ -117,7 +117,7 @@ def seed(record):
     code, person = s.json("POST", "/api/admin/people", {"userName": f"e2e-keeper-{tok}", "email": f"keeper-{tok}@example.com",
                                                        "credits": {"chat": 5, "api": 5}})
     must(code in (200, 201) and person.get("id"), f"a person was not made (HTTP {code})")
-    code, conv = s.json("POST", "/api/chat/conversations", {"thinking": "off", "useArgus": False})
+    code, conv = s.json("POST", "/api/chat/conversations", {"thinking": "off", "useCodeIntel": False})
     must(code in (200, 201) and conv.get("id"), f"a chat was not made (HTTP {code})")
     content = f"kept across the upgrade: {tok}\n".encode() * 64
     boundary = "e2e" + secrets.token_hex(8)

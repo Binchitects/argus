@@ -15,7 +15,7 @@ namespace Llm.Api.Code.Studio;
 /// <summary>
 /// Code Studio's workspaces service (compose profile "workspaces"): where the app drives it (<see cref="Url"/>, with
 /// <see cref="Key"/>, WORKSPACES_KEY), the name its engines answer at (<see cref="EngineHost"/>), and the addresses the
-/// engines reach the app, the gateway and Argus at over the stack's own network (Argus checks the person's own key).
+/// engines reach the app, the gateway and code-intel at over the stack's own network (code-intel checks the person's own key).
 /// </summary>
 public sealed class WorkspacesOptions
 {
@@ -27,7 +27,7 @@ public sealed class WorkspacesOptions
     /// app's, so a workspace's agent goes through the key's line, the prompt log and slot pinning as API keys do).
     /// </summary>
     public string ArenaUrl { get; set; } = "http://app:8080";
-    public string ArgusUrl { get; set; } = "http://argus:7700/mcp";
+    public string CodeIntelUrl { get; set; } = "http://code-intel:7700/mcp";
     /// <summary>A workspace unused this long sleeps: its engine stops, its files stay.</summary>
     public TimeSpan Idle { get; set; } = TimeSpan.FromMinutes(30);
     /// <summary>The most workspaces one person keeps.</summary>
@@ -141,7 +141,7 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
         {
             ["repo"] = $"{gitlab.BaseUrl}/{workspace.Project}.git", ["branch"] = workspace.Branch, ["git_user"] = login is { Length: > 0 } ? login : "oauth2", ["git_token"] = token,
             ["arena_url"] = o.ArenaUrl, ["api_key"] = SettingsCrypto.Decrypt(workspace.KeyCipher!, DataKey), ["gateway_url"] = o.ArenaUrl,
-            ["mcp_url"] = o.ArenaUrl.TrimEnd('/') + "/mcp", ["argus_url"] = o.ArgusUrl,
+            ["mcp_url"] = o.ArenaUrl.TrimEnd('/') + "/mcp", ["code_intel_url"] = o.CodeIntelUrl,
             // A GitLab on the company's own CA: the workspace's git, engine and terminals trust it too.
             ["ca"] = companyCa.Pem(),
             // Its commits are the person's (the IDE's and the agent's), unless they set another identity there.

@@ -8,10 +8,10 @@ public sealed class HelmChartTests
     [Fact]
     public void The_charts_configuration_files_are_the_stacks_own()
     {
-        var chart = Path.Combine(Deploy, "helm", "argus-arena", "files");
+        var chart = Path.Combine(Deploy, "helm", "arena", "files");
         var copies = new Dictionary<string, string>
         {
-            ["litellm.yaml"] = "config/litellm.yaml", ["argus.yaml"] = "config/argus.yaml", ["searxng.yml"] = "config/searxng.yml",
+            ["litellm.yaml"] = "config/litellm.yaml", ["code-intel.yaml"] = "config/code-intel.yaml", ["searxng.yml"] = "config/searxng.yml",
             ["alertmanager.yml"] = "config/alertmanager.yml", ["loki.yml"] = "config/loki.yml", ["prometheus/prometheus.yml"] = "config/prometheus/prometheus.yml",
             ["router.sh"] = "services/llamacpp/router.sh", ["sd-serve.sh"] = "services/sd-serve.sh",
         };
@@ -21,9 +21,9 @@ public sealed class HelmChartTests
         }
         foreach (var (copy, source) in copies)
         {
-            Assert.True(File.Exists(Path.Combine(chart, copy)), $"deploy/helm/argus-arena/files/{copy} is missing: copy deploy/{source} there.");
+            Assert.True(File.Exists(Path.Combine(chart, copy)), $"deploy/helm/arena/files/{copy} is missing: copy deploy/{source} there.");
             Assert.True(File.ReadAllBytes(Path.Combine(chart, copy)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(Deploy, source))),
-                $"deploy/helm/argus-arena/files/{copy} differs from deploy/{source}: copy it again.");
+                $"deploy/helm/arena/files/{copy} differs from deploy/{source}: copy it again.");
         }
     }
 }

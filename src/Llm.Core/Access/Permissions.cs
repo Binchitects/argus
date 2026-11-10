@@ -1,3 +1,4 @@
+using Branding;
 namespace Llm.Core.Access;
 
 /// <summary>One permission of the catalog: its key, the area it belongs to on the role editor, and what it lets a person do.</summary>
@@ -51,9 +52,9 @@ public static class Permissions
     public const string StorageManage = "storage.manage";
     public const string BotsManage = "bots.manage";
     public const string TasksManageAll = "tasks.manage.all";
-    public const string ArgusRead = "argus.read";
-    public const string ArgusManage = "argus.manage";
-    public const string ArgusExplore = "argus.explore";
+    public const string CodeIntelRead = "code-intel.read";
+    public const string CodeIntelManage = "code-intel.manage";
+    public const string CodeIntelExplore = "code-intel.explore";
     public const string RoomsModerate = "rooms.moderate";
     public const string ReviewsAdmin = "reviews.admin";
     public const string SafeguardsRead = "safeguards.read";
@@ -114,7 +115,7 @@ public static class Permissions
     public const string SettingsIntegrations = "settings.integrations";
     public const string SettingsData = "settings.data";
     public const string SettingsGateway = "settings.gateway";
-    public const string SettingsArgus = "settings.argus";
+    public const string SettingsCodeIntel = "settings.code-intel";
     public const string SettingsRestart = "settings.restart";
     public const string SignInDirectory = "signin.directory";
     public const string SignInSso = "signin.sso";
@@ -124,10 +125,10 @@ public static class Permissions
     public const string StorageCleanup = "storage.cleanup";
     public const string StorageDelete = "storage.delete";
     public const string StorageQuota = "storage.quota";
-    public const string ArgusRepos = "argus.repos";
-    public const string ArgusIndex = "argus.index";
-    public const string ArgusPacks = "argus.packs";
-    public const string ArgusWebhook = "argus.webhook";
+    public const string CodeIntelRepos = "code-intel.repos";
+    public const string CodeIntelIndex = "code-intel.index";
+    public const string CodeIntelPacks = "code-intel.packs";
+    public const string CodeIntelWebhook = "code-intel.webhook";
     public const string ProjectsManage = "projects.manage";
 
     public const string Chat = "feature.chat";
@@ -216,9 +217,9 @@ public static class Permissions
         new(StorageManage, "Data", "See and clean up stored files.", true),
         new(BotsManage, "Integrations", "Connect the chat bots (Slack, Teams, mail).", true),
         new(TasksManageAll, "Integrations", "See and change everyone's scheduled tasks.", true),
-        new(ArgusRead, "Argus", "See Argus's repositories, indexing and health.", true),
-        new(ArgusManage, "Argus", "Choose repositories, index, set packs and the webhook.", true),
-        new(ArgusExplore, "Argus", "Explore the code index across repositories.", true),
+        new(CodeIntelRead, $"{Brand.CodeIntel}", $"See {Brand.CodeIntel}'s repositories, indexing and health.", true),
+        new(CodeIntelManage, $"{Brand.CodeIntel}", "Choose repositories, index, set packs and the webhook.", true),
+        new(CodeIntelExplore, $"{Brand.CodeIntel}", "Explore the code index across repositories.", true),
         new(RoomsModerate, "Rooms and reviews", "List rooms, remove members and delete rooms (not read them).", true),
         new(ReviewsAdmin, "Rooms and reviews", "Manage every project's reviews.", true),
         new(SharingManage, "Sharing", "Share assistants, skills, apps, chats and reviews with the whole company or any group, and look after the company's skills and assistants.", true),
@@ -276,7 +277,7 @@ public static class Permissions
         new(SettingsIntegrations, "Settings", "Change email, notifications, scheduled tasks and chat bots' settings.", true, SettingsManage),
         new(SettingsData, "Settings", "Change retention, storage and company knowledge settings.", true, SettingsManage),
         new(SettingsGateway, "Settings", "Change the API keys' settings.", true, SettingsManage),
-        new(SettingsArgus, "Settings", "Change Argus's settings.", true, SettingsManage),
+        new(SettingsCodeIntel, "Settings", $"Change {Brand.CodeIntel}'s settings.", true, SettingsManage),
         new(SettingsRestart, "Settings", "Restart the app to apply settings.", true, SettingsManage),
         new(SignInDirectory, "Settings", "Set up the company directory (LDAP) and sync it.", true, SignInManage),
         new(SignInSso, "Settings", "Set up company sign-in (OIDC, SAML) and SCIM.", true, SignInManage),
@@ -286,10 +287,10 @@ public static class Permissions
         new(StorageCleanup, "Data", "Run clean-ups.", true, StorageManage),
         new(StorageDelete, "Data", "Delete people's stored files.", true, StorageManage),
         new(StorageQuota, "Data", "Set people's storage quotas.", true, StorageManage),
-        new(ArgusRepos, "Argus", "Choose Argus's repositories and their branches.", true, ArgusManage),
-        new(ArgusIndex, "Argus", "Index repositories now and set the schedule.", true, ArgusManage),
-        new(ArgusPacks, "Argus", "Install and remove knowledge packs.", true, ArgusManage),
-        new(ArgusWebhook, "Argus", "Set GitLab's webhook.", true, ArgusManage),
+        new(CodeIntelRepos, $"{Brand.CodeIntel}", $"Choose {Brand.CodeIntel}'s repositories and their branches.", true, CodeIntelManage),
+        new(CodeIntelIndex, $"{Brand.CodeIntel}", "Index repositories now and set the schedule.", true, CodeIntelManage),
+        new(CodeIntelPacks, $"{Brand.CodeIntel}", "Install and remove knowledge packs.", true, CodeIntelManage),
+        new(CodeIntelWebhook, $"{Brand.CodeIntel}", "Set GitLab's webhook.", true, CodeIntelManage),
 
         new(Chat, "Chat and knowledge", "Use the chat.", false),
         new(ApiKeys, "Agents and keys", "Have API keys (coding agents, IDEs, scripts).", false),
@@ -303,7 +304,7 @@ public static class Permissions
         new(Tasks, "Agents and keys", "Schedule tasks.", false),
         new(AssistantsShare, "Sharing and rooms", "Share assistants and prompts with groups.", false),
         new(Memory, "Chat and knowledge", "Let the chat remember things.", false),
-        new(CodeRead, "Code", "Ask about the company's code (Argus) and use the code assistant.", false),
+        new(CodeRead, "Code", $"Ask about the company's code ({Brand.CodeIntel}) and use the code assistant.", false),
         new(ReviewRun, "Code", "Start reviews of merge requests and branches.", false),
         new(CodeStudio, "Code", "Open workspaces in Code Studio: edit, run and debug code on the server or one's own machine.", false),
         new(ReviewPolicy, "Code", "Set a project's automatic reviews.", false),
@@ -368,7 +369,7 @@ public static class BuiltInRoles
     public const string ModelAdmin = "model-admin";
     public const string Billing = "billing";
     public const string Auditor = "auditor";
-    public const string ArgusAdmin = "argus-admin";
+    public const string CodeIntelAdmin = "code-intel-admin";
     public const string RoomModerator = "room-moderator";
     public const string ReviewAdmin = "review-admin";
     public const string Member = "member";
@@ -388,8 +389,8 @@ public static class BuiltInRoles
         new(Billing, "Billing", "Credit, spend and usage; scoped to some groups, only theirs.", [Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Auditor, "Auditor", "Reads everything an admin can see, and changes nothing.",
             [.. Permissions.All.Where(p => p.Admin && p.Key.EndsWith(".read", StringComparison.Ordinal)).Select(p => p.Key)]),
-        new(ArgusAdmin, "Argus admin", "Argus: its repositories, indexing, packs and webhook; scoped to some repositories, only those.",
-            [Permissions.ArgusRead, Permissions.ArgusManage, Permissions.ArgusExplore]),
+        new(CodeIntelAdmin, $"{Brand.CodeIntel} admin", "CodeIntel: its repositories, indexing, packs and webhook; scoped to some repositories, only those.",
+            [Permissions.CodeIntelRead, Permissions.CodeIntelManage, Permissions.CodeIntelExplore]),
         new(RoomModerator, "Room moderator", "Lists rooms, removes members and deletes rooms, without reading them.", [Permissions.RoomsModerate]),
         new(ReviewAdmin, "Review admin", "Every project's reviews and automatic reviews.", [Permissions.ReviewsAdmin, Permissions.ReviewPolicy]),
         new(TeamManager, "Team manager", "A group's manager: its people, their credit and limits, its spend and usage. Given over a group, it reaches only that group.",

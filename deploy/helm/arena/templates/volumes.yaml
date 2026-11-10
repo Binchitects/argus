@@ -1,0 +1,54 @@
+{{- /* The shared volumes: the model library and the app's files, read and written by several pods. */}}
+{{- $p := .Values.persistence }}
+{{- /* Each made only when a pod mounts it: a claim nothing mounts never binds where binding waits for its first pod (WaitForFirstConsumer), and helm --wait waits for it. */}}
+{{- $claims := list (list "arena-engine" $p.engine.size) (list "arena-directory" $p.directory.size) (list "arena-audit" $p.audit.size) (list "arena-sandbox" $p.sandbox.size) (list "arena-blender" $p.blender.size) (list "arena-lean" $p.lean.size) (list "arena-media-status" $p.mediaStatus.size) (list "arena-vllm-status" $p.vllmStatus.size) }}
+{{- if .Values.workspaces.enabled }}
+{{- $claims = append $claims (list "arena-workspaces" $p.workspaces.size) }}
+{{- end }}
+{{- if .Values.strata.enabled }}
+{{- $claims = append $claims (list "arena-strata-data" $p.strataData.size) }}
+{{- end }}
+{{- if not $p.models.existingClaim }}
+{{- $claims = prepend $claims (list "arena-models" $p.models.size) }}
+{{- end }}
+{{- range $claims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ index . 0 }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ $p.sharedAccessMode }}]
+  {{- with ($p.sharedStorageClass | default $p.storageClass) }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources: { requests: { storage: {{ index . 1 }} } }
+{{- end }}
+{{- /* Volumes of one service each. */}}
+{{- $own := list }}
+{{- if .Values.codeIntel.enabled }}{{ $own = append $own (list .Values.codeIntel.claim .Values.codeIntel.size) }}{{ end }}
+{{- if .Values.audio.enabled }}{{ $own = append $own (list "arena-audio" .Values.audio.size) }}{{ end }}
+{{- if .Values.monitoring.enabled }}
+{{- $own = append $own (list "arena-prometheus" .Values.monitoring.prometheusSize) }}
+{{- $own = append $own (list "arena-loki" .Values.monitoring.lokiSize) }}
+{{- $own = append $own (list "arena-alertmanager" "1Gi") }}
+{{- end }}
+{{- range $own }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ index . 0 }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $p.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources: { requests: { storage: {{ index . 1 }} } }
+{{- end }}

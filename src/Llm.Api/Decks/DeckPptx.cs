@@ -4,6 +4,7 @@ using System.Text;
 using System.Xml.Linq;
 using Llm.Api.Chat;
 
+using Branding;
 namespace Llm.Api.Decks;
 
 /// <summary>A picture to put on a slide: its bytes and type (image/png, image/jpeg or image/gif).</summary>
@@ -365,7 +366,7 @@ public static partial class DeckPptx
             var at8601 = at.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
             Set("docProps/core.xml", $"""
                 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{CanvasDocx.Esc(title)}</dc:title><dc:creator>Argus Arena</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">{at8601}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{at8601}</dcterms:modified></cp:coreProperties>
+                <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{CanvasDocx.Esc(title)}</dc:title><dc:creator>{Brand.Product}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">{at8601}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{at8601}</dcterms:modified></cp:coreProperties>
                 """);
             Override("docProps/core.xml", "application/vnd.openxmlformats-package.core-properties+xml");
             var root = Xml("_rels/.rels")!;

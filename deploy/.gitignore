@@ -40,13 +40,13 @@ config/traefik/dynamic/certificate.yml
 config/tls/*
 !config/tls/README.md
 
-# Argus's private CA for a GitLab that is not on a public one. Whatever an
+# code-intel's private CA for a GitLab that is not on a public one. Whatever an
 # operator drops here belongs to their environment, not to this repository --
 # and unlike the self-signed certificate above, it is not reproducible from
 # .env. The README stays so the directory exists in a fresh clone and the bind
 # mount in docker-compose.yml never has to be created by Docker.
-config/argus/tls/*
-!config/argus/tls/README.md
+config/code-intel/tls/*
+!config/code-intel/tls/README.md
 
 # Issued API keys - never commit
 .keys/
@@ -65,10 +65,10 @@ redeploy-report.txt
 config/prometheus/secrets/*
 !config/prometheus/secrets/.gitkeep
 
-# The hash-free account list the app writes for Argus to read.
+# The hash-free account list the app writes for code-intel to read.
 #
 # The DIRECTORY is kept in the repository with a placeholder, and only its
-# CONTENTS are ignored. Without that, a fresh clone has no source for the argus
+# CONTENTS are ignored. Without that, a fresh clone has no source for the code-intel
 # and app bind mounts, so Docker creates a root-owned empty directory there
 # instead -- which is exactly the failure `make preflight` exists to name.
 config/directory/*

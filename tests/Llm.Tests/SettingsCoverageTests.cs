@@ -80,7 +80,7 @@ public sealed partial class SettingsCoverageTests(AppFixture app)
     /// What an admin may want to change is a setting, not wiring: the replicas' timing, the dashboards' scrape interval,
     /// the embedder, the security alerts, the admin group other services see, a Hugging Face mirror. What stays wiring is
     /// the stack's plumbing alone, each entry with why it is no setting; an option that means nothing (email in has no
-    /// channels; Argus's GitLab sign-in is Argus's own) is not bound at all.
+    /// channels; code-intel's GitLab sign-in is code-intel's own) is not bound at all.
     /// </summary>
     [Fact]
     public void What_an_admin_may_change_is_a_setting_and_the_wiring_says_why_each_is_not()
@@ -90,8 +90,8 @@ public sealed partial class SettingsCoverageTests(AppFixture app)
         Assert.All(settings, k => Assert.True(SettingsCatalog.ByKey.ContainsKey(k), $"{k} is no setting"));
         Assert.All(InstallSettings.Wiring, w => Assert.True(w.Value.Length >= 20 && !w.Value.Contains('\n'), $"{w.Key} is wiring with no reason given"));
         Assert.Null(typeof(Llm.Api.Bots.MailInOptions).GetProperty("Channels"));
-        Assert.Null(typeof(Llm.Api.Operations.ArgusOptions).GetProperty("GitlabAuth"));
-        Assert.Null(typeof(Llm.Api.Operations.ArgusOptions).GetProperty("GitlabUsername"));
+        Assert.Null(typeof(Llm.Api.Operations.CodeIntelOptions).GetProperty("GitlabAuth"));
+        Assert.Null(typeof(Llm.Api.Operations.CodeIntelOptions).GetProperty("GitlabUsername"));
         // The embedder's prefixes end in a space, which is part of them; its key is never shown.
         Assert.True(SettingsCatalog.ByKey["Knowledge:DocumentPrefix"].Exact);
         Assert.True(SettingsCatalog.ByKey["Knowledge:EmbedKey"].IsSecret);
@@ -137,7 +137,7 @@ public sealed partial class SettingsCoverageTests(AppFixture app)
     public void Every_configuration_key_the_docs_name_has_a_place_in_settings()
     {
         var docs = Path.GetFullPath(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "..", "docs"));
-        var files = Directory.GetFiles(docs, "*.md").Concat(Directory.GetFiles(Path.Combine(docs, "argus"), "*.md")).ToList();
+        var files = Directory.GetFiles(docs, "*.md").Concat(Directory.GetFiles(Path.Combine(docs, "code-intel"), "*.md")).ToList();
         Assert.Contains(files, f => f.EndsWith("settings.md", StringComparison.Ordinal));
         var named = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in files)

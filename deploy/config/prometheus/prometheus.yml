@@ -72,10 +72,10 @@ scrape_configs:
       - targets: ["app:8080"]
         labels: { tier: core, component: app }
 
-  - job_name: argus
+  - job_name: code-intel
     metrics_path: /admin/metrics
     authorization:
-      credentials_file: /tmp/argus.token
+      credentials_file: /tmp/code-intel.token
     static_configs:
-      - targets: ["argus:7700"]
+      - targets: ["code-intel:7700"]
         labels: { tier: optional, component: index }

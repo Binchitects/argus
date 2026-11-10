@@ -183,7 +183,7 @@ public sealed class ScaleOutTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/tools/calculator", UriKind.Relative),
             new { enabled = true, audience = "Everyone", onByDefault = true, askFirst = true }));
         var (onA, onB, _) = await PersonOnBothAsync(a, b);
-        var chat = (await onA.JsonAsync(await onA.PostAsync("/api/chat/conversations", new { useArgus = false, thinking = "xhigh" }))).GetProperty("id").GetGuid();
+        var chat = (await onA.JsonAsync(await onA.PostAsync("/api/chat/conversations", new { useCodeIntel = false, thinking = "xhigh" }))).GetProperty("id").GetGuid();
 
         // The answer runs on A and waits for a yes, which comes to B.
         var answering = SendAsync(onA, chat, """Sum: [call calculate {"expression":"6*7"}]""");
@@ -215,7 +215,7 @@ public sealed class ScaleOutTests(AppFixture app)
         await using var _a = a;
         await using var _b = b;
         var (onA, _, _) = await PersonOnBothAsync(a, b);
-        var chat = (await onA.JsonAsync(await onA.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var chat = (await onA.JsonAsync(await onA.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var answering = SendAsync(onA, chat, "Write a lot [slow]");
         var gate = a.Services.GetRequiredService<AnswerGate>();
         await UntilAsync(() => gate.Now().Total == 1, "the answer running on A");

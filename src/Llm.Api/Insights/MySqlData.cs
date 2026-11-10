@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Llm.Core.Insights;
 using MySqlConnector;
 
+using Branding;
 namespace Llm.Api.Insights;
 
 /// <summary>
@@ -60,7 +61,7 @@ public sealed class MySqlData : IDataEngine
     private static string Prepared(string connection, int seconds) => new MySqlConnectionStringBuilder(connection)
     {
         Pooling = false, ConnectionTimeout = 10, DefaultCommandTimeout = (uint)(seconds + 5), AllowLoadLocalInfile = false,
-        AllowUserVariables = false, ApplicationName = "Argus Arena (Ask your data)",
+        AllowUserVariables = false, ApplicationName = $"{Brand.Product} (Ask your data)",
     }.ConnectionString;
 
     /// <summary>

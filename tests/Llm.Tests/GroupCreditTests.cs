@@ -45,7 +45,7 @@ public sealed class GroupCreditTests(AppFixture app)
     /// <summary>A chat answer: its text, or the refusal it ended with.</summary>
     private static async Task<string> AskAsync(TestBrowser b, string text)
     {
-        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useCodeIntel = false }))).GetProperty("id").GetGuid();
         var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         await res.Content.ReadAsStringAsync();

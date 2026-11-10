@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 
+using Branding;
 namespace Llm.Api.Decks;
 
 public static partial class DeckPptx
@@ -15,15 +16,15 @@ public static partial class DeckPptx
         {
             ["[Content_Types].xml"] = ContentTypes,
             ["_rels/.rels"] = Rels(("rId1", "officeDocument", "ppt/presentation.xml"), ("rId2", "extended-properties", "docProps/app.xml")),
-            ["docProps/app.xml"] = """<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Argus Arena</Application></Properties>""",
+            ["docProps/app.xml"] = $"""<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>{System.Security.SecurityElement.Escape(Branding.Brand.Product)}</Application></Properties>""",
             ["ppt/presentation.xml"] = Presentation,
             ["ppt/_rels/presentation.xml.rels"] = Rels(("rId1", "slideMaster", "slideMasters/slideMaster1.xml"), ("rId2", "notesMaster", "notesMasters/notesMaster1.xml"),
                 ("rId3", "theme", "theme/theme1.xml"), ("rId4", "presProps", "presProps.xml"), ("rId5", "viewProps", "viewProps.xml"), ("rId6", "tableStyles", "tableStyles.xml")),
             ["ppt/presProps.xml"] = $"""<p:presentationPr xmlns:a="{A}" xmlns:r="{R}" xmlns:p="{P}"/>""",
             ["ppt/viewProps.xml"] = $"""<p:viewPr xmlns:a="{A}" xmlns:r="{R}" xmlns:p="{P}"><p:normalViewPr><p:restoredLeft sz="15620"/><p:restoredTop sz="94660"/></p:normalViewPr><p:gridSpacing cx="76200" cy="76200"/></p:viewPr>""",
             ["ppt/tableStyles.xml"] = $$"""<a:tblStyleLst xmlns:a="{{A}}" def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"/>""",
-            ["ppt/theme/theme1.xml"] = ThemeXml("Argus Arena"),
-            ["ppt/theme/theme2.xml"] = ThemeXml("Argus Arena notes"),
+            ["ppt/theme/theme1.xml"] = ThemeXml($"{Brand.Product}"),
+            ["ppt/theme/theme2.xml"] = ThemeXml($"{Brand.Product} notes"),
             ["ppt/slideMasters/slideMaster1.xml"] = Master,
             ["ppt/slideMasters/_rels/slideMaster1.xml.rels"] = Rels(("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"), ("rId2", "slideLayout", "../slideLayouts/slideLayout2.xml"),
                 ("rId3", "slideLayout", "../slideLayouts/slideLayout3.xml"), ("rId4", "slideLayout", "../slideLayouts/slideLayout4.xml"), ("rId5", "slideLayout", "../slideLayouts/slideLayout5.xml"),
@@ -120,7 +121,7 @@ public static partial class DeckPptx
         }
         return $"""
             <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-            <a:theme xmlns:a="{A}" name="{name}"><a:themeElements><a:clrScheme name="Argus Arena"><a:dk1><a:srgbClr val="1B1C1F"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>{C("dk2", "1E3A5F")}{C("lt2", "EEF1F5")}{C("accent1", "2A78D6")}{C("accent2", "EB6834")}{C("accent3", "1BAF7A")}{C("accent4", "EDA100")}{C("accent5", "E87BA4")}{C("accent6", "4A3AA7")}{C("hlink", "2A78D6")}{C("folHlink", "4A3AA7")}</a:clrScheme><a:fontScheme name="Argus Arena"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Argus Arena"><a:fillStyleLst>{Fill("phClr")}{Fill("phClr")}{Fill("phClr")}</a:fillStyleLst><a:lnStyleLst>{line}</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>{Fill("phClr")}{Fill("phClr")}{Fill("phClr")}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>
+            <a:theme xmlns:a="{A}" name="{name}"><a:themeElements><a:clrScheme name="{Brand.Product}"><a:dk1><a:srgbClr val="1B1C1F"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>{C("dk2", "1E3A5F")}{C("lt2", "EEF1F5")}{C("accent1", "2A78D6")}{C("accent2", "EB6834")}{C("accent3", "1BAF7A")}{C("accent4", "EDA100")}{C("accent5", "E87BA4")}{C("accent6", "4A3AA7")}{C("hlink", "2A78D6")}{C("folHlink", "4A3AA7")}</a:clrScheme><a:fontScheme name="{Brand.Product}"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="{Brand.Product}"><a:fillStyleLst>{Fill("phClr")}{Fill("phClr")}{Fill("phClr")}</a:fillStyleLst><a:lnStyleLst>{line}</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>{Fill("phClr")}{Fill("phClr")}{Fill("phClr")}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>
             """;
     }
 }

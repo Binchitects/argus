@@ -1,12 +1,13 @@
 using System.Net;
 using Llm.Api.Access;
 
+using Branding;
 namespace Llm.Api.Oidc;
 
 /// <summary>
-/// Which network addresses may reach Argus Arena at all (Settings → Network access): an allow list (empty: every address)
+/// Which network addresses may reach Arena at all (Settings → Network access): an allow list (empty: every address)
 /// and a block list (refused whatever the allow list says). Traefik asks <see cref="Path"/> before every request, for every
-/// host (the web, the app, the gateway, Argus), with the caller's address as it saw it; the lists are read from the saved
+/// host (the web, the app, the gateway, code-intel), with the caller's address as it saw it; the lists are read from the saved
 /// settings on each request (parsed once per value). A list is one address or range a line (10.0.0.0/8, 2001:db8::/32,
 /// 192.168.1.20), commas also separate, and # starts a comment.
 /// </summary>
@@ -85,7 +86,7 @@ public sealed class AddressFilter(IConfiguration config)
             {
                 return Results.NoContent();
             }
-            return Results.Text($"Argus Arena does not take requests from this address ({why}). An admin changes it under Settings → Network access.",
+            return Results.Text($"{Brand.Product} does not take requests from this address ({why}). An admin changes it under Settings → Network access.",
                 "text/plain; charset=utf-8", statusCode: StatusCodes.Status403Forbidden);
         }).AllowAnonymous("Traefik's forward auth for the caller's network address, before every request.");
 }

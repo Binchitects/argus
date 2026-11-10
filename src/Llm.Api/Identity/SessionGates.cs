@@ -4,7 +4,7 @@ namespace Llm.Api.Identity;
 
 /// <summary>
 /// What a session held back by a gate (the sign-in notice, two-factor enrolment) gets when its browser is sent to another app's
-/// sign-in through this one (OIDC's /connect/authorize, as Argus's and Code Arena's): the web's page for that step, which goes
+/// sign-in through this one (OIDC's /connect/authorize, as code-intel's and Code Arena's): the web's page for that step, which goes
 /// on to the same authorize request once it is done, not a JSON refusal with no page around it.
 /// </summary>
 public static class SessionGates

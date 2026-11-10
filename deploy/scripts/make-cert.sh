@@ -1,6 +1,6 @@
 #!/bin/sh
 # Traefik's certificate, made with openssl: a CA of this deployment's own and,
-# signed by it, a certificate for DOMAIN, gateway.DOMAIN and argus.DOMAIN (and
+# signed by it, a certificate for DOMAIN, gateway.DOMAIN and CODE_INTEL_HOST.DOMAIN (and
 # *.DOMAIN). Or a company's certificate, installed as it is.
 #
 #   scripts/make-cert.sh                          from .env's DOMAIN; again to renew (same CA)
@@ -15,6 +15,10 @@
 # Then trust certs/ca.crt on the machines and in the tools that use the stack
 # (it is the certificate to import; ca.key stays here, and renews the certificate).
 set -eu
+# The product's name people read: PRODUCT_NAME, else branding.env (deploy/'s, or the repository's at its root).
+brand_name() { for f in "$(dirname "$0")/../branding.env" "$(dirname "$0")/../../branding.env" "$(dirname "$0")/branding.env"; do if [ -f "$f" ]; then sed -n "s/^$1=//p" "$f" | head -n1; return 0; fi; done; }
+PRODUCT="${PRODUCT_NAME:-$(brand_name PRODUCT_NAME)}"; PRODUCT="${PRODUCT:-Farzan Arena}"
+
 cd "$(dirname "$0")/.."
 
 domain="" cert="" key="" chain="" days=825
@@ -33,6 +37,10 @@ if [ -z "$domain" ] && [ -f .env ]; then
   domain=$(sed -n 's/^DOMAIN=//p' .env | tail -n 1 | tr -d '"'"'"' ')
 fi
 domain=${domain:-llm.localhost}
+# The code-intelligence service's address (CODE_INTEL_HOST.DOMAIN): named in the certificate beside *.DOMAIN.
+if [ -z "${CODE_INTEL_HOST:-}" ] && [ -f .env ]; then
+  CODE_INTEL_HOST=$(sed -n 's/^CODE_INTEL_HOST=//p' .env | tail -n 1 | tr -d '"'"'"' ')
+fi
 command -v openssl >/dev/null || { echo "make-cert: openssl is not installed" >&2; exit 1; }
 
 mkdir -p certs
@@ -50,7 +58,7 @@ else
   if [ ! -f certs/ca.key ] || [ ! -f certs/ca.crt ]; then
     echo "make-cert: making a CA for $domain (certs/ca.crt, 10 years)"
     openssl req -x509 -new -nodes -newkey rsa:3072 -sha256 -days 3650 \
-      -keyout certs/ca.key -out certs/ca.crt -subj "/O=Argus Arena/CN=Argus Arena CA ($domain)" \
+      -keyout certs/ca.key -out certs/ca.crt -subj "/O=$PRODUCT/CN=$PRODUCT CA ($domain)" \
       -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
       -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
   fi
@@ -60,9 +68,9 @@ else
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=DNS:$domain,DNS:*.$domain,DNS:gateway.$domain,DNS:argus.$domain
+subjectAltName=DNS:$domain,DNS:*.$domain,DNS:gateway.$domain,DNS:${CODE_INTEL_HOST:-code-intel}.$domain
 EOF
-  openssl req -new -nodes -newkey rsa:2048 -keyout "$work/tls.key" -out "$work/tls.csr" -subj "/O=Argus Arena/CN=$domain" 2>/dev/null
+  openssl req -new -nodes -newkey rsa:2048 -keyout "$work/tls.key" -out "$work/tls.csr" -subj "/O=$PRODUCT/CN=$domain" 2>/dev/null
   openssl x509 -req -in "$work/tls.csr" -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial -CAserial "$work/ca.srl" \
     -out "$work/tls.crt" -days "$days" -sha256 -extfile "$work/ext" 2>/dev/null
   # The certificate, then the CA: clients that trust the CA can build the chain.
@@ -87,7 +95,7 @@ echo "make-cert: certs/tls.crt for:"
 openssl x509 -in certs/tls.crt -noout -subject -enddate -ext subjectAltName | sed 's/^/  /'
 if [ -f certs/ca.crt ] && [ -z "$cert" ]; then
   echo "make-cert: trust certs/ca.crt where the stack is used, e.g."
-  echo "  Linux:   sudo cp certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt && sudo update-ca-certificates"
+  echo "  Linux:   sudo cp certs/ca.crt /usr/local/share/ca-certificates/arena.crt && sudo update-ca-certificates"
   echo "  Windows: certutil -addstore -f Root ca.crt   macOS: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt"
   echo "  curl:    curl --cacert certs/ca.crt https://$domain/   Node: NODE_EXTRA_CA_CERTS=certs/ca.crt"
 fi

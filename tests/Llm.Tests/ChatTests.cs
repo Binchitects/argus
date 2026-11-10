@@ -100,20 +100,20 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Config_lists_the_model_its_presets_and_argus()
+    public async Task Config_lists_the_model_its_presets_and_code_intel()
     {
         var (b, _) = await PersonAsync();
         var c = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
         Assert.Equal("Qwen3.8-Flash-Next", c.GetProperty("model").GetString());
         Assert.Equal(["xhigh", "low", "off"], c.GetProperty("presets").EnumerateArray().Select(p => p.GetProperty("level").GetString()));
-        Assert.True(c.GetProperty("argus").GetBoolean());
+        Assert.True(c.GetProperty("code-intel").GetBoolean());
     }
 
     [Fact]
     public async Task An_answer_streams_is_saved_and_is_billed_to_the_person()
     {
         var (b, email) = await PersonAsync();
-        var id = await NewChatAsync(b, new { thinking = "low", useArgus = false });
+        var id = await NewChatAsync(b, new { thinking = "low", useCodeIntel = false });
         var events = await SendAsync(b, id, "How do I rotate logs?\nMore detail here.");
         Assert.Equal(["question", "title", "assistant", "reasoning", "thought", "content", "content", "usage", "done"], Types(events));
         Assert.Equal("How do I rotate logs?", events[1].GetProperty("title").GetString());
@@ -126,7 +126,7 @@ public sealed class ChatTests(AppFixture app)
         Assert.Contains(headers["Authorization"][7..], app.Gateway.ServiceKeys);
         Assert.Equal("low", body["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
         Assert.True(body["stream_options"]!["include_usage"]!.GetValue<bool>());
-        // Argus off: the other tools on in new chats, and no Argus function.
+        // code-intel off: the other tools on in new chats, and no code-intel function.
         var functions = body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
         Assert.Contains("calculate", functions);
         Assert.DoesNotContain("find_symbol", functions);
@@ -150,17 +150,17 @@ public sealed class ChatTests(AppFixture app)
     public async Task Thinking_off_turns_thinking_off_and_the_default_sends_nothing()
     {
         var (b, _) = await PersonAsync();
-        var off = await NewChatAsync(b, new { thinking = "off", useArgus = false });
+        var off = await NewChatAsync(b, new { thinking = "off", useCodeIntel = false });
         await SendAsync(b, off, "hi");
         Assert.False(app.Model.Requests.Last().Body["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
-        var plain = await NewChatAsync(b, new { useArgus = false });
+        var plain = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, plain, "hi");
         Assert.Null(app.Model.Requests.Last().Body["chat_template_kwargs"]);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/chat/conversations", new { thinking = "ultra" }));
     }
 
     [Fact]
-    public async Task Argus_tools_are_called_as_the_person_and_the_answer_uses_them()
+    public async Task CodeIntel_tools_are_called_as_the_person_and_the_answer_uses_them()
     {
         var (b, email) = await PersonAsync();
         var id = await NewChatAsync(b);
@@ -174,15 +174,15 @@ public sealed class ChatTests(AppFixture app)
         Assert.True(result.GetProperty("durationMs").GetInt32() >= 0);
         Assert.False(result.GetProperty("noAccess").GetBoolean());
 
-        // Argus saw the chat token and this person's email, in one session.
-        var calls = app.Argus.McpCalls.Where(c => c.Email == email).ToList();
+        // code-intel saw the chat token and this person's email, in one session.
+        var calls = app.CodeIntel.McpCalls.Where(c => c.Email == email).ToList();
         Assert.Equal(["initialize", "notifications/initialized", "tools/list", "tools/call"], calls.Select(c => c.Method));
         Assert.All(calls.Skip(1), c => Assert.Equal("session-" + email, c.Session));
 
-        // The model got the tools, Argus's instructions, and then the tool's answer.
+        // The model got the tools, code-intel's instructions, and then the tool's answer.
         var requests = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         Assert.Equal("find_symbol", requests[0].Body["tools"]![0]!["function"]!["name"]!.GetValue<string>());
-        Assert.Contains(FakeArgus.Instructions, requests[0].Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains(FakeCodeIntel.Instructions, requests[0].Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         var second = requests[1].Body["messages"]!.AsArray();
         Assert.Equal("tool", second.Last()!["role"]!.GetValue<string>());
         Assert.Equal("call_1", second.Last()!["tool_call_id"]!.GetValue<string>());
@@ -212,21 +212,21 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
-    public async Task When_argus_is_down_the_chat_still_answers_and_says_so()
+    public async Task When_code_intel_is_down_the_chat_still_answers_and_says_so()
     {
         var (b, _) = await PersonAsync();
         var id = await NewChatAsync(b);
-        app.Argus.McpDown = true;
+        app.CodeIntel.McpDown = true;
         try
         {
             var events = await SendAsync(b, id, "hello");
-            Assert.Equal("argus_unavailable", events.First(e => e.GetProperty("type").GetString() == "notice").GetProperty("kind").GetString());
+            Assert.Equal("code_intel_unavailable", events.First(e => e.GetProperty("type").GetString() == "notice").GetProperty("kind").GetString());
             Assert.Contains("done", Types(events));
             Assert.DoesNotContain("find_symbol", app.Model.Requests.Last().Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         }
         finally
         {
-            app.Argus.McpDown = false;
+            app.CodeIntel.McpDown = false;
         }
     }
 
@@ -234,7 +234,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Used_up_credit_is_said_plainly_and_the_turn_is_marked_failed()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var events = await SendAsync(b, id, "hello [budget]");
         Assert.Equal("You have used all your credit. Ask an admin to raise it.", events.Last().GetProperty("message").GetString());
         var last = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last();
@@ -280,7 +280,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Stopping_keeps_what_arrived_and_marks_it_stopped()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var (res, _) = await StartAsync(b, id, "Write a lot [slow]", "w5 ", CancellationToken.None);
         using (res)
         {
@@ -328,7 +328,7 @@ public sealed class ChatTests(AppFixture app)
         await using var f = app.Create(app.ConnectionStringFor("delete_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), null,
             s => s.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logged));
         var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var (res, _) = await StartAsync(b, id, "Write a lot [slow]", "w5 ", CancellationToken.None);
         using (res)
         {
@@ -346,7 +346,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Closing_the_page_leaves_the_answer_to_finish_and_it_can_be_watched_again()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         using var cts = new CancellationTokenSource();
         var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ", cts.Token);
         // The page goes away mid-answer.
@@ -375,7 +375,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task An_answer_that_ends_while_no_page_watches_goes_to_the_bell_and_one_watched_does_not()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, "Hello there");
         Assert.Equal(0, (await b.JsonAsync(await b.GetAsync("/api/notifications"))).GetProperty("unread").GetInt32());
 
@@ -406,7 +406,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Each_answer_keeps_what_filled_its_request_for_the_context_gauge()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false, systemPrompt = "Answer in one line." });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, systemPrompt = "Answer in one line." });
         var file = await UploadAsync(b, "notes.txt", Encoding.UTF8.GetBytes(new string('x', 3000)));
         var events = await SendAsync(b, id, "What is in the notes?", [file.GetProperty("id").GetGuid()]);
         var live = events.Single(e => e.GetProperty("type").GetString() == "usage").GetProperty("context");
@@ -426,7 +426,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task A_model_whose_thinking_loops_is_cut_off_told_and_answers_without_thinking()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, thinking = "xhigh" });
         var events = await SendAsync(b, id, "Why does it fail? [loop]");
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "loop"
             && e.GetProperty("text").GetString()!.Contains("repeating itself in its thinking", StringComparison.Ordinal));
@@ -442,7 +442,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task An_answer_that_loops_is_stopped_there_and_kept_up_to_its_loop()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var events = await SendAsync(b, id, "Fix it [loop-answer]");
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "loop");
         var last = await LastOnceAsync(b, id, "complete");
@@ -455,7 +455,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Answer_now_stops_the_thinking_and_the_model_answers_without_it()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        var id = await NewChatAsync(b, new { useCodeIntel = false, thinking = "xhigh" });
         await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/hurry", new { }));
         var (res, seen) = await StartAsync(b, id, "Think hard [ponder]", "t5 ", CancellationToken.None);
         using (res)
@@ -482,7 +482,7 @@ public sealed class ChatTests(AppFixture app)
     {
         var (b, _) = await PersonAsync();
         var (other, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await b.GetAsync($"/api/chat/conversations/{id}/summary"));
         await SendAsync(b, id, "How do frames decode?");
         var res = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}/summary"));
@@ -500,7 +500,7 @@ public sealed class ChatTests(AppFixture app)
     {
         var (b, _) = await PersonAsync();
         var (other, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         var file = await UploadAsync(b, "pineapple-budget.txt", "costs"u8.ToArray());
         await SendAsync(b, id, "Pineapple pizza recipe please", [file.GetProperty("id").GetGuid()]);
         async Task<List<JsonElement>> FindAsync(TestBrowser who, string query) =>
@@ -528,14 +528,14 @@ public sealed class ChatTests(AppFixture app)
     {
         var (b, _) = await PersonAsync();
         var (other, _) = await PersonAsync();
-        var first = await NewChatAsync(b, new { useArgus = false });
-        var second = await NewChatAsync(b, new { useArgus = false });
+        var first = await NewChatAsync(b, new { useCodeIntel = false });
+        var second = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, first, "one");
         await SendAsync(b, second, "two");
         await SendAsync(b, first, "three");
         await SendAsync(b, second, new string('x', ChatEndpoints.HistoryMaxChars + 1));
         Assert.Contains((await ConversationAsync(b, second)).GetProperty("messages").EnumerateArray(), m => m.GetProperty("content").GetString()!.Length > ChatEndpoints.HistoryMaxChars);
-        await SendAsync(other, await NewChatAsync(other, new { useArgus = false }), "not mine");
+        await SendAsync(other, await NewChatAsync(other, new { useCodeIntel = false }), "not mine");
         async Task<List<(string Text, DateTimeOffset At)>> HistoryAsync(TestBrowser who, string query = "") =>
             [.. (await who.JsonAsync(await who.GetAsync($"/api/chat/history{query}"))).EnumerateArray()
                 .Select(m => (m.GetProperty("text").GetString()!, m.GetProperty("at").GetDateTimeOffset()))];
@@ -555,7 +555,7 @@ public sealed class ChatTests(AppFixture app)
         Assert.Equal(["three", "one"], (await HistoryAsync(b)).Select(m => m.Text));
 
         // A task's run is not typed by the person: an event's text rides in its question.
-        var task = await b.JsonAsync(await b.PostAsync("/api/tasks", new { name = "Alert", prompt = "Say what this alert means.", trigger = "webhook", useArgus = false }));
+        var task = await b.JsonAsync(await b.PostAsync("/api/tasks", new { name = "Alert", prompt = "Say what this alert means.", trigger = "webhook", useCodeIntel = false }));
         using var hook = new HttpRequestMessage(HttpMethod.Post, new Uri(task.GetProperty("hookUrl").GetString()!).PathAndQuery) { Content = JsonContent.Create(new { alert = "DiskFull" }) };
         hook.Headers.Add("X-Hook-Secret", task.GetProperty("hookToken").GetString());
         await StatusAssert.Is(HttpStatusCode.Accepted, await app.Factory.CreateClient().SendAsync(hook));
@@ -571,7 +571,7 @@ public sealed class ChatTests(AppFixture app)
             StringComparison.Ordinal);
 
         // A fork copies someone else's questions, and one's own already in their chat: only what is written in it after counts.
-        var shared = await NewChatAsync(other, new { useArgus = false });
+        var shared = await NewChatAsync(other, new { useCodeIntel = false });
         await SendAsync(other, shared, "theirs");
         var share = await other.Http.PutAsJsonAsync(new Uri($"/api/chat/conversations/{shared}/share", UriKind.Relative), new { reach = "Company" });
         await StatusAssert.Is(HttpStatusCode.OK, share);
@@ -589,7 +589,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Regenerate_adds_an_answer_beside_the_old_one()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, "first question");
         var before = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last().GetProperty("id").GetGuid();
         var events = await SendAsync(b, id, "", path: "regenerate");
@@ -610,7 +610,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task One_answer_at_a_time_per_chat()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         using var first = new HttpRequestMessage(HttpMethod.Post, new Uri($"/api/chat/conversations/{id}/messages", UriKind.Relative)) { Content = JsonContent.Create(new { content = "long [slow]" }) };
         using var running = await b.Http.SendAsync(first, HttpCompletionOption.ResponseHeadersRead);
         var second = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "again" });
@@ -623,7 +623,7 @@ public sealed class ChatTests(AppFixture app)
     {
         var (alice, _) = await PersonAsync();
         var (bob, _) = await PersonAsync();
-        var id = await NewChatAsync(alice, new { useArgus = false });
+        var id = await NewChatAsync(alice, new { useCodeIntel = false });
         await SendAsync(alice, id, "private question");
         await StatusAssert.Is(HttpStatusCode.NotFound, await bob.GetAsync($"/api/chat/conversations/{id}"));
         await StatusAssert.Is(HttpStatusCode.NotFound, await bob.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "x" }));
@@ -631,7 +631,7 @@ public sealed class ChatTests(AppFixture app)
         Assert.DoesNotContain(id.ToString(), await (await bob.GetAsync("/api/chat/conversations")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
         var file = await UploadAsync(alice, "notes.txt", "alice's notes"u8.ToArray());
-        var bobChat = await NewChatAsync(bob, new { useArgus = false });
+        var bobChat = await NewChatAsync(bob, new { useCodeIntel = false });
         var res = await bob.PostAsync($"/api/chat/conversations/{bobChat}/messages", new { content = "read this", attachments = new[] { file.GetProperty("id").GetGuid() } });
         await StatusAssert.Is(HttpStatusCode.BadRequest, res);
     }
@@ -659,7 +659,7 @@ public sealed class ChatTests(AppFixture app)
         Assert.True(pdf.GetProperty("chars").GetInt32() > 20);
         await UploadAsync(b, "image.png", [0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 0], HttpStatusCode.BadRequest);
 
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, "Summarise these", [txt.GetProperty("id").GetGuid(), pdf.GetProperty("id").GetGuid()]);
         var user = app.Model.Requests.Last().Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
         Assert.Contains("<attachment name=\"config.yaml\">\nretries: 3", user, StringComparison.Ordinal);
@@ -672,7 +672,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task A_long_history_is_trimmed_from_the_oldest_end()
     {
         var (b, email) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         // 60 old exchanges of ~4000 characters: far past a 32K-token context.
         using (var scope = app.Factory.Services.CreateScope())
         {
@@ -720,7 +720,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task A_chat_near_the_end_of_the_context_is_compacted_and_goes_on()
     {
         var (b, email) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         // 30 exchanges of ~2,600 characters: past 80% of a 32K-token context.
         await OldExchangesAsync(id, 30, 2_500);
         var events = await SendAsync(b, id, "the newest question");
@@ -755,7 +755,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Compact_summarizes_the_branch_on_screen_and_the_next_answer_reads_the_summary()
     {
         var (b, email) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{id}/compact", new { }));
         await SendAsync(b, id, "first question");
         await SendAsync(b, id, "second question");
@@ -789,7 +789,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task A_chat_that_is_answering_cannot_be_compacted()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, "first");
         var (res, _) = await StartAsync(b, id, "long [slow]", "w1 ", CancellationToken.None);
         using (res)
@@ -944,7 +944,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task An_answer_that_stops_at_its_longest_says_so()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         // The model's longest answer (8,192: the engine's n-predict, or the gateway's cap) reached: said, with what to do.
         var notice = Assert.Single(await SendAsync(b, id, "[length 8192] write it all"), e => e.GetProperty("type").GetString() == "notice");
         Assert.Equal(("cut_at_longest", "The answer stopped at its longest (8,192 tokens, the model's longest answer): ask it to go on."),
@@ -996,7 +996,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task Chats_can_be_renamed_listed_searched_and_deleted()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { title = "Deploy notes", thinking = "xhigh" }));
         var c = await ConversationAsync(b, id);
         Assert.Equal(("Deploy notes", "xhigh"), (c.GetProperty("title").GetString(), c.GetProperty("thinking").GetString()));
@@ -1010,7 +1010,7 @@ public sealed class ChatTests(AppFixture app)
     public async Task A_chat_key_deleted_at_the_gateway_is_replaced_on_the_fly()
     {
         var (b, _) = await PersonAsync();
-        var id = await NewChatAsync(b, new { useArgus = false });
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
         await SendAsync(b, id, "first");
         var oldKey = app.Model.Requests.Last().Headers["Authorization"][7..];
         app.Model.RevokedKeys[oldKey] = true;
