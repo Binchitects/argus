@@ -41,15 +41,61 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   uninstaller and "Open in Code Arena" on folders on Windows, Code Arena.app
   on macOS, a desktop entry offered for folders on Linux.
   `code-arena uninstall` takes it off.
+- **The app's own model gateway** (Settings → API keys → Model gateway:
+  litellm, chat or own). With own, the app answers what LiteLLM answered:
+  API keys' chat completions, Anthropic's Messages API (Claude Code), OpenAI's
+  Responses API (Codex), the legacy completions, pictures, speech and
+  transcriptions, the model list and info, embeddings; with its own key checks
+  and per-minute limits shared by every replica, a pool balanced by what each
+  copy is busy with, fallbacks, a ledger row for every request (refusals
+  too), metrics and alert rules, and the Overview's health. LiteLLM is the
+  default until it is measured against it (`deploy/scripts/gateway-compare.py`).
+- **Chats in step as it happens**: every change to a chat reaches its
+  owner's pages and Code Arenas at once, on every replica.
+- **Code Arena without signing in**: with a provider of your own, or as an
+  IDE alone; sign in later from Accounts.
+- **Tags and summaries** on chats, projects and the prompt log (Summarize and
+  tag picks from the known tags); the prompt log searched by tag, its own
+  report and settings; Accounting by tag.
+- **Broadcasts**: an admin's message to everyone or some groups, in the bell,
+  above every page and in Code Arena.
 
 ### :sparkles: New features & Enhancements
 
+- Feedback from Code Arena too, with screenshots (pick, paste or capture),
+  and answers rated there as in the web chat.
+- Code Arena keeps itself signed in: a key refused is retried with the newer
+  one saved meanwhile.
+- Code Arena: every change the agent made is listed (a command's writes too,
+  with what each file held before the turn); notifications while you look
+  elsewhere (waiting, a VM's sign-in, ready, failed) answered from the bubble,
+  the desktop and the terminal's bell; checklists; several skills in one
+  message (the web chat too); the sub-agents' tasks list resizable; the home
+  folders `~/.code-arena` and `~/.claude` read as a project's (commands,
+  agents, instructions, memory).
+- Long Code Arena sessions keep their work: a summary carries the files
+  changed and the commands run; earlier long call arguments are cut with the
+  results; a kinder plan tool (other names for its fields, status words).
+- The VM tool waits for a guest that is up and stops after the same command
+  failed twice.
+- Input, cached and output tokens in the dashboards, the people pages,
+  Accounting and the project reports; a project's agent, person and waiting
+  times measured as they happened.
+- A group can be the one new people join (its own switch).
+- The context's detail ("what fills it") for answers that kept only their
+  context.
 - The code-intelligence service's address is `CODE_INTEL_HOST.DOMAIN`
   (`code-intel` by default); `/api/info` announces it (`codeIntelUrl`), and
   Code Arena and the Setup page use it.
 - `code-arena -C DIR` (`--folder`) runs in that folder.
 - The dashboards and the manual are written with the default names and shown
   with the names built.
+
+### :bug: Bugs fixed
+
+- A language server sent `exit` gets a second to end before it is killed.
+- A program just written is started again when Linux says it is busy
+  (ETXTBSY), which failed a debug adapter's check under load.
 
 ### :boom: Breaking changes & Deprecations
 
