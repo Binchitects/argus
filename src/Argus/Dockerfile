@@ -39,7 +39,12 @@ RUN case "$(dpkg --print-architecture)" in \
       amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; \
     esac \
  && tools/fetch-sqlite-vec.sh "$rid"
-COPY global.json Directory.Build.props VERSION ./
+COPY global.json Directory.Build.props VERSION branding.env ./
+COPY src/Shared/ src/Shared/
+# The names people see (branding.env's unless given): PRODUCT_NAME and CODE_INTEL_NAME, read by Directory.Build.props.
+ARG PRODUCT_NAME=
+ARG CODE_INTEL_NAME=
+ENV PRODUCT_NAME=$PRODUCT_NAME CODE_INTEL_NAME=$CODE_INTEL_NAME
 COPY src/Argus/Argus.csproj src/Argus/
 COPY tests/Argus.Tests/Argus.Tests.csproj tests/Argus.Tests/
 RUN dotnet restore tests/Argus.Tests/Argus.Tests.csproj

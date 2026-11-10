@@ -12,7 +12,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api
 # set: an empty -p:AppVersion= is a global property and would win over VERSION.
 ARG APP_VERSION=
 WORKDIR /src
-COPY global.json Directory.Build.props VERSION ./
+COPY global.json Directory.Build.props VERSION branding.env ./
+COPY src/Shared/ src/Shared/
+# The names people see (branding.env's unless given): PRODUCT_NAME and CODE_INTEL_NAME, read by Directory.Build.props.
+ARG PRODUCT_NAME=
+ARG CODE_INTEL_NAME=
+ENV PRODUCT_NAME=$PRODUCT_NAME CODE_INTEL_NAME=$CODE_INTEL_NAME
 COPY src/Llm.Core/Llm.Core.csproj src/Llm.Core/
 COPY src/Llm.Api/Llm.Api.csproj src/Llm.Api/
 RUN dotnet restore src/Llm.Api/Llm.Api.csproj
@@ -63,7 +68,12 @@ FROM code-arena-web-${CODE_ARENA} AS code-arena-web
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 ARG CODE_ARENA
 WORKDIR /src
-COPY global.json Directory.Build.props VERSION ./
+COPY global.json Directory.Build.props VERSION branding.env ./
+COPY src/Shared/ src/Shared/
+# The names people see (branding.env's unless given): PRODUCT_NAME and CODE_INTEL_NAME, read by Directory.Build.props.
+ARG PRODUCT_NAME=
+ARG CODE_INTEL_NAME=
+ENV PRODUCT_NAME=$PRODUCT_NAME CODE_INTEL_NAME=$CODE_INTEL_NAME
 COPY tools/publish-code-arena.sh tools/
 # What writes the IDE's launcher for Windows (code-arena-ide.exe), beside code-arena.exe.
 COPY tools/ide-launcher/ tools/ide-launcher/

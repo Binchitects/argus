@@ -11,6 +11,11 @@ RUN npm ci --no-audit --no-fund
 COPY src/web/ ./
 # The manual's pages: vite.config.ts reads ../../docs, which from /web is /docs.
 COPY docs/ /docs/
+# The names people see: ../../branding.env from /web, unless PRODUCT_NAME or CODE_INTEL_NAME are given.
+COPY branding.env /branding.env
+ARG PRODUCT_NAME=
+ARG CODE_INTEL_NAME=
+ENV PRODUCT_NAME=$PRODUCT_NAME CODE_INTEL_NAME=$CODE_INTEL_NAME
 # NO_MINIFY=1 builds a readable bundle for chasing production-only bugs.
 ARG NO_MINIFY=
 RUN NO_MINIFY=$NO_MINIFY npm run build

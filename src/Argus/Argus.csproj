@@ -32,4 +32,8 @@
     <None Include="../../native/runtimes/**/vec0.*" Exclude="../../native/runtimes/**/*.sha256"
           Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The names people see, set at build time (branding.env). -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\Shared\Brand.cs" Link="Brand.cs" />
+  </ItemGroup>
 </Project>

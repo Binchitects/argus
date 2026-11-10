@@ -58,7 +58,7 @@ services:
 
   web:
     <<: *service
-    build: { context: .., dockerfile: src/web/Dockerfile }
+    build: { context: .., dockerfile: src/web/Dockerfile, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
     container_name: web
     read_only: true
     tmpfs: [/tmp]
@@ -67,7 +67,7 @@ services:
 
   app:
     <<: *service
-    build: { context: .., dockerfile: src/Llm.Api/Dockerfile }
+    build: { context: .., dockerfile: src/Llm.Api/Dockerfile, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
     container_name: app
     read_only: true
     tmpfs: [/tmp]
@@ -381,7 +381,7 @@ services:
   argus:
     <<: *service
     profiles: [argus]
-    build: { context: .., dockerfile: src/Argus/Dockerfile, target: server }
+    build: { context: .., dockerfile: src/Argus/Dockerfile, target: server, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
     container_name: argus
     command:
       - serve
@@ -581,7 +581,7 @@ services:
   # and the internet (the code host, package registries), not the stack's databases, gateway, engines or browser.
   workspaces:
     <<: *service
-    build: { context: .., dockerfile: deploy/services/workspaces/Dockerfile }
+    build: { context: .., dockerfile: deploy/services/workspaces/Dockerfile, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
     image: arena-workspaces
     container_name: workspaces
     profiles: [workspaces]

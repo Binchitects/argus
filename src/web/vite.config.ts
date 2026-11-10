@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, searchForWorkspaceRoot } from 'vite'
 
@@ -12,6 +13,15 @@ const proxy = { target: api, changeOrigin: true, secure: false }
 // The manual (src/help/manual.ts) builds the repository's docs/ into the page. In the web image
 // they are copied to /docs, which ../../docs from /web names too (src/web/Dockerfile).
 const docs = fileURLToPath(new URL('../../docs', import.meta.url))
+
+// The names people see (the repository's branding.env, copied to /branding.env in the web image; PRODUCT_NAME and
+// CODE_INTEL_NAME in the environment win): import.meta.env.VITE_PRODUCT_NAME and VITE_CODE_INTEL_NAME (src/lib/brand.ts),
+// and %VITE_PRODUCT_NAME% in index.html.
+const brandFile = fileURLToPath(new URL('../../branding.env', import.meta.url))
+const brandText = existsSync(brandFile) ? readFileSync(brandFile, 'utf8') : ''
+const fromFile = (key: string) => new RegExp(`^${key}=(.*)$`, 'm').exec(brandText)?.[1]?.trim()
+process.env.VITE_PRODUCT_NAME = process.env.PRODUCT_NAME || fromFile('PRODUCT_NAME') || 'Farzan Arena'
+process.env.VITE_CODE_INTEL_NAME = process.env.CODE_INTEL_NAME || fromFile('CODE_INTEL_NAME') || 'Farzan Graph'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

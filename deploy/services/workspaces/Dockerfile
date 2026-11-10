@@ -7,7 +7,12 @@
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 WORKDIR /src
-COPY global.json Directory.Build.props VERSION ./
+COPY global.json Directory.Build.props VERSION branding.env ./
+COPY src/Shared/ src/Shared/
+# The names people see (branding.env's unless given): PRODUCT_NAME and CODE_INTEL_NAME, read by Directory.Build.props.
+ARG PRODUCT_NAME=
+ARG CODE_INTEL_NAME=
+ENV PRODUCT_NAME=$PRODUCT_NAME CODE_INTEL_NAME=$CODE_INTEL_NAME
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
 # The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
