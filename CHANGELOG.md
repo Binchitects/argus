@@ -15,6 +15,59 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v8.0.0 (unreleased, branch v8.0)
+
+The names people see are the build's: Farzan Arena, and Farzan Graph for its
+code intelligence, by default; nothing inside is named after a brand. Three
+sidebars instead of one long list, the app's icon of the admin's choosing, an
+owl for the wise one, and Code Arena installed as an application everywhere.
+
+### :rocket: Epics and highlights
+
+- **Names from the build.** `branding.env` (or `PRODUCT_NAME` and
+  `CODE_INTEL_NAME` at build time) names the product and its code
+  intelligence wherever people read them: the app, the web, Code Arena, the
+  manual, the dashboards, the installer, the README. Inside, the product is
+  `arena` and the service `code-intel`; a build with other names changes what
+  people read and nothing else.
+- **Three sidebars.** Workspace (the tools and chats, the most used first),
+  Monitoring (the dashboards) and Admin, each a tab of its own; the page
+  opened shows its tab; a person with the workspace only sees no tabs.
+- **The app's icon**, beside its name, chosen in Settings → Branding: the
+  sidebar, the sign-in page, the browser's tab, notifications and a phone's
+  home screen. The app's own is an owl in the A, the sign-in's eyes the owl's.
+- **Code Arena as an application.** A setup to download and open for
+  Windows, macOS and Linux (Connect your tools): in Settings → Apps with an
+  uninstaller and "Open in Code Arena" on folders on Windows, Code Arena.app
+  on macOS, a desktop entry offered for folders on Linux.
+  `code-arena uninstall` takes it off.
+
+### :sparkles: New features & Enhancements
+
+- The code-intelligence service's address is `CODE_INTEL_HOST.DOMAIN`
+  (`code-intel` by default); `/api/info` announces it (`codeIntelUrl`), and
+  Code Arena and the Setup page use it.
+- `code-arena -C DIR` (`--folder`) runs in that folder.
+- The dashboards and the manual are written with the default names and shown
+  with the names built.
+
+### :boom: Breaking changes & Deprecations
+
+- Inside names: the service, container, image, feature and data folder are
+  `code-intel`; its environment `CODE_INTEL_*` (`CODE_INTEL_KEY`,
+  `CODE_INTEL_PACK_LIBRARY_DIR`); the app's settings section `CodeIntel`;
+  the chat tool id `code-intel`; permissions `code-intel.*` and
+  `settings.code-intel`; packs `.kpack`; metrics `code_intel_*`; the bundle
+  `arena-VERSION-offline.run` and the chart `deploy/helm/arena` (values under
+  `codeIntel`). An upgrade from 7.x carries all of it: `.env`'s keys renamed
+  on their lines, the address kept (`CODE_INTEL_HOST=argus`), the data
+  folder renamed (back on a rollback), the database's stored names
+  (migration NeutralNames), installed packs taken under `.kpack`, the
+  Kubernetes claim and address kept.
+- People's tools add the code-intelligence MCP server again from Connect
+  your tools: it is named `code-intel` now. Code Arena's config keys are
+  `codeIntelUrl` and `codeIntelTools`.
+
 ## v7.10.1 (2026-11-09)
 
 Models that fail on vLLM, SGLang, LMDeploy or Strata now say why, and SGLang
