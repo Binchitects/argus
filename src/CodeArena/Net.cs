@@ -21,7 +21,11 @@ internal static class Net
     public static string? CaFile(string? option, string? configured, Func<string, string?> env) =>
         new[] { option, env("ARENA_CA_CERT"), configured, env("SSL_CERT_FILE") }.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f));
 
-    public static HttpClient Client(string? caFile)
+    /// <summary>
+    /// A client; with <paramref name="keys"/>, a request refused for its key (401, 403 but an admin's) goes once more with the newer
+    /// key saved since, when there is one: a long session keeps working after a sign-in elsewhere replaced this machine's key.
+    /// </summary>
+    public static HttpClient Client(string? caFile, KeyRefresh? keys = null)
     {
         var handler = new SocketsHttpHandler
         {
@@ -40,7 +44,7 @@ internal static class Net
             var roots = LoadCertificates(caFile);
             handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, chain, errors) => Trusted(certificate, chain, errors, roots);
         }
-        var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var http = new HttpClient(keys is null ? handler : new KeyRefreshHandler(keys) { InnerHandler = handler }) { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("code-arena", Cli.Version));
         return http;
     }
@@ -170,5 +174,73 @@ internal static class Net
             }
         }
         return $"Could not reach {url}: {e.Message}";
+    }
+}
+
+/// <summary>Where a newer key comes from: given the key a request was refused with, the newer one saved since (null: none).</summary>
+internal sealed class KeyRefresh
+{
+    public Func<string, string?>? Newer { get; set; }
+}
+
+/// <summary>A request refused for its key, sent once more with the newer key <see cref="KeyRefresh"/> gives (Bearer keys only).</summary>
+internal sealed class KeyRefreshHandler(KeyRefresh keys) : DelegatingHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        if (request.Headers.Authorization is not { Scheme: "Bearer", Parameter: { Length: > 0 } sent } || keys.Newer is null)
+        {
+            return await base.SendAsync(request, ct);
+        }
+        // Kept to send again: the bodies are JSON or small forms (an upload's stream is not read twice: it is not sent again).
+        var body = request.Content is StringContent or ByteArrayContent && request.Content is not MultipartContent
+            ? (await request.Content.ReadAsByteArrayAsync(ct), request.Content.Headers.ContentType)
+            : default((byte[] Bytes, MediaTypeHeaderValue? Type)?);
+        var res = await base.SendAsync(request, ct);
+        if (res.StatusCode is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) || (request.Content is not null && body is null))
+        {
+            return res;
+        }
+        if (res.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // An admin's 403 (the request taken out of the line) or a permission's: not the key's.
+            var said = await res.Content.ReadAsStringAsync(ct);
+            res = Again(res, said);
+            if (!said.Contains("key", StringComparison.OrdinalIgnoreCase) || said.Contains("removed_by_admin", StringComparison.Ordinal))
+            {
+                return res;
+            }
+        }
+        if (keys.Newer(sent) is not { Length: > 0 } fresh || fresh == sent)
+        {
+            return res;
+        }
+        res.Dispose();
+        using var again = new HttpRequestMessage(request.Method, request.RequestUri) { Version = request.Version, VersionPolicy = request.VersionPolicy };
+        foreach (var (name, values) in request.Headers.Where(h => h.Key != "Authorization"))
+        {
+            again.Headers.TryAddWithoutValidation(name, values);
+        }
+        again.Headers.Authorization = new AuthenticationHeaderValue("Bearer", fresh);
+        if (body is { } b)
+        {
+            again.Content = new ByteArrayContent(b.Bytes);
+            again.Content.Headers.ContentType = b.Type;
+        }
+        return await base.SendAsync(again, ct);
+    }
+
+    /// <summary>An answer whose body was read, as it came.</summary>
+    private static HttpResponseMessage Again(HttpResponseMessage res, string body)
+    {
+        var copy = new HttpResponseMessage(res.StatusCode) { ReasonPhrase = res.ReasonPhrase, RequestMessage = res.RequestMessage, Version = res.Version };
+        copy.Content = new StringContent(body, System.Text.Encoding.UTF8);
+        copy.Content.Headers.ContentType = res.Content.Headers.ContentType;
+        foreach (var (name, values) in res.Headers)
+        {
+            copy.Headers.TryAddWithoutValidation(name, values);
+        }
+        res.Dispose();
+        return copy;
     }
 }

@@ -24,6 +24,42 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     public Config Config { get; }
+
+    /// <summary>The key Arena's and code-intel's servers are reached with: changed in place when a newer one is taken.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _arenaAuth = new();
+    private readonly object _keyGate = new();
+
+    /// <summary>
+    /// The key saved in config.json since this run started, when it is newer than the one in use (a sign-in in another window,
+    /// or code-arena login, replaced this machine's key and revoked the old one): from now on every call goes with it, the
+    /// gateway's, Arena's and its servers' alike, so a long session keeps working without starting again. Null: none newer.
+    /// </summary>
+    public string? AdoptSavedKey()
+    {
+        lock (_keyGate)
+        {
+            Config saved;
+            try
+            {
+                saved = Config.Load(Env.Paths.ConfigFile);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException)
+            {
+                return null;
+            }
+            if (saved.ApiKey is not { Length: > 0 } key || key == Config.ApiKey
+                || !string.Equals(saved.Url?.TrimEnd('/'), Config.Url?.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            Config.ApiKey = key;
+            Gateway.Key = key;
+            _arenaAuth["Authorization"] = "Bearer " + key;
+            Ui.Info("Arena's key changed (a newer sign-in on this machine): carrying on with the new one.");
+            return key;
+        }
+    }
+
     public Ui Ui { get; }
     public CliEnv Env { get; }
     public HttpClient Http { get; }
@@ -474,15 +510,18 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException(wrong);
         }
         HttpClient http;
+        var keys = new KeyRefresh();
         try
         {
-            http = Net.Client(Net.CaFile(o.Ca, config.Ca, env.Env));
+            http = Net.Client(Net.CaFile(o.Ca, config.Ca, env.Env), keys);
         }
         catch (Exception e) when (e is IOException or System.Security.Cryptography.CryptographicException)
         {
             throw new StartException(e.Message);
         }
         var rt = new Runtime(config, ui, env, http, new GatewayClient(http, config.GatewayUrl, config.ApiKey));
+        // A key refused: the newer one saved since, when there is one (the session keeps working).
+        keys.Newer = refused => refused == rt.Config.ApiKey || refused == rt.Gateway.Key ? rt.AdoptSavedKey() : rt.Config.ApiKey is { Length: > 0 } now && now != refused ? now : null;
         // Each request names its chat and project in Arena: what the session uses counts to the project.
         rt.Gateway.Tags = () => WorkProjects.Tags(rt.Sync?.Conversation, rt.Session?.Read(d => d.WorkProject));
         rt.Gateway.Retrying = said =>
@@ -1500,7 +1539,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// </summary>
     private void AddLinks()
     {
-        var auth = new Dictionary<string, string> { ["Authorization"] = "Bearer " + Config.ApiKey };
+        _arenaAuth["Authorization"] = "Bearer " + Config.ApiKey;
+        var auth = _arenaAuth;
         if (Config.ArenaTools && Config.ArenaMcpUrl is { } arenaUrl)
         {
             Link(new ServerLink(ArenaName, "Arena", arenaUrl, ct => McpClient.ConnectAsync(ArenaName, new HttpMcpTransport(Http, arenaUrl, auth), ct)));

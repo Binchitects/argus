@@ -84,6 +84,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>The finish reason of an answer stopped where it began repeating itself (what came before the loop is kept).</summary>
     public const string Looped = "looped";
 
+    /// <summary>The key the requests go with: a newer one replaces it (Runtime.AdoptSavedKey) without starting again.</summary>
+    public string Key { get; set; } = key;
+
     /// <summary>How long the stream may stay quiet before its first event (a long prompt is read first) and between two.</summary>
     public TimeSpan FirstEventWait { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan EventWait { get; set; } = TimeSpan.FromMinutes(3);
@@ -729,12 +732,12 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         var req = new HttpRequestMessage(method, BaseUrl + path);
         if (Kind == "anthropic")
         {
-            req.Headers.Add("x-api-key", key);
+            req.Headers.Add("x-api-key", Key);
             req.Headers.Add("anthropic-version", "2023-06-01");
         }
         else
         {
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Key);
         }
         return req;
     }

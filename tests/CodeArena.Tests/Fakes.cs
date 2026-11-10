@@ -131,6 +131,8 @@ public abstract class FakeServer : IDisposable
 public sealed class FakeGateway : FakeServer
 {
     public const string Key = "sk-arena-test-key-0123456789";
+    /// <summary>The key it takes (another sign-in may have replaced the one a run started with).</summary>
+    public string Accepted { get; set; } = Key;
     private readonly List<JsonObject> _requests = [];
 
     public string[] Models { get; set; } = ["model-a", "model-b"];
@@ -178,7 +180,7 @@ public sealed class FakeGateway : FakeServer
 
     protected override async Task HandleAsync(HttpListenerContext ctx, string body, CancellationToken ct)
     {
-        if (ctx.Request.Headers["Authorization"] != "Bearer " + Key)
+        if (ctx.Request.Headers["Authorization"] != "Bearer " + Accepted)
         {
             await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "Authentication Error, invalid key" } }, 401);
             return;
