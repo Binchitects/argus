@@ -74,7 +74,8 @@ public sealed record AccountHealth(double? GpuBusy, decimal? IdleCost, decimal M
 /// <summary>Everything Admin → Accounting and its exports show.</summary>
 public sealed record AccountingReport(DateTimeOffset From, DateTimeOffset To, string Basis, CostOptions Settings, RunningCost Running, AccountUse Used, AccountUnit Unit,
     AccountHealth Health, AccountBefore? Before, TimeSpan Interval, IReadOnlyList<AccountBucket> Series, IReadOnlyList<AccountRow> People, IReadOnlyList<AccountRow> Groups,
-    IReadOnlyList<AccountRow> CostCentres, IReadOnlyList<AccountRow> Projects, IReadOnlyList<AccountRow> Models, IReadOnlyList<AccountRow> Sources, IReadOnlyList<AccountRow> Kinds);
+    IReadOnlyList<AccountRow> CostCentres, IReadOnlyList<AccountRow> Projects, IReadOnlyList<AccountRow> Models, IReadOnlyList<AccountRow> Sources, IReadOnlyList<AccountRow> Kinds,
+    IReadOnlyList<AccountRow> Tags);
 
 /// <summary>
 /// The accountant's view (billing.read): over a time, what running the machine cost (<see cref="RunningCost"/>: power
@@ -262,6 +263,19 @@ public static class Accounting
         var sources = rows.GroupBy(r => r.Surface).Select(g => Row("source", null, Projects.ProjectReport.Surface(g.Key), null, null, PeopleIn(g), g)).ToList();
         var kinds = rows.GroupBy(r => r.Kind).Select(g => Row("kind", null, KindName(g.Key), null, null, PeopleIn(g), g)).ToList();
 
+        // By tag: a request counts under each tag of its chat and of its project, once each (so the tags add up to more than the whole).
+        var tagged = (await sql.QueryAsync("""
+            select t.tag, lower(r.person), count(*), coalesce(sum(r.prompt_tokens),0) + coalesce(sum(r.completion_tokens),0), coalesce(sum(r.duration_ms),0) / 1000.0, coalesce(sum(r.cost),0),
+                   coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0), coalesce(sum(r.cached_tokens),0), coalesce(sum(r.completion_tokens),0)
+            from gateway.requests r
+            left join conversations c on c."Id" = r.conversation_id
+            left join work_projects p on p."Id" = r.project_id
+            cross join lateral (select distinct x from unnest(coalesce(c."Tags", '{}'::text[]) || coalesce(p."Tags", '{}'::text[])) x) t(tag)
+            where r.started_at >= @from and r.started_at < @to and r.status <> 'refused'
+            group by 1, 2
+            """, window, ct)).Rows.Select(r => (Tag: (string)r[0]!, Used: new Used((string?)r[1], null, "", "", "", Num(r[2]), Num(r[3]), Dbl(r[4]), Dec(r[5]), Num(r[6]), Num(r[7]), Num(r[8])))).ToList();
+        var tags = tagged.GroupBy(t => t.Tag, StringComparer.Ordinal).Select(g => Row("tag", null, g.Key, null, null, PeopleIn(g.Select(x => x.Used)), g.Select(x => x.Used))).ToList();
+
         var active = byPerson.Keys.Count(k => k.Length > 0);
         var modelHours = Math.Round(allSeconds / 3600, 2);
         var unit = new AccountUnit(
@@ -299,7 +313,8 @@ public static class Accounting
                 Change(prevUse.Tokens, allTokens));
         }
         return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, Math.Round(allCharged, 4), active, rows.Sum(r => r.Input), rows.Sum(r => r.Cached), rows.Sum(r => r.Output)), unit, health, before, interval, series,
-            Ordered(people), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(projects), Ordered(models), Ordered(sources), Ordered(kinds));
+            Ordered(people), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(projects), Ordered(models), Ordered(sources), Ordered(kinds),
+            Ordered(tags));
     }
 
     /// <summary>Each bucket's average GPU draw in watts (from its start), measured; buckets Prometheus has nothing for are left out.</summary>
@@ -432,6 +447,7 @@ public static class Accounting
             Shares("Models", "Model", r.Models),
             Shares("Where it came from", "From", r.Sources),
             Shares("What it was for", "Kind", r.Kinds),
+            Shares("Tags", "Tag", r.Tags, "A request counts under each tag of its chat and its project, so the tags can add up to more than the whole."),
             new("By time", [new("From", ReportKind.Time, 1.4), new("Power", ReportKind.Money), new("Hardware", ReportKind.Money), new("Service", ReportKind.Money),
                     new("Running cost", ReportKind.Money), new("Spend", ReportKind.Money), new("Tokens", ReportKind.Number), new("Requests", ReportKind.Number)],
                 [.. r.Series.Select(b => (object?[])[b.At, b.Power, b.Hardware, b.Service, b.Total, b.Charged, b.Tokens, b.Requests])]),

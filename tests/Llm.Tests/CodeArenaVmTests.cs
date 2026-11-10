@@ -23,7 +23,7 @@ public sealed class CodeArenaVmTests : IDisposable
             printf '%s\n' "$*" >> "$d/vbox.log"
             case "$1" in
             list) echo '"test-vm" {11111111-2222-3333-4444-555555555555}';;
-            showvminfo) echo 'VMState="running"'; echo 'ostype="Ubuntu (64-bit)"';;
+            showvminfo) echo 'VMState="running"'; echo 'ostype="Ubuntu (64-bit)"'; echo 'GuestAdditionsRunLevel=2';;
             guestcontrol)
               while [ $# -gt 0 ] && [ "$1" != "--" ]; do
                 [ "$1" = "--passwordfile" ] && { ls -l "$2" | cut -c1-10 > "$d/mode"; cat "$2" > /dev/null; }

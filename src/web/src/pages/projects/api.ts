@@ -11,6 +11,9 @@ export interface ProjectSummary {
   startsOn: string | null
   dueOn: string | null
   monthlyBudget: number | null
+  /** Its tags (review, security, …), and what it is about (Summarize and tag). */
+  tags?: string[]
+  brief?: string | null
   role: ProjectRole
   owner: string | null
   /** Made by the person, or they (or their groups) are in it; a global one they are not in is not. */

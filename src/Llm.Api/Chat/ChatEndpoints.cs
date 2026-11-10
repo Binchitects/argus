@@ -26,7 +26,7 @@ public sealed record NewConversation(string? Thinking = null, bool? UseCodeIntel
 /// <param name="AssistantId">With this assistant; Guid.Empty takes it away from its assistant.</param>
 public sealed record ConversationChange(string? Title = null, string? Thinking = null, bool? UseCodeIntel = null, string? Model = null,
     string? SystemPrompt = null, double? Temperature = null, double? TopP = null, int? MaxTokens = null, bool? Archived = null, string[]? Tools = null,
-    Guid? AssistantId = null);
+    Guid? AssistantId = null, string[]? Tags = null);
 
 /// <summary>The person's answer to a call waiting for them ("ask before running").</summary>
 public sealed record ToolDecision(bool Allow);
@@ -189,11 +189,11 @@ public static partial class ChatEndpoints
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
         var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300)
-            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil, c.Kind, mine = c.UserId == me.Id, c.WorkProjectId }).ToListAsync();
+            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil, c.Kind, mine = c.UserId == me.Id, c.WorkProjectId, c.Tags }).ToListAsync();
         var now = DateTimeOffset.UtcNow;
         return Results.Ok(list.Select(c => new
         {
-            c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id), codeArena = c.CodeArenaTurnUntil > now,
+            c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.Tags, answering = jobs.IsAnswering(c.Id), codeArena = c.CodeArenaTurnUntil > now,
             isRoom = c.Kind == RoomMember.Room, c.mine, projectId = c.WorkProjectId,
         }));
     }
@@ -481,7 +481,7 @@ public static partial class ChatEndpoints
             // A room's: the person's role, its people and its settings (RoomEndpoints).
             room,
             c.Id, c.Title, c.Thinking, tools, useCodeIntel = tools.Contains("code-intel"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
+            c.CurrentLeafId, c.ArchivedAt, c.Tags, c.Brief, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace, projectId = c.WorkProjectId,
             // A science lab notebook's field (null: a chat).
             labField = c.LabField,
@@ -520,6 +520,10 @@ public static partial class ChatEndpoints
         if (body.Archived is { } archive)
         {
             c.ArchivedAt = archive ? c.ArchivedAt ?? DateTimeOffset.UtcNow : null;
+        }
+        if (body.Tags is { } tags)
+        {
+            c.Tags = Tags.Tagging.Clean(tags);
         }
         if (body.AssistantId is { } aid)
         {

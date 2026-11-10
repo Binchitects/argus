@@ -1247,7 +1247,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             }}
             canvas={id ? { count: canvas.count, open: canvasOpen, onToggle: () => (canvasOpen ? canvas.setOpen(false) : canvas.reveal(canvas.selected)) } : undefined}
             onOpenList={onOpenList}
-            chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt, projectId: data.projectId ?? null, mayMoveProject: !room || room.role === 'owner' } : undefined}
+            chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt, projectId: data.projectId ?? null, mayMoveProject: !room || room.role === 'owner', tags: data.tags ?? [], brief: data.brief ?? null } : undefined}
             onExport={id && path.length && mayUse(config, 'feature.export') ? exportChat : undefined}
             assistant={assistant}
             onMove={id ? (assistantId) => void move(assistantId) : undefined}

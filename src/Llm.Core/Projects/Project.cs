@@ -29,6 +29,10 @@ public sealed class Project
     public int AlertPercent { get; set; } = 80;
     /// <summary>Past the budget, its chats' answers are refused until the month ends or the budget is raised.</summary>
     public bool StopAtBudget { get; set; }
+    /// <summary>Its tags (review, security, …: Tags:Known); accounting groups by them.</summary>
+    public List<string> Tags { get; set; } = [];
+    /// <summary>What it is about in a few sentences, from its chats (Summarize and tag); null until summarized.</summary>
+    public string? Brief { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

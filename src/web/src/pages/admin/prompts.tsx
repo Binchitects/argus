@@ -1,10 +1,12 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { Ban, CircleCheck, CircleStop, CircleX, Clock, Download, FileText, LoaderCircle } from 'lucide-react'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Ban, CircleCheck, CircleStop, CircleX, Clock, Download, FileText, LoaderCircle, Tag } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
+import { TagList, TagsDialog } from '@/components/app/tags'
+import { tagsQuery } from '@/lib/tags'
 import { TimeWindow } from '@/components/app/time-window'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +15,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { formatValue, when } from '@/lib/format'
 import { allTime, reportPresets } from '@/lib/time'
@@ -24,6 +27,11 @@ type State = 'waiting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused'
 
 interface Logged {
   source: 'chat' | 'api'
+  /** The question (a chat's message, an API request's line): what its tags and summary are set on. */
+  id?: string | null
+  /** Its tags (a chat question: its chat's) and what it is about. */
+  tags?: string[]
+  brief?: string | null
   at: string
   person: { id: string; userName: string; displayName: string | null } | null
   model: string | null
@@ -70,7 +78,9 @@ const states: Record<State, { label: string; icon: ReactNode; variant: 'default'
  */
 export function PromptLogPage() {
   const [form, setForm] = useState({ q: '', person: '' })
-  const [search, setSearch] = useState({ q: '', person: '', source: 'all' as Source, state: 'all' as State | 'all' })
+  const [search, setSearch] = useState({ q: '', person: '', source: 'all' as Source, state: 'all' as State | 'all', tag: '' })
+  const [view, setView] = useState('log')
+  const known = useQuery(tagsQuery)
   // When it was asked, in the address; any time until a window is chosen.
   const time = useTimeWindow({ from: allTime.from, to: 'now' })
   const log = useInfiniteQuery({
@@ -82,6 +92,7 @@ export function PromptLogPage() {
       if (search.state !== 'all') p.set('state', search.state)
       if (search.q) p.set('q', search.q)
       if (search.person) p.set('person', search.person)
+      if (search.tag) p.set('tag', search.tag)
       if (pageParam) p.set('before', pageParam)
       return api<{ items: Logged[]; next: string | null }>(`/api/admin/prompts?${p}`, { signal })
     },
@@ -99,6 +110,15 @@ export function PromptLogPage() {
         title="Prompt log"
         description="Everyone's questions and the answers they got, newest first, whatever became of them: running, done, failed, stopped or refused. In the chat (as long as the chats are kept, Code Arena's sessions and rooms among them) and with API keys (Settings: Prompt log of API requests). Every search you make here is in the audit log."
       />
+      <Tabs value={view} onValueChange={setView}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="log">Log</TabsTrigger>
+          <TabsTrigger value="report">Report</TabsTrigger>
+        </TabsList>
+        <TabsContent value="report">
+          <PromptReport />
+        </TabsContent>
+        <TabsContent value="log">
       <form onSubmit={submit} className="mb-5 flex flex-wrap items-end gap-3">
         <Field label="Words" className="w-64">
           <Input value={form.q} onChange={(e) => setForm({ ...form, q: e.target.value })} placeholder="in the question (and an API answer)" />
@@ -118,6 +138,23 @@ export function PromptLogPage() {
                   {states[s].label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Tag" className="w-40">
+          <Select value={search.tag || 'any'} onValueChange={(tag) => setSearch({ ...search, tag: tag === 'any' ? '' : tag })}>
+            <SelectTrigger aria-label="Tag">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any tag</SelectItem>
+              {[...(known.data?.known ?? []), ...(known.data?.used.map((u) => u.tag) ?? [])]
+                .filter((t, n, all) => all.indexOf(t) === n)
+                .map((t) => (
+                  <SelectItem key={t} value={t}>
+                    #{t}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
         </Field>
@@ -149,11 +186,15 @@ export function PromptLogPage() {
           Older
         </Button>
       )}
+        </TabsContent>
+      </Tabs>
     </>
   )
 }
 
 function Entry({ item: i }: { item: Logged }) {
+  const [tagging, setTagging] = useState(false)
+  const queryClient = useQueryClient()
   const s = states[i.state] ?? states.done
   const name = i.person ? (i.person.displayName ?? i.person.userName) : 'someone removed'
   const facts = [
@@ -177,6 +218,7 @@ function Entry({ item: i }: { item: Logged }) {
             <Badge variant="outline">{i.source === 'api' ? 'API' : 'Chat'}</Badge>
             {i.title && <span className="min-w-0 truncate text-muted-foreground">in “{i.title}”</span>}
             {i.deleted && <Badge variant="outline">chat deleted</Badge>}
+            <TagList tags={i.tags} />
           </div>
           {facts.length > 0 && <p className="truncate font-mono text-xs text-muted-foreground">{facts.join(' · ')}</p>}
         </div>
@@ -188,9 +230,34 @@ function Entry({ item: i }: { item: Logged }) {
           <time dateTime={i.at} title={new Date(i.at).toLocaleString()} className="text-xs whitespace-nowrap text-muted-foreground">
             {when(i.at)}
           </time>
+          {i.id && (
+            <Button variant="ghost" size="icon-sm" aria-label="Tags and summary" title={i.source === 'chat' ? 'Tags and summary of its chat' : 'Tags and summary'} onClick={() => setTagging(true)}>
+              <Tag />
+            </Button>
+          )}
         </div>
       </header>
+      {i.id && (
+        <TagsDialog
+          open={tagging}
+          onOpenChange={setTagging}
+          what={i.source === 'chat' ? 'its chat' : 'this request'}
+          tags={i.tags ?? []}
+          brief={i.brief}
+          save={(tags) => api(`/api/admin/prompts/${i.source}/${i.id}/tags`, { method: 'PUT', body: { tags } })}
+          summarize={() => api<{ brief: string | null; tags: string[] }>(`/api/admin/prompts/${i.source}/${i.id}/summarize`, { body: {} })}
+          onDone={() => {
+            void queryClient.invalidateQueries({ queryKey: ['admin', 'prompts'] })
+            void queryClient.invalidateQueries({ queryKey: ['tags'] })
+          }}
+        />
+      )}
       <div className="grid gap-3 p-4 text-sm">
+        {i.brief && (
+          <p dir="auto" className="text-muted-foreground italic" aria-label="Summary">
+            {i.brief}
+          </p>
+        )}
         <Said label="Question" text={i.question} lines={4} />
         {!!i.files?.length && <Files label="With the question" files={i.files} />}
         {i.answer && <Said label={i.state === 'stopped' ? 'Answer, as far as it went' : 'Answer'} text={i.answer} lines={6} answer />}
@@ -291,6 +358,136 @@ function Said({ label, text, lines, answer }: { label: string; text: string; lin
         >
           {open ? 'Show less' : `Show all (${text.length.toLocaleString()} characters)`}
         </button>
+      )}
+    </section>
+  )
+}
+
+interface ReportRow {
+  name: string
+  count: number
+  failed: number
+  stopped: number
+  refused: number
+  averageMs: number | null
+  medianMs: number | null
+  p95Ms: number | null
+  tokens: number
+  api: number
+  chat: number
+}
+
+interface Report {
+  api: number
+  apiFailed: number
+  apiRefused: number
+  chat: number
+  chatFailed: number
+  apiP95Ms: number | null
+  chatP95Ms: number | null
+  apiModels: ReportRow[]
+  chatModels: ReportRow[]
+  people: ReportRow[]
+  tags: ReportRow[]
+  days: ReportRow[]
+}
+
+const percent = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '–')
+const ms = (v: number | null) => (v === null ? '–' : formatValue(v, 'ms'))
+
+/** The prompt log over a window: by model (how they ended, how long they took), the people who asked most, the tags, each day. */
+function PromptReport() {
+  const time = useTimeWindow({ from: 'now-30d', to: 'now' })
+  const report = useQuery({
+    queryKey: ['admin', 'prompts', 'report', time.key],
+    queryFn: ({ signal }) => api<Report>(`/api/admin/prompts/report?${time.query()}`, { signal }),
+  })
+  const r = report.data
+  return (
+    <div className="grid gap-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <TimeWindow value={time.range} onChange={time.set} presets={reportPresets} />
+        <Button variant="outline" asChild>
+          <a href={`/api/admin/prompts/report?${time.query()}&format=csv`} download>
+            <Download /> CSV
+          </a>
+        </Button>
+      </div>
+      {report.error && <QueryError error={report.error} retry={() => report.refetch()} />}
+      {report.isPending && <Skeleton className="h-40" />}
+      {r && (
+        <>
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="In this window">
+            <Fact label="API requests" value={r.api.toLocaleString()} note={`${percent(r.apiFailed, r.api)} failed, ${percent(r.apiRefused, r.api)} refused`} />
+            <Fact label="API 95th percentile" value={ms(r.apiP95Ms)} note="from arrival to end" />
+            <Fact label="Chat questions" value={r.chat.toLocaleString()} note={`${r.chatFailed.toLocaleString()} answers failed`} />
+            <Fact label="Chat 95th percentile" value={ms(r.chatP95Ms)} note="an answer's time" />
+          </dl>
+          <Table title="API requests by model" rows={r.apiModels} timed />
+          <Table title="Chat answers by model" rows={r.chatModels} timed />
+          <Table title="People who asked most" rows={r.people} split />
+          <Table title="By tag" rows={r.tags} split note="A chat's question counts under its chat's tags." />
+          <Table title="By day" rows={r.days} split />
+        </>
+      )}
+    </div>
+  )
+}
+
+function Fact({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="rounded-xl border bg-card p-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-xl font-semibold tabular-nums">{value}</dd>
+      {note && <dd className="text-xs text-muted-foreground">{note}</dd>}
+    </div>
+  )
+}
+
+function Table({ title, rows, timed, split, note }: { title: string; rows: ReportRow[]; timed?: boolean; split?: boolean; note?: string }) {
+  return (
+    <section aria-label={title} className="grid gap-2">
+      <h2 className="text-sm font-medium">{title}</h2>
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing in this window.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-start font-medium">Name</th>
+                <th className="px-3 py-2 text-end font-medium">Count</th>
+                {split && <th className="px-3 py-2 text-end font-medium">API</th>}
+                {split && <th className="px-3 py-2 text-end font-medium">Chat</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">Failed</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">Stopped</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">Average</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">Median</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">95th</th>}
+                {timed && <th className="px-3 py-2 text-end font-medium">Tokens</th>}
+              </tr>
+            </thead>
+            <tbody className="tabular-nums">
+              {rows.map((x) => (
+                <tr key={x.name} className="border-t">
+                  <td dir="auto" className="px-3 py-1.5">
+                    {x.name}
+                  </td>
+                  <td className="px-3 py-1.5 text-end">{x.count.toLocaleString()}</td>
+                  {split && <td className="px-3 py-1.5 text-end">{x.api.toLocaleString()}</td>}
+                  {split && <td className="px-3 py-1.5 text-end">{x.chat.toLocaleString()}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{percent(x.failed, x.count)}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{x.stopped.toLocaleString()}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{ms(x.averageMs)}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{ms(x.medianMs)}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{ms(x.p95Ms)}</td>}
+                  {timed && <td className="px-3 py-1.5 text-end">{x.tokens.toLocaleString()}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )

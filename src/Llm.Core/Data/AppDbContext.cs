@@ -227,6 +227,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
 
         builder.Entity<Conversation>(e =>
         {
+            // Upgrades: rows from before 8.0 have none.
+            e.Property(x => x.Tags).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Brief).HasMaxLength(2000);
             e.ToTable("conversations");
             e.Property(c => c.Title).HasMaxLength(200);
             e.Property(c => c.Thinking).HasMaxLength(20);
@@ -874,6 +877,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         builder.Entity<PromptLogEntry>(e =>
         {
+            // Upgrades: rows from before 8.0 have none.
+            e.Property(x => x.Tags).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Brief).HasMaxLength(2000);
             e.ToTable("prompt_log");
             e.Property(x => x.KeyToken).HasMaxLength(64);
             e.Property(x => x.Model).HasMaxLength(200);
@@ -913,6 +919,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         // Projects: work_projects, as "projects" is the assistants' table (they were called projects).
         builder.Entity<Projects.Project>(e =>
         {
+            // Upgrades: rows from before 8.0 have none.
+            e.Property(x => x.Tags).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Brief).HasMaxLength(2000);
             e.ToTable("work_projects");
             e.Property(x => x.Name).HasMaxLength(100);
             e.Property(x => x.Description).HasMaxLength(2000);

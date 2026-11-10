@@ -1,7 +1,7 @@
-import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Users, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Users, Wrench } from 'lucide-react'
 import { ReadInMenu } from './read-in'
 import { ChatProjectMenu } from '../projects/chat-project'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +22,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
-import { mayUse } from '@/lib/api'
+import { api, mayUse } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { AUTO, assistantsQuery, chatModel, onAuto } from './api'
 import { chatAnswerMost } from './context'
@@ -31,6 +31,7 @@ import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
 import { ChecklistButton } from './checklist-button'
 import { MemoryButton } from './memory'
+import { TagsDialog } from '@/components/app/tags'
 
 const DEFAULT = '__default__'
 
@@ -251,7 +252,7 @@ export function ChatHeader({
   onToggleFiles: () => void
   onOpenList: () => void
   /** The chat on screen, once it exists: fork, archive and delete it from here too. */
-  chat?: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean }
+  chat?: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean; tags?: string[]; brief?: string | null }
   /** Summarize the branch on screen (undefined: nothing to compact now). */
   onCompact?: () => void
   /** Export the branch on screen, or its summary. */
@@ -339,7 +340,7 @@ function ChatMenu({
   onShare,
   onMakeRoom,
 }: {
-  chat: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean }
+  chat: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean; tags?: string[]; brief?: string | null }
   onCompact?: () => void
   onExport?: (kind: ExportKind) => void
   assistant?: HeaderAssistant | null
@@ -349,7 +350,24 @@ function ChatMenu({
 }) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
   const assistants = useQuery({ ...assistantsQuery, enabled: !!onMove })
+  const queryClient = useQueryClient()
+  const [tagging, setTagging] = useState(false)
   return (
+    <>
+    <TagsDialog
+      open={tagging}
+      onOpenChange={setTagging}
+      what="this chat"
+      tags={chat.tags ?? []}
+      brief={chat.brief}
+      save={(tags) => api(`/api/chat/conversations/${chat.id}`, { method: 'PATCH', body: { tags } })}
+      summarize={() => api<{ brief: string | null; tags: string[] }>(`/api/chat/conversations/${chat.id}/summarize`, { body: {} })}
+      onDone={() => {
+        void queryClient.invalidateQueries({ queryKey: ['chat', 'conversation', chat.id] })
+        void queryClient.invalidateQueries({ queryKey: ['chat', 'list'] })
+        void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      }}
+    />
     <DropdownMenu>
       <Tooltip content="More">
         <DropdownMenuTrigger asChild>
@@ -412,6 +430,9 @@ function ChatMenu({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
+        <DropdownMenuItem onSelect={() => setTagging(true)}>
+          <Tag /> Tags and summary…
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => archive.mutate(!chat.archived)}>
           {chat.archived ? <ArchiveRestore /> : <Archive />} {chat.archived ? 'Unarchive' : 'Archive'}
         </DropdownMenuItem>
@@ -421,5 +442,6 @@ function ChatMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
   )
 }

@@ -34,7 +34,7 @@ public static class PromptLogEndpoints
     private sealed record FileRef(Guid Id, string Name, string Kind, string ContentType, long Size);
 
     private sealed record Row(string Source, DateTimeOffset At, Guid Person, string? Model, string Question, string? Answer, Guid? Chat, string? Title, bool Deleted, int? Tokens,
-        string State, string? Error, int? DurationMs, Guid? Id = null, Guid? Answered = null)
+        string State, string? Error, int? DurationMs, Guid? Id = null, Guid? Answered = null, IReadOnlyList<string>? Tags = null, string? Brief = null)
     {
         public IReadOnlyList<FileRef> Asked { get; set; } = [];
         public IReadOnlyList<FileRef> Made { get; set; } = [];
@@ -71,12 +71,13 @@ public static class PromptLogEndpoints
 
     private static string Like(string q) => "%" + q.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%";
 
-    private static async Task<IResult> SearchAsync(string? q, string? person, string? source, string? state, DateTimeOffset? from, DateTimeOffset? to, DateTimeOffset? before,
+    private static async Task<IResult> SearchAsync(string? q, string? person, string? source, string? state, string? tag, DateTimeOffset? from, DateTimeOffset? to, DateTimeOffset? before,
         AppDbContext db, Audit audit, Chat.AnswerJobs jobs, TimeProvider clock, CancellationToken ct)
     {
         source = source is "chat" or "api" ? source : "all";
         state = state is not null && States.Contains(state) ? state : null;
         var text = q?.Trim() is { Length: > 0 } t ? t : null;
+        var tagged = Tags.Tagging.One(tag);
         Guid? who = null;
         if (person?.Trim() is { Length: > 0 } named)
         {
@@ -99,13 +100,17 @@ public static class PromptLogEndpoints
             {
                 questions = questions.Where(x => EF.Functions.ILike(x.m.Content, Like(text), "\\"));
             }
+            if (tagged is not null)
+            {
+                questions = questions.Where(x => x.c.Tags.Contains(tagged));
+            }
             // A chat's question is answered while its chat answers (its newest question), "waiting" included: the line is the answer's.
             if (state is PromptLogEntry.Waiting or PromptLogEntry.Refused)
             {
                 questions = questions.Where(_ => false);
             }
             var asked = await questions.OrderByDescending(x => x.m.CreatedAt).Take(state is null ? Page : Scanned)
-                .Select(x => new { x.m.Id, x.m.Content, x.m.CreatedAt, Person = x.m.AuthorId ?? x.c.UserId, Chat = x.c.Id, x.c.Title, Deleted = x.c.DeletedAt != null, x.m.AttachmentsJson })
+                .Select(x => new { x.m.Id, x.m.Content, x.m.CreatedAt, Person = x.m.AuthorId ?? x.c.UserId, Chat = x.c.Id, x.c.Title, Deleted = x.c.DeletedAt != null, x.m.AttachmentsJson, x.c.Tags, x.c.Brief })
                 .ToListAsync(ct);
             var ids = asked.Select(a => (Guid?)a.Id).ToList();
             // Each question's answer: its first message (whose parent is the question) and the rest of it (AnswerId), its last words.
@@ -130,7 +135,7 @@ public static class PromptLogEndpoints
                     continue;
                 }
                 rows.Add(new Row("chat", a.CreatedAt, a.Person, first?.Model, Cut(Typed(a.Content)), words is null ? null : Cut(words), a.Chat, a.Title, a.Deleted,
-                    tokens > 0 ? tokens : null, now, why, said.LastOrDefault(x => x.AnswerMs is not null)?.AnswerMs, a.Id, first?.Id)
+                    tokens > 0 ? tokens : null, now, why, said.LastOrDefault(x => x.AnswerMs is not null)?.AnswerMs, a.Id, first?.Id, a.Tags, a.Brief)
                 {
                     Asked = [.. Chat.ChatService.ParseIds(a.AttachmentsJson).Select(id => new FileRef(id, "", "", "", 0))],
                 });
@@ -142,13 +147,14 @@ public static class PromptLogEndpoints
         }
         if (source != "chat")
         {
-            var api = db.PromptLog.AsNoTracking().Where(p => p.At < end && p.At >= start && (who == null || p.UserId == who) && (state == null || p.State == state));
+            var api = db.PromptLog.AsNoTracking().Where(p => p.At < end && p.At >= start && (who == null || p.UserId == who) && (state == null || p.State == state)
+                && (tagged == null || p.Tags.Contains(tagged)));
             if (text is not null)
             {
                 api = api.Where(p => EF.Functions.ILike(p.Prompt, Like(text), "\\") || EF.Functions.ILike(p.Answer!, Like(text), "\\"));
             }
             rows.AddRange((await api.OrderByDescending(p => p.At).Take(Page).ToListAsync(ct)).Select(p => new Row("api", p.At, p.UserId, p.Model, Cut(p.Prompt), p.Answer is null ? null : Cut(p.Answer),
-                null, null, false, (p.PromptTokens ?? 0) + (p.CompletionTokens ?? 0) is > 0 and var n ? n : null, p.State, p.Error, p.DurationMs, p.Id)));
+                null, null, false, (p.PromptTokens ?? 0) + (p.CompletionTokens ?? 0) is > 0 and var n ? n : null, p.State, p.Error, p.DurationMs, p.Id, null, p.Tags, p.Brief)));
         }
         var page = rows.OrderByDescending(r => r.At).Take(Page).ToList();
         await FilesAsync(db, page, ct);
@@ -156,7 +162,7 @@ public static class PromptLogEndpoints
         var names = await db.Users.AsNoTracking().Where(u => people.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => new { u.Id, u.UserName, u.DisplayName }, ct);
         await audit.WriteAsync("prompts.viewed", person, detail: string.Join("; ", new[]
         {
-            $"source {source}", state is null ? null : $"state {state}", text is null ? null : $"text \"{text}\"", person is null ? null : $"person {person}",
+            $"source {source}", state is null ? null : $"state {state}", tagged is null ? null : $"tag {tagged}", text is null ? null : $"text \"{text}\"", person is null ? null : $"person {person}",
             from is null ? null : $"from {from.Value.ToString("O", CultureInfo.InvariantCulture)}", to is null ? null : $"to {to.Value.ToString("O", CultureInfo.InvariantCulture)}",
             $"{page.Count} shown",
         }.OfType<string>()));
@@ -164,7 +170,8 @@ public static class PromptLogEndpoints
         {
             items = page.Select(r => new
             {
-                r.Source, r.At, person = names.GetValueOrDefault(r.Person), r.Model, r.Question, r.Answer, r.Chat, r.Title, r.Deleted, r.Tokens, r.State, r.Error, r.DurationMs,
+                r.Source, r.Id, r.At, person = names.GetValueOrDefault(r.Person), r.Model, r.Question, r.Answer, r.Chat, r.Title, r.Deleted, r.Tokens, r.State, r.Error, r.DurationMs,
+                tags = r.Tags ?? [], r.Brief,
                 files = r.Asked.Select(f => new { f.Id, f.Name, f.Kind, f.ContentType, f.Size, url = $"/api/admin/prompts/files/{r.Source}/{f.Id}" }),
                 made = r.Made.Select(f => new { f.Id, f.Name, f.Kind, f.ContentType, f.Size, url = $"/api/admin/prompts/files/{r.Source}/{f.Id}" }),
             }),

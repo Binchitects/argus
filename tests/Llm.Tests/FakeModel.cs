@@ -582,6 +582,11 @@ public sealed class FakeModel : HttpMessageHandler
         {
             chunks = [Delta(new JsonObject { ["content"] = closing }), Finish("stop")];
         }
+        else if (body["messages"]?[0]?["content"]?.ToString().StartsWith("You file work", StringComparison.Ordinal) == true)
+        {
+            // Summarize and tag: a summary, a known tag and one not known (which is dropped).
+            chunks = [Delta(new JsonObject { ["content"] = "Summary: Asks which port Postgres uses.\n" }), Delta(new JsonObject { ["content"] = "Tags: security, made-up" }), Finish("stop")];
+        }
         else if (System.Text.RegularExpressions.Regex.Match(lastUser, @"\[length (\d+)\]") is { Success: true } longest)
         {
             written = int.Parse(longest.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);

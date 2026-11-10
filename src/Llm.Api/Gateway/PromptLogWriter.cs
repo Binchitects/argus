@@ -10,7 +10,8 @@ namespace Llm.Api.Gateway;
 /// then done, failed, stopped (the caller went away) or refused, with its answer or why it failed. The writes never hold a
 /// request up: they run behind it in order, and one that fails is logged and dropped.
 /// </summary>
-public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimeProvider clock, ILogger<PromptLogWriter> logger)
+public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimeProvider clock, Microsoft.Extensions.Options.IOptionsMonitor<AnswerCacheOptions> options,
+    ILogger<PromptLogWriter> logger)
 {
     /// <summary>The question a request asks: its last user message's text (its text parts, for a message of parts).</summary>
     public static string? LastQuestion(JsonObject request)
@@ -102,7 +103,17 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
 
     private static string Short(string s) => s.Length <= 2000 ? s : s[..1999] + "…";
 
-    private static string Cut(string s) => s.Length <= PromptLogEntry.MaxText ? s : s[..(PromptLogEntry.MaxText - 1)] + "…";
+    /// <summary>How much of a question or an answer is kept (Gateway:PromptLogKeep), at most <see cref="PromptLogEntry.MaxText"/>.</summary>
+    private int Keep => Math.Clamp(options.CurrentValue.PromptLogKeep, 200, PromptLogEntry.MaxText);
+
+    private string Cut(string s) => s.Length <= Keep ? s : s[..(Keep - 1)] + "…";
+
+    /// <summary>Whether this model's requests are kept (Gateway:PromptLogModels: one a line or comma; empty: every model).</summary>
+    public bool Logs(string? model)
+    {
+        var only = AnswerCacheOptions.Split(options.CurrentValue.PromptLogModels);
+        return only.Count == 0 || (model is { Length: > 0 } && only.Contains(model, StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// One request's line in the log, written as it goes: its writes run one after another, the first adding it. Null-safe
@@ -161,7 +172,7 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
             var done = state is not (PromptLogEntry.Waiting or PromptLogEntry.Running);
             int? promptTokens = completion?["usage"]?["prompt_tokens"]?.GetValue<int>();
             int? completionTokens = completion?["usage"]?["completion_tokens"]?.GetValue<int>();
-            var said = answer is null ? null : Cut(answer);
+            var said = answer is null ? null : _writer.Cut(answer);
             var why = error is null ? null : Short(error);
             lock (_lock)
             {
@@ -223,7 +234,11 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
     public Line? Begin(Guid person, string? keyToken, JsonObject request)
     {
         var question = LastQuestion(request) ?? "";
-        var pictures = PicturesOf(request);
+        if (!Logs(request["model"]?.GetValue<string>()))
+        {
+            return null;
+        }
+        var pictures = options.CurrentValue.PromptLogPictures ? PicturesOf(request) : [];
         if (question.Length == 0 && pictures.Count == 0)
         {
             return null;

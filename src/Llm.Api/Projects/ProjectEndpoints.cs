@@ -20,7 +20,7 @@ namespace Llm.Api.Projects;
 
 /// <summary>Only what is sent changes. MonthlyBudget: 0 or less takes the budget away; StartsOn and DueOn: "" clears them.</summary>
 public sealed record ProjectRequest(string? Name = null, string? Description = null, bool? Global = null, string? Status = null, string? StartsOn = null, string? DueOn = null,
-    decimal? MonthlyBudget = null, int? AlertPercent = null, bool? StopAtBudget = null);
+    decimal? MonthlyBudget = null, int? AlertPercent = null, bool? StopAtBudget = null, string[]? Tags = null);
 
 public sealed record ProjectMembersRequest(Guid[]? UserIds = null, Guid[]? GroupIds = null, string? Role = null);
 
@@ -170,7 +170,7 @@ public static class ProjectEndpoints
             }
             return new
             {
-                p.Id, p.Name, p.Description, p.Global, p.Status, p.StartsOn, p.DueOn, p.MonthlyBudget, role, owner = ownerNames.GetValueOrDefault(p.OwnerId),
+                p.Id, p.Name, p.Description, p.Global, p.Status, p.StartsOn, p.DueOn, p.MonthlyBudget, p.Tags, p.Brief, role, owner = ownerNames.GetValueOrDefault(p.OwnerId),
                 mine = p.OwnerId == me.Id || mine.Any(x => x.ProjectId == p.Id),
                 members = people.GetValueOrDefault(p.Id) + 1, chats = chats.GetValueOrDefault(p.Id),
                 goals = goals.TryGetValue(p.Id, out var gl) ? gl.All : 0, goalsDone = goals.TryGetValue(p.Id, out var gd) ? gd.Done : 0,
@@ -224,6 +224,10 @@ public static class ProjectEndpoints
         if (body.Description is { } description)
         {
             p.Description = description.Trim();
+        }
+        if (body.Tags is { } tags)
+        {
+            p.Tags = Tags.Tagging.Clean(tags);
         }
         if (body.Global is { } global)
         {
@@ -331,7 +335,7 @@ public static class ProjectEndpoints
         var assigneeNames = (await db.Users.AsNoTracking().Where(u => assignees.Contains(u.Id)).ToListAsync(ct)).ToDictionary(u => u.Id, Name);
         return Results.Ok(new
         {
-            p.Id, p.Name, p.Description, p.Global, p.Status, p.StartsOn, p.DueOn, p.MonthlyBudget, p.AlertPercent, p.StopAtBudget, p.CreatedAt, p.UpdatedAt,
+            p.Id, p.Name, p.Description, p.Global, p.Status, p.StartsOn, p.DueOn, p.MonthlyBudget, p.AlertPercent, p.StopAtBudget, p.Tags, p.Brief, p.CreatedAt, p.UpdatedAt,
             role, ownerId = p.OwnerId, owner = owner is null ? null : Name(owner), isOwner = p.OwnerId == me.Id,
             members, repositories, items = things, chats = shown,
             otherChats = otherOwners.Select(o => new { person = otherNames.GetValueOrDefault(o.Key) ?? "(a former person)", count = o.Count() }),

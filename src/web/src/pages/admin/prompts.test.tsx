@@ -105,4 +105,55 @@ describe('prompt log', () => {
     expect(titles({ ...member, permissions: ['audit.read', 'usage.read'] })).not.toContain('Prompt log')
     expect(titles({ ...member, permissions: ['prompts.review'] })).toContain('Prompt log')
   })
+
+  it('tags a question, summarizes it, searches by tag and reports by model, person and tag', async () => {
+    let tags: string[] = []
+    let brief: string | null = null
+    const calls = fakeApi(admin, {
+      'GET /api/tags': () => ({ json: { known: ['review', 'security'], used: [{ tag: 'later', count: 2 }] } }),
+      'GET /api/admin/prompts': () => ({ json: { items: [{ ...row(0, 'chat'), id: 'm1', tags, brief }], next: null } }),
+      'PUT /api/admin/prompts/chat/m1/tags': (body: { tags: string[] }) => {
+        tags = body.tags
+        return { json: { tags } }
+      },
+      'POST /api/admin/prompts/chat/m1/summarize': () => {
+        brief = 'Asks about the trip.'
+        tags = [...tags, 'security']
+        return { json: { brief, tags } }
+      },
+      'GET /api/admin/prompts/report': () => ({
+        json: {
+          api: 4, apiFailed: 1, apiRefused: 0, chat: 3, chatFailed: 0, apiP95Ms: 2500, chatP95Ms: 4000,
+          apiModels: [{ name: 'Qwen3-4B', count: 4, failed: 1, stopped: 0, refused: 0, averageMs: 1000, medianMs: 900, p95Ms: 2500, tokens: 480, api: 0, chat: 0 }],
+          chatModels: [], people: [{ name: 'Ann', count: 7, failed: 0, stopped: 0, refused: 0, averageMs: null, medianMs: null, p95Ms: null, tokens: 0, api: 4, chat: 3 }],
+          tags: [{ name: 'security', count: 2, failed: 0, stopped: 0, refused: 0, averageMs: null, medianMs: null, p95Ms: null, tokens: 0, api: 0, chat: 2 }], days: [],
+        },
+      }),
+    })
+    renderApp('/admin/prompts')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tags and summary' }))
+    const dialog = await screen.findByRole('dialog', { name: /Tags and summary/ })
+    await userEvent.click(within(dialog).getByRole('button', { name: '+ review' }))
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Tags' }), 'For Later{Enter}')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save tags' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ tags: ['review', 'for-later'] }))
+    expect(await screen.findByText('#for-later')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Tags and summary' }))
+    const again = await screen.findByRole('dialog', { name: /Tags and summary/ })
+    await userEvent.click(within(again).getByRole('button', { name: /Summarize and tag/ }))
+    expect(await within(again).findByLabelText('Summary')).toHaveTextContent('Asks about the trip.')
+    expect(within(again).getByText('#security')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Tag' }))
+    await userEvent.click(await screen.findByRole('option', { name: '#later' }))
+    await waitFor(() => expect(calls.some((c) => c.path.startsWith('/api/admin/prompts?') && c.path.includes('tag=later'))).toBe(true))
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Report' }))
+    const byModel = await screen.findByRole('region', { name: 'API requests by model' })
+    expect(within(byModel).getByRole('row', { name: /Qwen3-4B/ })).toHaveTextContent('25.0%')
+    expect(within(screen.getByRole('region', { name: 'By tag' })).getByRole('row', { name: /security/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /CSV/ })).toHaveAttribute('href', expect.stringContaining('format=csv'))
+  })
 })

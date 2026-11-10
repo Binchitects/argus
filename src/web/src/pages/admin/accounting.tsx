@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 export type Basis = 'spend' | 'tokens' | 'time'
 
 export interface AccountRow {
-  kind: 'person' | 'group' | 'cost centre' | 'project' | 'model' | 'source' | 'kind'
+  kind: 'person' | 'group' | 'cost centre' | 'project' | 'model' | 'source' | 'kind' | 'tag'
   id: string | null
   name: string
   email: string | null
@@ -72,6 +72,7 @@ export interface AccountingReport {
   models: AccountRow[]
   sources: AccountRow[]
   kinds: AccountRow[]
+  tags: AccountRow[]
 }
 
 const bases: { value: Basis; label: string }[] = [
@@ -89,7 +90,7 @@ const kwh = (v: number) => formatValue(v, 'kwatth')
  * Admin → Accounting (billing.read): what running the models cost over a time (power measured on the GPUs and set for the
  * rest, the hardware written off, service), over time and against the window before; what a unit of use costs; the GPUs'
  * idle time and what it cost; a month at this rate; and the cost shared out to groups (with their members), cost centres,
- * people, projects, models, sources and kinds of work. The costs are set in Settings → Costs.
+ * people, projects, models, sources, kinds of work and tags. The costs are set in Settings → Costs.
  */
 export function AccountingPage() {
   const time = useTimeWindow({ from: 'now-30d', to: 'now' })
@@ -267,6 +268,7 @@ export function AccountingPage() {
                 <TabsTrigger value="models">Models</TabsTrigger>
                 <TabsTrigger value="sources">Where it came from</TabsTrigger>
                 <TabsTrigger value="kinds">What it was for</TabsTrigger>
+                <TabsTrigger value="tags">By tag</TabsTrigger>
               </TabsList>
               <TabsContent value="groups">
                 <Shares rows={r.groups} label="Groups" first="Group" credit />
@@ -288,6 +290,15 @@ export function AccountingPage() {
               </TabsContent>
               <TabsContent value="kinds">
                 <Shares rows={r.kinds} label="What it was for" first="Kind" />
+              </TabsContent>
+              <TabsContent value="tags">
+                <Shares
+                  rows={r.tags}
+                  label="By tag"
+                  first="Tag"
+                  empty="No chat or project in this window has a tag. Tag them on the chat's menu or the project's page."
+                />
+                <p className="mt-2 text-xs text-muted-foreground">A request counts under each tag of its chat and its project, so the tags can add up to more than the whole.</p>
               </TabsContent>
             </Tabs>
           </CardContent>

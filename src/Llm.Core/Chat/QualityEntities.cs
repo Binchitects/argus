@@ -51,6 +51,10 @@ public sealed class PromptLogEntry
     /// <summary>From its arrival to its end, the wait for its turn included.</summary>
     public int? DurationMs { get; set; }
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>Its tags (review, security, …: Tags:Known), a reviewer's or the small model's.</summary>
+    public List<string> Tags { get; set; } = [];
+    /// <summary>What it asked and got in a sentence or two (Summarize and tag); null until summarized.</summary>
+    public string? Brief { get; set; }
 
     /// <summary>In line for its turn (the key's, the model's).</summary>
     public const string Waiting = "waiting";

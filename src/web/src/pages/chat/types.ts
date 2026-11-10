@@ -239,6 +239,8 @@ export interface ConversationSummary {
   title: string
   updatedAt: string
   archivedAt?: string | null
+  /** Its tags (review, security, …). */
+  tags?: string[]
   /** An answer is being written (it goes on when the page closes): the page watches it again. */
   answering?: boolean
   assistantId?: string | null
@@ -386,6 +388,8 @@ export interface Conversation extends ConversationSummary {
   maxTokens: number | null
   currentLeafId: string | null
   archivedAt: string | null
+  /** What it is about, from Summarize and tag. */
+  brief?: string | null
   /** The chat this one was forked from, while it still exists. */
   forkedFrom: { id: string; title: string } | null
   /** The assistant the chat is with, if any. */

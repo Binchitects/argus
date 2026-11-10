@@ -24,6 +24,19 @@ public sealed class AnswerCacheOptions
     /// <summary>Gateway:LogPrompts: each API request's last question and answer kept in the prompt log.</summary>
     public bool LogPrompts { get; set; } = true;
 
+    /// <summary>Gateway:PromptLogKeep: how many characters of each question and answer are kept.</summary>
+    public int PromptLogKeep { get; set; } = Llm.Core.Chat.PromptLogEntry.MaxText;
+
+    /// <summary>Gateway:PromptLogPictures: a question's pictures kept with it.</summary>
+    public bool PromptLogPictures { get; set; } = true;
+
+    /// <summary>Gateway:PromptLogModels: only these models' requests kept (one a line or comma); empty: every model's.</summary>
+    public string? PromptLogModels { get; set; }
+
+    /// <summary>A list setting's items: one a line or comma, trimmed, empty ones dropped.</summary>
+    public static List<string> Split(string? list) =>
+        [.. (list ?? "").Split(['\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase)];
+
     /// <summary>off; opt-in: the keys of people who turned it on (Your account); all: every key.</summary>
     public string AnswerCache { get; set; } = AnswerCacheModes.Off;
     /// <summary>How long an answer is kept.</summary>
@@ -386,6 +399,8 @@ public static class AnswerCacheEndpoints
         services.AddSingleton<KeyBook>();
         services.AddSingleton<KeyPeople>();
         services.AddSingleton<PromptLogWriter>();
+        services.Configure<Tags.TagOptions>(config.GetSection("Tags"));
+        services.AddScoped<Tags.TagSummaries>();
         services.AddScoped<OwnKeys>();
         services.AddScoped<ApiKeys>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>

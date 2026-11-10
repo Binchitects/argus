@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AppWindow, Bot, Clock, Coins, ExternalLink, Gauge, FolderGit2, GitMerge, Globe2, Hash, Hourglass, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
+import { AppWindow, Bot, Clock, Coins, ExternalLink, Gauge, FolderGit2, GitMerge, Globe2, Hash, Hourglass, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Tag, Target, Timer, Trash2, Users } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
+import { TagList, TagsDialog } from '@/components/app/tags'
 import { Stat, StatGrid } from '@/components/app/stat'
 import { ExportMenu, TimeWindow } from '@/components/app/time-window'
 import { TimeChart } from '@/components/charts/time-chart'
@@ -112,6 +113,8 @@ export function ProjectPage() {
 export function ProjectView({ id, time, host }: { id: string; time: TimeWindowState; host: ProjectHost }) {
   const project = useQuery(projectQuery(id))
   const [tab, setTab] = useState('overview')
+  const [tagging, setTagging] = useState(false)
+  const queryClient = useQueryClient()
   if (project.isPending) return <PageSkeleton />
   if (project.error) return <QueryError error={project.error} retry={() => project.refetch()} />
   const p = project.data
@@ -128,7 +131,15 @@ export function ProjectView({ id, time, host }: { id: string; time: TimeWindowSt
               </Badge>
             )}
             {p.status === 'archived' && <Badge variant="outline">Archived</Badge>}
+            <TagList tags={p.tags} />
           </span>
+        }
+        actions={
+          p.role !== 'viewer' && (
+            <Button variant="outline" size="sm" onClick={() => setTagging(true)}>
+              <Tag /> Tags and summary
+            </Button>
+          )
         }
         description={
           <>
@@ -137,12 +148,30 @@ export function ProjectView({ id, time, host }: { id: string; time: TimeWindowSt
                 {p.description}
               </span>
             )}
+            {p.brief && (
+              <span dir="auto" className="block text-xs italic">
+                {p.brief}
+              </span>
+            )}
             <span className="text-xs">
               {roleLabels[p.role]} · made by {p.owner ?? 'a former person'}
               {p.dueOn ? ` · due ${new Date(`${p.dueOn}T00:00:00`).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : ''}
             </span>
           </>
         }
+      />
+      <TagsDialog
+        open={tagging}
+        onOpenChange={setTagging}
+        what="the project"
+        tags={p.tags ?? []}
+        brief={p.brief}
+        save={(tags) => api(`/api/projects/${p.id}/tags`, { method: 'PUT', body: { tags } })}
+        summarize={() => api<{ brief: string | null; tags: string[] }>(`/api/projects/${p.id}/summarize`, { body: {} })}
+        onDone={() => {
+          void queryClient.invalidateQueries({ queryKey: projectQuery(id).queryKey })
+          void queryClient.invalidateQueries({ queryKey: ['tags'] })
+        }}
       />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="max-w-full overflow-x-auto">

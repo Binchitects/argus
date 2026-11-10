@@ -1421,7 +1421,26 @@ While any shown is waiting or running, the page looks again every 5 seconds.
   20,000 characters each, one from the answer cache too), its tokens and the
   time from its arrival to its end, its wait for a turn included. **Settings → Data retention → Keep API requests in the prompt log
   for** (90 days by default, 0 forever) keeps them; **Settings → API keys → Prompt log of API
-  requests** off keeps none. Deleting a person deletes theirs.
+  requests** off keeps none. Deleting a person deletes theirs. Also under
+  **Settings → API keys**: **Prompt log: how much of each question and
+  answer** (20,000 characters by default, at least 200), **Prompt log: keep
+  the pictures** (off: only the words) and **Prompt log: only these models**
+  (one a line; empty: every model's).
+
+Each question can carry **tags** (review, security, …; a chat's question
+carries its chat's) and a **summary**: the tag button on its card sets them
+by hand, and **Summarize and tag** has the model for small steps (else your
+default model) write what it is about in a sentence or two and add the known
+tags that fit. **Settings → API keys → Tags** lists the known ones, one a
+line; others may be typed, but Summarize and tag picks only from the list.
+Search by tag with **Tag**. Setting them is in the audit log as
+`prompts.tagged` and `prompts.summarized`.
+
+**Report** shows the log over a time: the API requests by model (how many,
+the share failed, stopped, the time from arrival to end on average, the
+median and the 95th percentile, tokens), the chat's answers by model, the
+people who asked most, the tags and each day; **CSV** saves it. Each report
+is in the audit log as `prompts.report`.
 
 Search by words (in the question, and in an API answer), by person (user name
 or email), by state and by where (all, chat, API); **Older** goes on 50 at a
@@ -1928,7 +1947,9 @@ what running the models really cost over the time chosen, and shares it out.
   share of the use and its part of the running cost. The share is **by
   spend** by default (`Costs:ShareBy`: output, pictures and video weigh more,
   as their prices do), **by tokens** or **by model time**. A person in two
-  groups counts in both, and once in a cost centre.
+  groups counts in both, and once in a cost centre. **By tag** counts a
+  request under each tag of its chat and of its project (once each), so the
+  tags can add up to more than the whole.
 - **Export**: a PDF report, an Excel workbook or a CSV with every figure,
   chart and table, for the time and basis shown; each export is audited.
 

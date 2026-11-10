@@ -63,6 +63,10 @@ public sealed class Conversation
     public float[]? DigestEmbedding { get; set; }
     /// <summary>What the digest covers: the messages up to this one (by their sequence).</summary>
     public int DigestedSequence { get; set; }
+    /// <summary>Its tags (review, security, …: Tags:Known), the person's or the small model's; accounting groups by them.</summary>
+    public List<string> Tags { get; set; } = [];
+    /// <summary>What it is about in a few sentences, for people (Summarize and tag); null until summarized.</summary>
+    public string? Brief { get; set; }
     /// <summary>
     /// Code Arena is answering in this chat until then (its turn, held while it works and renewed as it goes): the web
     /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.

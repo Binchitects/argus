@@ -338,6 +338,14 @@ public static class SettingsCatalog
             { Default = "90", Min = 0, Max = 3650, Unit = "days", Optional = false },
         new("Gateway:LogPrompts", Api, "Prompt log of API requests", "Keeps each API request's last question and its answer, for those with prompts.review (Admin → Prompt log); the chat's questions and answers are there from the chats themselves. Off: API requests are not kept.", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
+        new("Gateway:PromptLogKeep", Api, "Prompt log: how much of each question and answer", "The first so many characters of each API request's last question and of its answer are kept; the rest is cut (…).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20000", Min = 200, Max = 20_000, Unit = "characters", Optional = false },
+        new("Gateway:PromptLogPictures", Api, "Prompt log: keep the pictures", "A question's pictures (sent as data) are kept with its line and go with it. Off: only the words.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
+        new("Gateway:PromptLogModels", Api, "Prompt log: only these models", "One model a line (or comma): only their API requests are kept. Empty: every model's.", SettingType.Text, SettingScope.Live)
+            { Max = 4000, Lines = 3 },
+        new("Tags:Known", Api, "Tags", "The tags people and the small model choose from for chats, projects and prompts (review, security, …), one a line or comma. Others may be typed; these are offered first, and Summarize and tag picks only from them. Accounting → By tag counts each.", SettingType.Text, SettingScope.Live)
+            { Default = "review\nsecurity\nbug\nidea\nquestion\ndocs", Max = 4000, Lines = 6 },
         new("Retention:ToolCallDays", Retention, "Keep the record of tool calls for", "Which tool was called, how long it took, whether it failed (never what was sent): Admin → Tools reads it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "180", Unit = "days", Min = 0, Max = 36500, Optional = false },
         new("Retention:NotificationDays", Retention, "Keep news in the bell for", "People's notifications, read or not. 0: forever.", SettingType.WholeNumber, SettingScope.Live)

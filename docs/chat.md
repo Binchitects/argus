@@ -1014,6 +1014,17 @@ What a project holds:
 An archived project is read only: nothing goes in, its chats answer as
 before. Deleting one leaves its chats their owners', in no project.
 
+### Tags and summaries
+
+A chat (⋯ → **Tags and summary…**) and a project (**Tags and summary**, for
+its contributors and owners) carry **tags**: review, security, bug, or any
+word of yours, at most 10. The known ones (Admin → Settings → API keys →
+Tags) are offered first. **Summarize and tag** has the model for small steps
+(else your default model) read it, write what it is about in a sentence or
+two, and add the known tags that fit; the tags already there stay. Admin →
+Accounting counts the use **By tag**, and Admin → Prompt log searches and
+reports by tag.
+
 ### What a project used
 
 The project's page shows, over the time chosen (see

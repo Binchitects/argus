@@ -1309,6 +1309,10 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("ProjectId");
 
+                    b.Property<string>("Brief")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<DateTimeOffset?>("CodeArenaTurnUntil")
                         .HasColumnType("timestamp with time zone");
 
@@ -1383,6 +1387,12 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("SystemPrompt")
                         .HasMaxLength(20000)
                         .HasColumnType("character varying(20000)");
+
+                    b.PrimitiveCollection<List<string>>("Tags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<double?>("Temperature")
                         .HasColumnType("double precision");
@@ -2253,6 +2263,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset>("At")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Brief")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<int?>("CompletionTokens")
                         .HasColumnType("integer");
 
@@ -2289,6 +2303,12 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.PrimitiveCollection<List<string>>("Tags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
@@ -7462,6 +7482,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("AlertPercent")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Brief")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -7498,6 +7522,12 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<bool>("StopAtBudget")
                         .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<string>>("Tags")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");

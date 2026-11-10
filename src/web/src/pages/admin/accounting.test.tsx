@@ -29,6 +29,7 @@ const report = (basis: AccountingReport['basis']): AccountingReport => ({
   models: [row('model', null, 'qwen3', 1, 1566.92)],
   sources: [row('source', null, 'Chat', 1, 1566.92)],
   kinds: [row('kind', null, 'Chat answers', 1, 1566.92)],
+  tags: [row('tag', null, 'security', 1, 120.5)],
 })
 
 describe('accounting', () => {

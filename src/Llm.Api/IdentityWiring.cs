@@ -709,6 +709,8 @@ public static class IdentityWiring
         Quality.ProductFeedbackEndpoints.MapProductFeedback(app);
         Notifications.BroadcastEndpoints.MapBroadcasts(app);
         Quality.PromptLogEndpoints.MapPromptLog(app);
+        Tags.TagEndpoints.MapTags(app);
+        Quality.PromptLogReport.MapPromptLogReport(app);
         Chat.ChecklistEndpoints.MapChecklists(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
