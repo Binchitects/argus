@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Nodes;
 using Llm.Api.Gateway;
@@ -19,6 +20,24 @@ public sealed class OwnApiTests(AppFixture app)
     private sealed class Given(params Deployment[] given) : IRoutesSource
     {
         public IEnumerable<Deployment> Routes() => given;
+    }
+
+    [Fact]
+    public async Task The_gateway_is_chosen_in_the_settings_and_the_next_request_goes_the_new_way()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("gwmode_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var gateway = f.Services.GetRequiredService<ModelGateway>();
+        Assert.False(gateway.ForChat);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var saved = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new object[] { new { key = "Gateway:Mode", value = "own" } } });
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync());
+        for (var i = 0; i < 100 && !gateway.ForApi; i++)
+        {
+            await Task.Delay(50);
+        }
+        Assert.True(gateway.ForApi);
+        var refused = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new object[] { new { key = "Gateway:Mode", value = "both" } } });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
 
     [Fact]
