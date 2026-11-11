@@ -194,11 +194,12 @@ internal static partial class LocalTools
     ];
 
     /// <summary>run_steps: steps of the plan that wait for nothing not done, run at once.</summary>
-    public static ToolDef RunStepsTool() => new()
+    public static ToolDef RunStepsTool(Func<int> atOnce) => new()
     {
         Name = "run_steps",
         Kind = ToolKind.Agent,
-        Description = "Run 2 to 4 steps of the plan at once, when none waits for another not done. A step with no files (research) goes to a read-only " +
+        Now = () => $" Here 2 to {Math.Max(2, atOnce())} steps at once (the sub-agents Arena's admins allow you at once).",
+        Description = "Run several steps of the plan at once, when none waits for another not done. A step with no files (research) goes to a read-only " +
             "sub-agent; one with files goes to a worker in a git worktree of its own (auto-edit or yolo mode): it edits there and runs only its " +
             "step's check, and its change is merged into the project once the check passed. Each step ends done or blocked (why in its notes); " +
             "you get each one's report.",
@@ -219,10 +220,14 @@ internal static partial class LocalTools
     };
 
     /// <summary>The sub-agent tool: a fresh context of its own, with the reading tools or those named, for work that would crowd the main one.</summary>
-    public static ToolDef SubAgentTool() => new()
+    public static ToolDef SubAgentTool(Func<int> atOnce) => new()
     {
         Name = "task",
         Kind = ToolKind.Agent,
+        // The limit as Arena's admins set it for the person (it can change while the session runs): plan by it.
+        Now = () => atOnce() is var n && n > 1
+            ? $" Here {n} sub-agents run at once (the limit Arena's admins set for you): split independent work into up to {n} task calls in one reply; any more wait their turn."
+            : " Here one sub-agent runs at a time (the limit Arena's admins set for you): more task calls in one reply wait their turn.",
         Description = "Hand a self-contained piece of work to a sub-agent with a fresh context of its own. By default it has the read-only tools (read, search, git, Arena's tools) " +
             "and cannot edit or run commands; name tools (globs of yours, e.g. [\"read_file\", \"edit_file\", \"run_shell\"]) to let it change things: it then never asks the person, " +
             "so what the mode would ask is refused to it, and such sub-agents run one at a time. It returns one report: say exactly what to do and what to report. " +

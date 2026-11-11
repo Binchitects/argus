@@ -76,7 +76,7 @@ public sealed class PermissionTests
 
         // A server the person trusts runs without asking, but is not taken to change nothing.
         Assert.Contains("Plan mode is read-only", await p.CheckAsync(RemoteTool(trusted: true), [], default));
-        var box = new ToolBox([.. LocalTools.All(), LocalTools.SubAgentTool(), RemoteTool(trusted: true), RemoteTool(trusted: false, readOnly: true)]);
+        var box = new ToolBox([.. LocalTools.All(), LocalTools.SubAgentTool(() => 4), RemoteTool(trusted: true), RemoteTool(trusted: false, readOnly: true)]);
         // Every tool in every mode, so the start of the requests stays what the engine has cached: plan mode refuses above.
         var offered = box.Offered().Select(t => t.Name).ToList();
         Assert.Equal(box.All.Select(t => t.Name), offered);

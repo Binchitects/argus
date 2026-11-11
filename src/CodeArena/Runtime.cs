@@ -645,8 +645,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         Jobs.Output += printer.Output;
         Jobs.Ended += printer.Ended;
         var tools = LocalTools.All(Config.Shell);
-        tools.Add(LocalTools.SubAgentTool());
-        tools.Add(LocalTools.RunStepsTool());
+        tools.Add(LocalTools.SubAgentTool(() => Tasks.AtOnce));
+        tools.Add(LocalTools.RunStepsTool(() => Tasks.AtOnce));
         tools.Add(RunCodeTool(this));
         tools.Add(Screenshots.Tool(Env.Options));
         // The VM tools, when VirtualBox, VMware, libvirt or Hyper-V is installed here.

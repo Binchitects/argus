@@ -81,10 +81,13 @@ internal sealed class ToolDef
     /// </summary>
     public string? Group { get; init; }
 
+    /// <summary>What its description says of now, after the description at each request (the sub-agents Arena's admins allow at once).</summary>
+    public Func<string>? Now { get; init; }
+
     public JsonObject Spec() => new()
     {
         ["type"] = "function",
-        ["function"] = new JsonObject { ["name"] = Name, ["description"] = Description, ["parameters"] = Parameters.Clone() },
+        ["function"] = new JsonObject { ["name"] = Name, ["description"] = Description + (Now?.Invoke() ?? ""), ["parameters"] = Parameters.Clone() },
     };
 
     /// <summary>Whether it changes nothing on this machine: what plan mode and sub-agents get.</summary>

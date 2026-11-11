@@ -13,8 +13,8 @@ namespace CodeArena;
 /// </summary>
 internal sealed partial class Runtime
 {
-    /// <summary>The most steps run at once.</summary>
-    public const int MostAtOnce = 4;
+    /// <summary>The most steps run at once: as many as sub-agents may (Arena's admins' limit for the person), two at least.</summary>
+    public int StepsAtOnce => Math.Max(2, Tasks.AtOnce);
 
     /// <summary>The steps a worker or a sub-agent runs as, and what came of each.</summary>
     private sealed record StepRun(WorkStep Step, bool Done, string Said, string Report);
@@ -28,9 +28,9 @@ internal sealed partial class Runtime
             throw new ToolError("The plan waits for the person's review: it is carried out once approved.");
         }
         var asked = numbers.Distinct().ToList();
-        if (asked.Count < 2 || asked.Count > MostAtOnce)
+        if (asked.Count < 2 || asked.Count > StepsAtOnce)
         {
-            throw new ToolError($"run_steps runs 2 to {MostAtOnce} steps at once; carry one step out yourself.");
+            throw new ToolError($"run_steps runs 2 to {StepsAtOnce} steps at once; carry one step out yourself.");
         }
         var steps = new List<WorkStep>();
         foreach (var n in asked)

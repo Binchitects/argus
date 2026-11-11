@@ -68,6 +68,10 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 - Feedback from Code Arena too, with screenshots (pick, paste or capture),
   and answers rated there as in the web chat.
+- Code Arena's sub-agents plan by the limit Arena's admins set for the
+  person (Sub-agents at once): the task tool tells the model the number at
+  each request, so it starts that many in one reply, and `run_steps` takes as
+  many steps.
 - Code Arena keeps itself signed in: a key refused is retried with the newer
   one saved meanwhile.
 - Code Arena: every change the agent made is listed (a command's writes too,

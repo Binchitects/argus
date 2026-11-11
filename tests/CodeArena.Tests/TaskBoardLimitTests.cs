@@ -25,4 +25,26 @@ public sealed class TaskBoardLimitTests
         release.SetResult();
         Assert.Equal("a", await a);
     }
+
+    [Fact]
+    public void The_task_tool_tells_the_model_how_many_sub_agents_run_at_once_as_the_limit_changes()
+    {
+        var board = new TaskBoard();
+        var task = LocalTools.SubAgentTool(() => board.AtOnce);
+        var steps = LocalTools.RunStepsTool(() => board.AtOnce);
+        static string Said(ToolDef t) => t.Spec()["function"]!["description"]!.GetValue<string>();
+        Assert.Contains($"Here {TaskBoard.MostAtOnce} sub-agents run at once", Said(task), StringComparison.Ordinal);
+        Assert.Contains("up to 4 task calls in one reply", Said(task), StringComparison.Ordinal);
+        // Arena's admins give the person 12: the next request says so.
+        board.AtOnce = 12;
+        Assert.Contains("Here 12 sub-agents run at once", Said(task), StringComparison.Ordinal);
+        Assert.Contains("Here 2 to 12 steps at once", Said(steps), StringComparison.Ordinal);
+        board.AtOnce = 1;
+        Assert.Contains("one sub-agent runs at a time", Said(task), StringComparison.Ordinal);
+        Assert.Contains("Here 2 to 2 steps at once", Said(steps), StringComparison.Ordinal);
+        // The person's own words for the tool keep the limit after them.
+        var mine = task.Copy();
+        mine.Description = "Delegate.";
+        Assert.StartsWith("Delegate. Here one sub-agent", Said(mine), StringComparison.Ordinal);
+    }
 }

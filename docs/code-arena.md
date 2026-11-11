@@ -2098,7 +2098,7 @@ On the person's machine:
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
-| `run_steps` | 2 to 4 steps of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
+| `run_steps` | 2 steps or more (as many as the sub-agents you may run at once) of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
 | `run_code` | Python in the chat's own interpreter, kept between calls as a notebook keeps its kernel, calling the session's tools as functions ([below](#code-mode)) |
 
 Several calls in one answer: those that only read run at once; one that
@@ -2523,8 +2523,12 @@ report. It keeps research out of the main context.
   do not allow, in `yolo` it does what the mode allows. Your kept rules and
   Laya apply as they do to the agent.
 - **At once, where it is safe.** Several task calls at once run side by side,
-  four at a time; those that may change files run one at a time, so two
-  never edit the same files together.
+  as many at a time as Arena's admins let you (Admin → People and Groups:
+  Sub-agents at once; four when they set nothing, "no limit" is 32); those
+  that may change files run one at a time, so two never edit the same files
+  together. The model is told that number at every request, so it splits
+  independent work into that many task calls in one reply; a change by an
+  admin applies from the next request.
 - **As whom.** `agent` names one of your or the project's own sub-agents
   ([below](#your-own-commands-sub-agents-and-skills)); `assistant` one of your
   Arena assistants ([below](#assistants)), with its instructions, model,
