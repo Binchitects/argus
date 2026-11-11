@@ -1987,7 +1987,7 @@ what running the models really cost over the time chosen, and shares it out.
   chart and table, for the time and basis shown; each export is audited.
 
 The GPUs' busy time, idle time, energy and what held work back are on the
-Hardware dashboard's **GPU time and what holds work back** section.
+Hardware dashboard's **GPU time and what holds work back, in the time window** section.
 
 ### Line
 
@@ -2041,11 +2041,18 @@ at once taken) is not in the model's line yet, and is not shown.
 The dashboards come in three areas, each seen with its own permission, so a
 role can give one without the others (Admin → Access → Roles):
 
+A dashboard's header stats are marked **Now**: they show the value at this
+moment, whatever time window is picked, and refresh with the page. Totals
+over a window (requests, tokens, spend, tool calls) are under a heading that
+says **in the time window**. A panel file marks a live stat with
+`"live": true`; only a Prometheus stat or gauge that reads nothing of the
+window (`$__range` and the like) may be live.
+
 | area | its dashboard | in detail | permission |
 |---|---|---|---|
 | the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the stack's throughput and a request's speed, and who uses what (per person, tokens, cost and speed, refused by rate limits) | LLM Overview, Stack Performance, Farzan Graph (Usage by person is on Usage) | `usage.read` |
 | the system | **System**: targets up and down, alerts firing, the line, each service's requests, server errors and response time (p95, through Traefik), the host | Stack Health & Alerts, Host, Logs, Indexing | `monitoring.read` |
-| the hardware | **Hardware**: GPU utilisation, memory, temperature, fan, power against its limit, clocks and throttling; **GPU time and what holds work back**: GPU time busy and idle (all GPUs added together), the busiest hour, the energy the GPUs used, the time people waited in line, the share of the window each limit held work back (GPUs saturated, someone waiting, context cache full, VRAM full, heat or power, CPU) and what to do about each, hour-by-hour busy, the busiest hours of the week and each hour of the day (from the gateway's requests, in the server's time); CPU by mode and per core, load, clock and temperature; memory, swap, disks, disk I/O, network, NVMe temperature | GPU Hardware, Resources | `hardware.read` |
+| the hardware | **Hardware**: GPU utilisation, memory, temperature, fan, power against its limit, clocks and throttling; **GPU time and what holds work back, in the time window**: GPU time busy and idle (all GPUs added together), the busiest hour, the energy the GPUs used, the time people waited in line, the share of the window each limit held work back (GPUs saturated, someone waiting, context cache full, VRAM full, heat or power, CPU) and what to do about each, hour-by-hour busy, the busiest hours of the week and each hour of the day (from the gateway's requests, in the server's time); CPU by mode and per core, load, clock and temperature; memory, swap, disks, disk I/O, network, NVMe temperature | GPU Hardware, Resources | `hardware.read` |
 
 The Supervisor and Operator roles hold all three; an Owner, every
 permission. Each file names its area and permission (`"area"`,

@@ -81,7 +81,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -135,7 +136,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -183,7 +185,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -233,7 +236,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -282,7 +286,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -330,7 +335,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "row",
@@ -399,7 +405,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -456,7 +463,8 @@
         "w": 4,
         "x": 4,
         "y": 5
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -510,7 +518,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -568,7 +577,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -626,7 +636,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -684,7 +695,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -739,7 +751,8 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      }
+      },
+      "live": true
     },
     {
       "type": "row",
@@ -1375,7 +1388,7 @@
     },
     {
       "type": "row",
-      "title": "GPU time and what holds work back",
+      "title": "GPU time and what holds work back, in the time window",
       "collapsed": false,
       "panels": [],
       "gridPos": {

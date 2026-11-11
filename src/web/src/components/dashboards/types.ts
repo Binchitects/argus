@@ -25,6 +25,8 @@ export interface PanelDef {
   emptyText?: string
   supported: boolean
   datasources: string[]
+  /** The app's own: the value now, whatever the time window (a header's stats); the server asks it so. */
+  live?: boolean
   fieldConfig?: {
     defaults?: {
       unit?: string

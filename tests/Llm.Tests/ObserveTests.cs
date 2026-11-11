@@ -72,6 +72,24 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_header_stat_is_live_the_value_now_whatever_time_window_the_page_asks_for()
+    {
+        var b = await Admin();
+        var d = await b.JsonAsync(await b.GetAsync("/api/dashboards/stack-performance"));
+        var panel = d.GetProperty("panels").EnumerateArray().First(p => p.TryGetProperty("title", out var t) && t.GetString() == "Active requests");
+        Assert.True(panel.GetProperty("live").GetBoolean());
+        // A window a year back: the value asked is still the one now, an instant query.
+        var before = DateTimeOffset.UtcNow;
+        var res = await b.Http.PostAsJsonAsync(new Uri($"/api/dashboards/stack-performance/panels/{panel.GetProperty("key").GetInt32()}/query", UriKind.Relative),
+            new { from = before.AddDays(-400).AddHours(1), to = before.AddDays(-399) });
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        var asked = Assert.Single(app.Observe.To("/api/v1/query"));
+        var at = DateTimeOffset.FromUnixTimeMilliseconds((long)(double.Parse(asked.Args["time"]!, CultureInfo.InvariantCulture) * 1000));
+        Assert.InRange(at, before.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.Empty(app.Observe.To("/api/v1/query_range"));
+    }
+
+    [Fact]
     public async Task A_prometheus_panel_asks_on_the_step_grid_and_names_series_by_the_legend()
     {
         var b = await Admin();

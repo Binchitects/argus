@@ -35,7 +35,8 @@ public sealed record Variable(
 /// <summary>One query of a panel. Never sent to the browser.</summary>
 public sealed record PanelTarget(string RefId, string Datasource, string? RawSql, string Format, string? Expr = null, string? LegendFormat = null, bool Instant = false);
 
-public sealed record Panel(int Key, string Type, string? Title, JsonObject Definition, IReadOnlyList<PanelTarget> Targets, TimeSpan? MinInterval = null);
+/// <param name="Live">The app's own "live": the value now, whatever time window the page shows (a header's stats).</param>
+public sealed record Panel(int Key, string Type, string? Title, JsonObject Definition, IReadOnlyList<PanelTarget> Targets, TimeSpan? MinInterval = null, bool Live = false);
 
 /// <param name="Permission">Who may see it (the file's "permission"; monitoring.read when it names none).</param>
 /// <param name="Area">Where the Dashboards page lists it: "llm" (the model and its users), "system" or "hardware".</param>
@@ -91,7 +92,7 @@ public sealed class DashboardStore(IOptions<DashboardOptions> options)
             definition["key"] = panels.Count;
             definition["datasources"] = new JsonArray([.. targets.Select(t => JsonValue.Create(t.Datasource)).Distinct()]);
             panels.Add(new Panel(panels.Count, p["type"]?.GetValue<string>() ?? "", p["title"]?.GetValue<string>(), definition, targets,
-                Interpolation.ParseDuration(p["interval"]?.GetValue<string>())));
+                Interpolation.ParseDuration(p["interval"]?.GetValue<string>()), p["live"]?.GetValue<bool>() == true));
         }
         var variables = (d["templating"]?["list"] as JsonArray ?? []).OfType<JsonObject>().Select(v => new Variable(
             v["name"]?.GetValue<string>() ?? "",

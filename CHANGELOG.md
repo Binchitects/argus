@@ -94,6 +94,9 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 - `code-arena -C DIR` (`--folder`) runs in that folder.
 - The dashboards and the manual are written with the default names and shown
   with the names built.
+- A dashboard's header stats are the value now (marked **Now**): the time
+  window does not change them. Totals of a window sit under a heading that
+  says so ("In the time window").
 
 ### :bug: Bugs fixed
 

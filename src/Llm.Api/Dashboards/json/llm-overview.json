@@ -47,7 +47,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -104,7 +104,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -161,7 +161,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -218,7 +218,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -275,7 +275,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -333,7 +333,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 4,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -395,7 +395,7 @@
       "description": "Every request the gateway served, whichever engine answered it.",
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 14,
         "w": 12,
         "h": 8
       },
@@ -450,7 +450,7 @@
       "description": "From the ledger: each kind of token a second over each interval, every model and engine, by when its request started.",
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 14,
         "w": 12,
         "h": 8
       },
@@ -505,7 +505,7 @@
       "description": "End-to-end, as the CLIENT experienced it -- queueing and gateway overhead included.",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -560,7 +560,7 @@
       "description": "Prefill. On a 128K window this dominates: ~164s measured for a 114K-token prompt.",
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -615,7 +615,7 @@
       "description": "From nvidia-smi, so it reports whichever engine holds the card.",
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 30,
         "w": 12,
         "h": 8
       },
@@ -669,7 +669,7 @@
       "description": "Weights plus KV cache. A window that spills to system RAM shows here as a total that stops growing while generation slows.",
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 30,
         "w": 12,
         "h": 8
       },
@@ -732,7 +732,7 @@
       "description": "Per model: requests, tokens, the share of prompt tokens read from the engine's cache, the median time and the spend.",
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 38,
         "w": 12,
         "h": 9
       },
@@ -770,7 +770,7 @@
       "description": "The raw rows. If a number above looks wrong, it is wrong here first.",
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 38,
         "w": 12,
         "h": 9
       },
@@ -804,7 +804,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 47,
         "w": 24,
         "h": 1
       },
@@ -819,9 +819,9 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 42,
-            "w": 12,
-            "h": 7
+            "y": 5,
+            "w": 6,
+            "h": 4
           },
           "targets": [
             {
@@ -862,7 +862,8 @@
               "fields": "",
               "values": false
             }
-          }
+          },
+          "live": true
         },
         {
           "type": "stat",
@@ -873,10 +874,10 @@
             "uid": "prometheus"
           },
           "gridPos": {
-            "x": 12,
-            "y": 42,
-            "w": 12,
-            "h": 7
+            "x": 6,
+            "y": 5,
+            "w": 6,
+            "h": 4
           },
           "targets": [
             {
@@ -918,7 +919,8 @@
               "fields": "",
               "values": false
             }
-          }
+          },
+          "live": true
         },
         {
           "type": "gauge",
@@ -929,10 +931,10 @@
             "uid": "prometheus"
           },
           "gridPos": {
-            "x": 0,
-            "y": 49,
-            "w": 12,
-            "h": 7
+            "x": 12,
+            "y": 5,
+            "w": 6,
+            "h": 4
           },
           "targets": [
             {
@@ -974,7 +976,8 @@
               "fields": "",
               "values": false
             }
-          }
+          },
+          "live": true
         },
         {
           "type": "stat",
@@ -985,10 +988,10 @@
             "uid": "prometheus"
           },
           "gridPos": {
-            "x": 12,
-            "y": 49,
-            "w": 12,
-            "h": 7
+            "x": 18,
+            "y": 5,
+            "w": 6,
+            "h": 4
           },
           "targets": [
             {
@@ -1018,7 +1021,8 @@
               "fields": "",
               "values": false
             }
-          }
+          },
+          "live": true
         },
         {
           "type": "timeseries",
@@ -1030,7 +1034,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 56,
+            "y": 62,
             "w": 12,
             "h": 7
           },
@@ -1102,7 +1106,7 @@
           },
           "gridPos": {
             "x": 12,
-            "y": 56,
+            "y": 62,
             "w": 12,
             "h": 7
           },
@@ -1142,6 +1146,30 @@
           }
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Now",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "panels": []
+    },
+    {
+      "type": "row",
+      "title": "In the time window",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "panels": []
     }
   ]
 }

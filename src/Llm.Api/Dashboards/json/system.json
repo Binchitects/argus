@@ -74,7 +74,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -126,7 +127,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -181,7 +183,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -207,7 +210,8 @@
         "w": 4,
         "x": 12,
         "y": 1
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -233,7 +237,8 @@
         "w": 4,
         "x": 16,
         "y": 1
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -259,7 +264,8 @@
         "w": 4,
         "x": 20,
         "y": 1
-      }
+      },
+      "live": true
     },
     {
       "type": "table",
@@ -599,7 +605,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -656,7 +663,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -699,7 +707,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -741,7 +750,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "timeseries",

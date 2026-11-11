@@ -59,6 +59,35 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
         select (d, p, t);
 
     [Fact]
+    public void A_dashboards_header_stats_show_the_value_now_and_a_live_panel_never_reads_the_window()
+    {
+        static int Y(Panel p) => p.Definition["gridPos"]!["y"]!.GetValue<int>();
+        foreach (var d in Store.All())
+        {
+            // A live panel is the value now: Prometheus, and nothing of the window ($__range and the like) in it.
+            foreach (var p in d.Panels.Where(p => p.Live))
+            {
+                Assert.True(p.Type is "stat" or "gauge", $"{d.Uid} / {p.Title}: only a stat or a gauge is live");
+                Assert.All(p.Targets, t => Assert.True(t.Datasource == PromDatasource.Uid && !t.Expr!.Contains("$__", StringComparison.Ordinal),
+                    $"{d.Uid} / {p.Title}: a live panel reads the window: {t.Expr}"));
+            }
+            // The first stats on the page are live, or under a heading that says they are of the window.
+            var stats = d.Panels.Where(p => p.Type is "stat" or "gauge").ToList();
+            if (stats.Count == 0)
+            {
+                continue;
+            }
+            var first = stats.Min(Y);
+            var heading = d.Panels.Where(p => p.Type == "row" && Y(p) < first).MaxBy(Y)?.Title ?? "";
+            foreach (var p in stats.Where(p => Y(p) == first))
+            {
+                Assert.True(p.Live || heading.Contains("in the time window", StringComparison.OrdinalIgnoreCase),
+                    $"{d.Uid} / {p.Title}: a header stat that follows the time window (heading \"{heading}\")");
+            }
+        }
+    }
+
+    [Fact]
     public void No_dashboard_names_the_hardware_of_one_machine()
     {
         var files = Directory.GetFiles(AppFixture.DashboardsPath, "*.json");

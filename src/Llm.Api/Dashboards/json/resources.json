@@ -87,7 +87,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -144,7 +145,8 @@
           "values": false
         }
       },
-      "description": "Memory that programs hold and the system cannot take back (100% minus MemAvailable). The models' files that the engine maps sit in the page cache, not here: Memory below shows it. When a model is bigger than RAM and the GPU, that page cache is full and the model is read from disk as it runs (Admin -> Models)."
+      "description": "Memory that programs hold and the system cannot take back (100% minus MemAvailable). The models' files that the engine maps sit in the page cache, not here: Memory below shows it. When a model is bigger than RAM and the GPU, that page cache is full and the model is read from disk as it runs (Admin -> Models).",
+      "live": true
     },
     {
       "type": "gauge",
@@ -195,7 +197,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -251,7 +254,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "gauge",
@@ -310,7 +314,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -358,7 +363,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "row",
@@ -1308,7 +1314,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "stat",
@@ -1366,7 +1373,8 @@
           "fields": "",
           "values": false
         }
-      }
+      },
+      "live": true
     },
     {
       "type": "timeseries",

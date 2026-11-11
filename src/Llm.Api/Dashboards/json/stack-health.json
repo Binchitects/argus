@@ -3,39 +3,86 @@
   "permission": "monitoring.read",
   "area": "system",
   "title": "Stack Health & Alerts",
-  "tags": ["llmservice", "meta"],
+  "tags": [
+    "llmservice",
+    "meta"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "editable": true,
   "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
-  "templating": { "list": [] },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
       "type": "stat",
       "title": "Targets up",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
-      "targets": [{ "refId": "A", "expr": "sum(up)", "legendFormat": "up" }],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(up)",
+          "legendFormat": "up"
+        }
+      ],
       "fieldConfig": {
-        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } },
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
         "overrides": []
       },
       "options": {
         "graphMode": "none",
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "live": true
     },
     {
       "type": "stat",
       "title": "Required targets down",
       "description": "Optional targets (disabled compose profiles) are excluded.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(up{tier!=\"optional\"} == bool 0)", "legendFormat": "down" }
+        {
+          "refId": "A",
+          "expr": "sum(up{tier!=\"optional\"} == bool 0)",
+          "legendFormat": "down"
+        }
       ],
       "fieldConfig": {
         "defaults": {
@@ -43,8 +90,14 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           }
         },
@@ -53,16 +106,35 @@
       "options": {
         "graphMode": "none",
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "live": true
     },
     {
       "type": "stat",
       "title": "Alerts firing",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(ALERTS{alertstate=\"firing\"}) or vector(0)", "legendFormat": "firing" }
+        {
+          "refId": "A",
+          "expr": "sum(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "legendFormat": "firing"
+        }
       ],
       "fieldConfig": {
         "defaults": {
@@ -70,9 +142,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 3 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
             ]
           }
         },
@@ -81,51 +162,116 @@
       "options": {
         "graphMode": "none",
         "colorMode": "background",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "live": true
     },
     {
       "type": "stat",
       "title": "Active series",
       "description": "TSDB cardinality. If this climbs without bound you have a label with unbounded values.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
-        { "refId": "A", "expr": "prometheus_tsdb_head_series", "legendFormat": "series" }
+        {
+          "refId": "A",
+          "expr": "prometheus_tsdb_head_series",
+          "legendFormat": "series"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } },
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
         "overrides": []
       },
       "options": {
         "graphMode": "area",
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "live": true
     },
     {
       "type": "stat",
       "title": "TSDB size on disk",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "targets": [
-        { "refId": "A", "expr": "prometheus_tsdb_storage_blocks_bytes", "legendFormat": "bytes" }
+        {
+          "refId": "A",
+          "expr": "prometheus_tsdb_storage_blocks_bytes",
+          "legendFormat": "bytes"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "bytes", "color": { "mode": "fixed", "fixedColor": "purple" } },
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
         "overrides": []
       },
       "options": {
         "graphMode": "area",
         "colorMode": "value",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
-      }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "live": true
     },
     {
       "type": "table",
       "title": "Firing alerts",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -138,26 +284,67 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true, "Value": true, "alertstate": true, "stack": true },
-            "renameByName": { "alertname": "Alert", "severity": "Severity", "component": "Component", "instance": "Instance" }
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "Value": true,
+              "alertstate": true,
+              "stack": true
+            },
+            "renameByName": {
+              "alertname": "Alert",
+              "severity": "Severity",
+              "component": "Component",
+              "instance": "Instance"
+            }
           }
         }
       ],
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "options": { "showHeader": true }
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "type": "table",
       "title": "Scrape targets",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
-      "targets": [{ "refId": "A", "expr": "up", "instant": true, "format": "table" }],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up",
+          "instant": true,
+          "format": "table"
+        }
+      ],
       "transformations": [
         {
           "id": "organize",
           "options": {
-            "excludeByName": { "Time": true, "__name__": true, "stack": true },
-            "renameByName": { "job": "Job", "instance": "Instance", "tier": "Tier", "component": "Component", "Value": "Up" }
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "stack": true
+            },
+            "renameByName": {
+              "job": "Job",
+              "instance": "Instance",
+              "tier": "Tier",
+              "component": "Component",
+              "Value": "Up"
+            }
           }
         }
       ],
@@ -165,19 +352,30 @@
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Up" },
+            "matcher": {
+              "id": "byName",
+              "options": "Up"
+            },
             "properties": [
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-background" }
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "red", "value": null },
-                    { "color": "green", "value": 1 }
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
                   ]
                 }
               }
@@ -185,14 +383,24 @@
           }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "type": "timeseries",
       "title": "Scrape duration by job",
       "description": "A job creeping toward the 10s scrape_timeout will start producing gaps.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
       "targets": [
         {
           "refId": "A",
@@ -203,17 +411,36 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
     },
     {
       "type": "timeseries",
       "title": "Samples ingested per second",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
       "targets": [
         {
           "refId": "A",
@@ -224,11 +451,22 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2, "showPoints": "never" }
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
     }
   ]
 }

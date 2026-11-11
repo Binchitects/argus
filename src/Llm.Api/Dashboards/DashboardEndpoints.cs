@@ -49,8 +49,8 @@ public static partial class DashboardEndpoints
             ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
             store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await VariablesAsync(uid, from, to, store, prom, loki, ct));
         g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
-            IOptions<DashboardOptions> options, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
-            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, ledger, prom, loki, options, ct));
+            IOptions<DashboardOptions> options, TimeProvider clock, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
+            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, ledger, prom, loki, options, clock, ct));
     }
 
     /// <summary>Whether the person may see this dashboard: its permission (an Owner has every one).</summary>
@@ -169,7 +169,7 @@ public static partial class DashboardEndpoints
     private static partial Regex LabelValues();
 
     private static async Task<IResult> QueryAsync(string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
-        IOptions<DashboardOptions> options, CancellationToken ct)
+        IOptions<DashboardOptions> options, TimeProvider clock, CancellationToken ct)
     {
         if (store.Find(uid) is not { } d || key < 0 || key >= d.Panels.Count)
         {
@@ -183,6 +183,12 @@ public static partial class DashboardEndpoints
         if (!Supported(panel))
         {
             return AuthEndpoints.Problem(400, "unsupported", "This panel's datasource is not served by the app.");
+        }
+        if (panel.Live)
+        {
+            // The value now: the window the page shows does not change it.
+            var now = clock.GetUtcNow();
+            q = q with { From = now.AddHours(-1), To = now };
         }
         // As Grafana: the bucket is (range / points) rounded to a nice size, unless the caller fixed it.
         var interval = q.IntervalMs is > 0
@@ -253,7 +259,8 @@ public static partial class DashboardEndpoints
     {
         var step = Interpolation.Step(interval, panel.MinInterval ?? o.ScrapeInterval);
         var expr = Interpolation.Expand(t.Expr!, q.From, q.To, step, o.ScrapeInterval, vars, loki: false);
-        if (t.Instant)
+        // A live panel's value is the one now; its sparkline (graphMode area) keeps the last hour.
+        if (t.Instant || (panel.Live && panel.Definition["options"]?["graphMode"]?.GetValue<string>() != "area"))
         {
             var at = await prom.InstantAsync(expr, q.To, ct);
             return t.Format == "table"

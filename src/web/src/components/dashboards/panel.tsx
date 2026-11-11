@@ -62,6 +62,13 @@ function Frame({ panel, action, children, className, compact, level = 3 }: { pan
             <span className={compact ? 'line-clamp-2 break-words' : 'truncate'} title={panel.title}>
               {panel.title}
             </span>
+            {panel.live && (
+              <Tooltip content="The value now: the time window does not change it.">
+                <span className="mt-0.5 shrink-0 rounded-full bg-success/12 px-1.5 text-[0.625rem] leading-4 font-semibold tracking-wide text-success-ink uppercase" tabIndex={0}>
+                  Now
+                </span>
+              </Tooltip>
+            )}
             {panel.description && (
               <Tooltip content={panel.description}>
                 <button type="button" className="mt-0.5 shrink-0 rounded text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`About ${panel.title}`}>
@@ -89,13 +96,14 @@ function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
 }) {
   const [asTable, setAsTable] = useState(false)
   const data = useQuery({
-    queryKey: ['panel', uid, panel.key, range.from, range.to, tick, JSON.stringify(vars)],
+    // A live panel shows the value now: the window is not part of what it asks.
+    queryKey: ['panel', uid, panel.key, ...(panel.live ? ['now'] : [range.from, range.to]), tick, JSON.stringify(vars)],
     enabled: panel.supported,
     // A refresh keeps what is on screen until the new answer is in.
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
-      const from = resolve(range.from)
-      const to = resolveEnd(range.to)
+      const from = resolve(panel.live ? 'now-1h' : range.from)
+      const to = resolveEnd(panel.live ? 'now' : range.to)
       // As Grafana: roughly one bucket per 3 px of a full-width panel.
       const points = Math.round(((panel.gridPos?.w ?? 24) / 24) * 400)
       return api<PanelData>(`/api/dashboards/${uid}/panels/${panel.key}/query`, {

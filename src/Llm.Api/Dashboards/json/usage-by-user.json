@@ -49,7 +49,7 @@
       "description": "",
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -106,7 +106,7 @@
       "description": "Requests the gateway took, every surface. A refused request (a rate limit, credit or a budget, the safeguards) is not counted: it is under Refused.",
       "gridPos": {
         "x": 4,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -163,7 +163,7 @@
       "description": "",
       "gridPos": {
         "x": 8,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -220,7 +220,7 @@
       "description": "",
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -278,7 +278,7 @@
       "description": "Share of requests that resolve to a real person. Anything short of 100% is usage nobody is accountable for.",
       "gridPos": {
         "x": 16,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -344,7 +344,7 @@
       "description": "Unowned and unbounded. Should be zero in steady state.",
       "gridPos": {
         "x": 20,
-        "y": 8,
+        "y": 9,
         "w": 4,
         "h": 4
       },
@@ -405,7 +405,7 @@
       "description": "One row per person, API and web UI summed. This is the number to bill, quota or argue about.",
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 13,
         "w": 12,
         "h": 9
       },
@@ -443,7 +443,7 @@
       "description": "The key inventory. LiteLLM shows only a masked key_name -- the full key is shown once at creation and never stored in the clear.",
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 13,
         "w": 12,
         "h": 9
       },
@@ -481,7 +481,7 @@
       "description": "",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -535,7 +535,7 @@
       "description": "API keys, the web UI's shared key, and anything still riding the master key -- side by side.",
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -589,7 +589,7 @@
       "description": "What each person spent since the start of this month, one row for each kind of credit (the chat, API keys, pictures, video, speech). Their credits and their groups' are set under People and Groups -- see docs/USAGE-LIMITS.md.",
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 30,
         "w": 12,
         "h": 9
       },
@@ -627,7 +627,7 @@
       "description": "Requests that resolve to nobody. Almost always the master key in a client config -- replace it with a per-person key.",
       "gridPos": {
         "x": 12,
-        "y": 29,
+        "y": 30,
         "w": 12,
         "h": 9
       },
@@ -665,7 +665,7 @@
       "description": "Requests the gateway refused before any model: a key's rate limits (requests or tokens a minute, requests at once), credit or a budget, the safeguards, a key unknown, blocked or expired, a model the key may not use, no room on the model. Who, with which key, why, how often and when last. They are not counted as requests or failures in the other panels. The gateway keeps no prompt or answer with a refusal.",
       "gridPos": {
         "x": 0,
-        "y": 38,
+        "y": 39,
         "w": 24,
         "h": 8
       },
@@ -703,7 +703,7 @@
       "description": "The raw rows with the person and key resolved. If a total above looks wrong, it is wrong here first.",
       "gridPos": {
         "x": 0,
-        "y": 46,
+        "y": 47,
         "w": 24,
         "h": 9
       },
@@ -737,7 +737,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 55,
+        "y": 56,
         "w": 24,
         "h": 1
       },
@@ -753,7 +753,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -800,7 +800,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -847,7 +847,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -894,7 +894,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -941,7 +941,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -988,7 +988,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 56,
+        "y": 57,
         "w": 4,
         "h": 4
       },
@@ -1034,7 +1034,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 60,
+        "y": 61,
         "w": 24,
         "h": 9
       },
@@ -1082,7 +1082,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 69,
+        "y": 70,
         "w": 12,
         "h": 8
       },
@@ -1128,7 +1128,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 69,
+        "y": 70,
         "w": 12,
         "h": 8
       },
@@ -1164,6 +1164,18 @@
           "placement": "bottom"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "In the time window",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "panels": []
     }
   ]
 }
