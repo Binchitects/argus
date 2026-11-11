@@ -1,6 +1,6 @@
 namespace Llm.Api.Reports;
 
-/// <summary>How a column's values read: text, a whole number, money (dollars), hours (from seconds), a percent (0 to 100) or a time.</summary>
+/// <summary>How a column's values read: text, a whole number, money (dollars), hours (from seconds), a percent (0 to 100), a time, or a number with its fraction (Fraction: a dashboard's 0.83).</summary>
 public enum ReportKind
 {
     Text,
@@ -9,6 +9,7 @@ public enum ReportKind
     Hours,
     Percent,
     Time,
+    Fraction,
 }
 
 public sealed record ReportColumn(string Header, ReportKind Kind = ReportKind.Text, double Width = 1);
@@ -19,8 +20,12 @@ public sealed record ReportTable(string Title, IReadOnlyList<ReportColumn> Colum
 /// <summary>One figure at the top: what it is, its value as it reads, and a line under it.</summary>
 public sealed record ReportFigure(string Label, string Value, string? Hint = null);
 
-/// <summary>A bar chart over time: each bucket's values, one per series (stacked), and how they read.</summary>
-public sealed record ReportChart(string Title, IReadOnlyList<string> Series, IReadOnlyList<(DateTimeOffset At, double[] Values)> Buckets, ReportKind Kind = ReportKind.Number);
+/// <summary>
+/// A chart over time: each bucket's values, one per series, and how they read. Stacked bars, or lines one beside another
+/// (<paramref name="Stacked"/> false: a dashboard's CPU and memory are not parts of one whole). A value not measured is NaN.
+/// </summary>
+public sealed record ReportChart(string Title, IReadOnlyList<string> Series, IReadOnlyList<(DateTimeOffset At, double[] Values)> Buckets, ReportKind Kind = ReportKind.Number,
+    bool Stacked = true, string? Note = null);
 
 /// <summary>
 /// A report as people read it, whatever the file: its title, what and when it covers, its figures, its charts and its
@@ -37,6 +42,9 @@ public sealed record ReportDocument(
     IReadOnlyList<ReportTable> Tables,
     string? MadeBy = null)
 {
+    /// <summary>CSV has no charts: with this, each chart is written as a table of its buckets (a dashboard's), else left out (Accounting has its own "By time").</summary>
+    public bool ChartsAsTables { get; init; }
+
     /// <summary>"1 Nov 2026 to 7 Nov 2026 (UTC)": an end at midnight is the day before's end.</summary>
     public string Period => $"{Day(From)} to {Day(To.UtcDateTime.TimeOfDay == TimeSpan.Zero && To - From >= TimeSpan.FromDays(1) ? To.AddDays(-1) : To)} (UTC)";
 
@@ -86,6 +94,7 @@ public static class ReportFiles
             _ when kind == ReportKind.Money => Money(Convert.ToDecimal(value, inv)),
             _ when kind == ReportKind.Hours => Hours(Convert.ToDouble(value, inv)),
             _ when kind == ReportKind.Percent => Convert.ToDouble(value, inv).ToString("0", inv) + "%",
+            _ when kind == ReportKind.Fraction => Convert.ToDouble(value, inv) is var d && double.IsNaN(d) ? "" : d.ToString(Math.Abs(d) >= 100 ? "#,##0" : "#,##0.###", inv),
             _ => Convert.ToDouble(value, inv).ToString("#,##0", inv),
         };
     }

@@ -12,6 +12,9 @@ namespace Llm.Api.Dashboards;
 /// <summary>A panel's time range and resolution, and the dashboard variables chosen on the page.</summary>
 public sealed record PanelQuery(DateTimeOffset From, DateTimeOffset To, long? IntervalMs = null, int? MaxDataPoints = null, Dictionary<string, string[]>? Vars = null);
 
+/// <summary>Where a dashboard's panels are read from.</summary>
+public sealed record PanelSources(SqlDatasource Sql, GatewayDatasource Ledger, PromDatasource Prom, LokiDatasource Loki, DashboardOptions Options, TimeProvider Clock);
+
 public static partial class DashboardEndpoints
 {
     public static readonly TimeSpan MaxRange = TimeSpan.FromDays(400);
@@ -48,9 +51,48 @@ public static partial class DashboardEndpoints
         g.MapGet("/{uid}/variables", async (string uid, DateTimeOffset? from, DateTimeOffset? to, DashboardStore store, PromDatasource prom, LokiDatasource loki,
             ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
             store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await VariablesAsync(uid, from, to, store, prom, loki, ct));
+        g.MapGet("/{uid}/export", (string uid, DateTimeOffset from, DateTimeOffset to, string? format, HttpRequest request, DashboardStore store, SqlDatasource sql,
+            GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki, IOptions<DashboardOptions> options, TimeProvider clock, ClaimsPrincipal user,
+            UserManager<Core.Identity.AppUser> users, AccessService access, Identity.Audit audit, CancellationToken ct) =>
+            ExportAsync(uid, from, to, format, request, store, new PanelSources(sql, ledger, prom, loki, options.Value, clock), user, users, access, audit, ct));
         g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
             IOptions<DashboardOptions> options, TimeProvider clock, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
             store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, ledger, prom, loki, options, clock, ct));
+    }
+
+    /// <summary>The variables a link or an export names, Grafana's way: var-NAME=value, as many as chosen.</summary>
+    public static Dictionary<string, string[]>? VarsOf(IQueryCollection query)
+    {
+        var vars = query.Where(kv => kv.Key.StartsWith("var-", StringComparison.Ordinal) && kv.Key.Length > 4)
+            .ToDictionary(kv => kv.Key[4..], kv => kv.Value.Where(v => v is not null).Select(v => v!).ToArray(), StringComparer.Ordinal);
+        return vars.Count == 0 ? null : vars;
+    }
+
+    /// <summary>A dashboard as a report file (PDF, Excel or CSV) over the window, its variables as the page has them.</summary>
+    private static async Task<IResult> ExportAsync(string uid, DateTimeOffset from, DateTimeOffset to, string? format, HttpRequest request, DashboardStore store,
+        PanelSources src, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, Identity.Audit audit, CancellationToken ct)
+    {
+        if (store.Find(uid) is not { } d)
+        {
+            return Results.NotFound();
+        }
+        if (!await MayAsync(d, user, users, access))
+        {
+            return Results.Forbid();
+        }
+        if (to <= from || to - from > MaxRange)
+        {
+            return AuthEndpoints.Problem(400, "range", "The time range must be positive and at most 400 days.");
+        }
+        if (!Reports.ReportFiles.Formats.Contains((format ?? "pdf").ToLowerInvariant()))
+        {
+            return AuthEndpoints.Problem(400, "format", "Export as pdf, xlsx or csv.");
+        }
+        var me = (await users.GetUserAsync(user))!;
+        var doc = await DashboardReport.DocumentAsync(d, new PanelQuery(from, to, Vars: VarsOf(request.Query)), src,
+            string.IsNullOrEmpty(me.DisplayName) ? me.UserName ?? "" : me.DisplayName, ct);
+        await audit.WriteAsync("dashboard.export", uid, detail: $"{(format ?? "pdf").ToLowerInvariant()}, {from:O} to {to:O}");
+        return Reports.ReportFiles.Result(doc, format, d.Title)!;
     }
 
     /// <summary>Whether the person may see this dashboard: its permission (an Owner has every one).</summary>
@@ -184,6 +226,17 @@ public static partial class DashboardEndpoints
         {
             return AuthEndpoints.Problem(400, "unsupported", "This panel's datasource is not served by the app.");
         }
+        var (interval, results) = await RunAsync(d, panel, q, new PanelSources(sql, ledger, prom, loki, options.Value, clock), ct);
+        return Results.Ok(new { intervalMs = (long)interval.TotalMilliseconds, results });
+    }
+
+    /// <summary>
+    /// A panel's queries over the range, as the page shows them: its variables as chosen (else their defaults), a live
+    /// panel at now. The bucket, and each query's result or its error. The page's query and the exports both run this.
+    /// </summary>
+    public static async Task<(TimeSpan Interval, List<TargetResult> Results)> RunAsync(Dashboard d, Panel panel, PanelQuery q, PanelSources src, CancellationToken ct)
+    {
+        var (sql, ledger, prom, loki, o, clock) = src;
         if (panel.Live)
         {
             // The value now: the window the page shows does not change it.
@@ -220,7 +273,6 @@ public static partial class DashboardEndpoints
             vars[v.Name] = new VariableValue(v, chosen, offered);
         }
 
-        var o = options.Value;
         var results = new List<TargetResult>();
         foreach (var t in panel.Targets)
         {
@@ -244,7 +296,7 @@ public static partial class DashboardEndpoints
                 results.Add(new TargetResult(t.RefId, t.Format, null, null, "The query took too long."));
             }
         }
-        return Results.Ok(new { intervalMs = (long)interval.TotalMilliseconds, results });
+        return (interval, results);
     }
 
     private static TargetResult SqlTarget(PanelTarget t, TableResult table)

@@ -86,6 +86,9 @@ describe('accounting', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Export' }))
     const pdf = new URL((await screen.findByRole('menuitem', { name: 'PDF report' })).getAttribute('href')!, 'https://x')
     expect([pdf.pathname, pdf.searchParams.get('format'), pdf.searchParams.get('basis')]).toEqual(['/api/admin/accounting/export', 'pdf', 'tokens'])
+    // With every dashboard the admin may see, over the same window.
+    const all = new URL(screen.getByRole('menuitem', { name: 'PDF report, with the dashboards' }).getAttribute('href')!, 'https://x')
+    expect([all.searchParams.get('format'), all.searchParams.get('dashboards'), all.searchParams.get('basis')]).toEqual(['pdf', 'true', 'tokens'])
   })
 
   it('says what is missing from the cost: the GPUs not measured, no hardware price, no service cost', async () => {

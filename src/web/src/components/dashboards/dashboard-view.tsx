@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pause, Play, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { QueryError } from '@/components/app/query-state'
-import { TimeWindow } from '@/components/app/time-window'
+import { ExportMenu, TimeWindow } from '@/components/app/time-window'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
@@ -65,6 +65,7 @@ export function DashboardView({ uid, actions }: { uid: string; actions?: (query:
             {paused ? <Play /> : <Pause />} {paused ? `Refresh every ${d.refresh}` : `Refreshing every ${d.refresh}`}
           </Button>
         )}
+        <ExportMenu path={`/api/dashboards/${uid}/export`} query={() => withVars(time.query(), vars)} label="Export" />
         {actions?.(time.query)}
         {d.variables && d.variables.length > 0 && (
           <div className="basis-full">
@@ -77,6 +78,12 @@ export function DashboardView({ uid, actions }: { uid: string; actions?: (query:
       ))}
     </div>
   )
+}
+
+/** The variables as chosen, Grafana's way (var-NAME, once a value), so an export shows what the page does. */
+function withVars(q: URLSearchParams, vars: Chosen): URLSearchParams {
+  for (const [name, values] of Object.entries(vars)) for (const v of values) q.append(`var-${name}`, v)
+  return q
 }
 
 /** The dashboard file's own range, when it has one, else the last hour. */

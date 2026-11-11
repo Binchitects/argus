@@ -410,8 +410,8 @@ public static class Accounting
         _ => kind,
     };
 
-    private static async Task<IResult> ExportAsync(DateTimeOffset from, DateTimeOffset to, string? basis, string? format, ClaimsPrincipal principal, UserManager<AppUser> users,
-        LedgerSql sql, AppDbContext db, Credit credit, PromDatasource prom, IOptionsMonitor<CostOptions> costs, Audit audit, TimeProvider clock, ILoggerFactory logs, CancellationToken ct)
+    private static async Task<IResult> ExportAsync(DateTimeOffset from, DateTimeOffset to, string? basis, string? format, bool? dashboards, ClaimsPrincipal principal, UserManager<AppUser> users,
+        LedgerSql sql, AppDbContext db, Credit credit, PromDatasource prom, IOptionsMonitor<CostOptions> costs, Audit audit, DashboardBook book, TimeProvider clock, ILoggerFactory logs, CancellationToken ct)
     {
         if (Problem(from, to, basis) is { } problem)
         {
@@ -431,8 +431,14 @@ public static class Accounting
             return AuthEndpoints.Problem(503, "usage", "Usage cannot be read right now: " + ex.Message);
         }
         var me = (await users.GetUserAsync(principal))!;
-        await audit.WriteAsync("accounting.export", "accounting", detail: $"{(format ?? "pdf").ToLowerInvariant()}, {from:O} to {to:O}");
-        return ReportFiles.Result(Document(r, string.IsNullOrEmpty(me.DisplayName) ? me.UserName ?? "" : me.DisplayName, clock.GetUtcNow()), format, "accounting")!;
+        await audit.WriteAsync("accounting.export", "accounting", detail: $"{(format ?? "pdf").ToLowerInvariant()}, {from:O} to {to:O}" + (dashboards == true ? ", with the dashboards" : ""));
+        var doc = Document(r, string.IsNullOrEmpty(me.DisplayName) ? me.UserName ?? "" : me.DisplayName, clock.GetUtcNow());
+        // With every dashboard the person may see, over the same window.
+        if (dashboards == true)
+        {
+            doc = await book.AppendAsync(doc, me, ct);
+        }
+        return ReportFiles.Result(doc, format, dashboards == true ? "accounting-and-dashboards" : "accounting")!;
     }
 
     /// <summary>The report as a document: its figures, its charts, and a table for each way it is shared out.</summary>

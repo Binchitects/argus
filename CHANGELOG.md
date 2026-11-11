@@ -101,6 +101,11 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   tokens and share, the average and busiest minute a second, a request's
   decode speed, input cached and not, the first token), and each model's
   tokens a second and per bucket over time, from the ledger.
+- Every dashboard exports as a PDF report, an Excel workbook or a CSV, as
+  Accounting does: its stats as figures, its charts (lines, or stacked bars
+  where the panel stacks), its tables and logs, for the window and the
+  variables shown. Accounting's export can take every dashboard the admin
+  may see over the same window ("With every dashboard").
 
 ### :bug: Bugs fixed
 

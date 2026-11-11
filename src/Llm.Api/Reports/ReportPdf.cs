@@ -142,18 +142,34 @@ public static class ReportPdf
     private static void Chart(Canvas c, ReportChart chart, ReportDocument doc)
     {
         const double PlotH = 140, AxisW = 46;
-        c.Need(PlotH + 70);
-        c.Text(chart.Title, Left, c.Y - 12, 11, bold: true);
-        // The legend, to the right of the title.
-        var lx = PageW - Right;
-        for (var s = chart.Series.Count - 1; s >= 0; s--)
+        var names = chart.Series.Select(n => Fit(n, 8, false, 150)).ToList();
+        var legendW = names.Sum(n => Measure(n, 8, false) + 22);
+        var beside = legendW <= Width - Measure(chart.Title, 11, true) - 24;
+        // A legend too long for beside the title goes under the plot, as many lines as it takes.
+        var under = 0;
+        for (double x = 0, i = 0; !beside && i < names.Count; i++)
         {
-            var name = chart.Series[s];
-            lx -= Measure(name, 8, false);
-            c.Text(name, lx, c.Y - 11, 8, colour: Muted);
-            lx -= 12;
-            c.Fill(Palette[s % Palette.Length], lx, c.Y - 11, 8, 8);
-            lx -= 10;
+            var w = Measure(names[(int)i], 8, false) + 22;
+            if (x == 0 || x + w > Width)
+            {
+                under++;
+                x = 0;
+            }
+            x += w;
+        }
+        c.Need(PlotH + 70 + under * 12 + (chart.Note is null ? 0 : 12));
+        c.Text(Fit(chart.Title, 11, true, Width), Left, c.Y - 12, 11, bold: true);
+        if (beside)
+        {
+            var lx = PageW - Right;
+            for (var s = names.Count - 1; s >= 0; s--)
+            {
+                lx -= Measure(names[s], 8, false);
+                c.Text(names[s], lx, c.Y - 11, 8, colour: Muted);
+                lx -= 12;
+                c.Fill(Palette[s % Palette.Length], lx, c.Y - 11, 8, 8);
+                lx -= 10;
+            }
         }
         c.Y -= 26;
         var top = c.Y;
@@ -161,7 +177,8 @@ public static class ReportPdf
         var plotW = Width - AxisW;
         var bottom = top - PlotH;
         var buckets = chart.Buckets;
-        var most = buckets.Count == 0 ? 0 : buckets.Max(b => b.Values.Sum());
+        static double Real(double v) => double.IsNaN(v) || double.IsInfinity(v) ? 0 : v;
+        var most = buckets.Count == 0 ? 0 : chart.Stacked ? buckets.Max(b => b.Values.Sum(Real)) : buckets.Max(b => b.Values.Length == 0 ? 0 : b.Values.Max(Real));
         var scale = Nice(most);
         for (var g = 0; g <= 4; g++)
         {
@@ -177,12 +194,32 @@ public static class ReportPdf
         {
             var step = plotW / buckets.Count;
             var barW = Math.Max(1, step * 0.72);
-            for (var i = 0; i < buckets.Count; i++)
+            for (var s = 0; !chart.Stacked && s < chart.Series.Count; s++)
+            {
+                // Lines, each on its own: a gap where a value was not measured.
+                (double X, double Y)? last = null;
+                for (var i = 0; i < buckets.Count; i++)
+                {
+                    var v = s < buckets[i].Values.Length ? buckets[i].Values[s] : double.NaN;
+                    if (double.IsNaN(v) || double.IsInfinity(v))
+                    {
+                        last = null;
+                        continue;
+                    }
+                    var point = (X: plotX + i * step + step / 2, Y: bottom + PlotH * Math.Max(0, v) / scale);
+                    if (last is { } from)
+                    {
+                        c.Line(Palette[s % Palette.Length], from.X, from.Y, point.X, point.Y, 1.1);
+                    }
+                    last = point;
+                }
+            }
+            for (var i = 0; chart.Stacked && i < buckets.Count; i++)
             {
                 var y = bottom;
                 for (var s = 0; s < buckets[i].Values.Length; s++)
                 {
-                    var h = PlotH * buckets[i].Values[s] / scale;
+                    var h = PlotH * Real(buckets[i].Values[s]) / scale;
                     if (h > 0)
                     {
                         c.Fill(Palette[s % Palette.Length], plotX + i * step + (step - barW) / 2, y, barW, h);
@@ -201,7 +238,30 @@ public static class ReportPdf
                 c.Text(label, Math.Max(plotX, x), bottom - 12, 7, colour: Muted);
             }
         }
-        c.Y = bottom - 34;
+        c.Y = bottom - 26;
+        if (!beside)
+        {
+            double x = 0;
+            for (var s = 0; s < names.Count; s++)
+            {
+                var w = Measure(names[s], 8, false) + 22;
+                if (x > 0 && x + w > Width)
+                {
+                    c.Y -= 12;
+                    x = 0;
+                }
+                c.Fill(Palette[s % Palette.Length], Left + x, c.Y - 1, 8, 8);
+                c.Text(names[s], Left + x + 12, c.Y, 8, colour: Muted);
+                x += w;
+            }
+            c.Y -= 14;
+        }
+        if (chart.Note is { Length: > 0 } note)
+        {
+            c.Text(Fit(note, 7.5, false, Width), Left, c.Y, 7.5, colour: Muted);
+            c.Y -= 12;
+        }
+        c.Y -= 8;
     }
 
     private static void Table(Canvas c, ReportTable t)
@@ -310,7 +370,7 @@ public static class ReportPdf
     {
         ReportKind.Money => v == 0 ? "$0" : v < 1 ? "$" + v.ToString("0.###", CultureInfo.InvariantCulture) : "$" + ReportFiles.Compact(v),
         ReportKind.Hours => ReportFiles.Hours(v),
-        _ => ReportFiles.Compact(v),
+        _ => v is > 0 and < 10 && v != Math.Floor(v) ? v.ToString("0.##", CultureInfo.InvariantCulture) : ReportFiles.Compact(v),
     };
 
     // ------------------------------------------------------------------ text --

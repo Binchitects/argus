@@ -132,7 +132,7 @@ export function AccountingPage() {
             ))}
           </SelectContent>
         </Select>
-        <ExportMenu path="/api/admin/accounting/export" query={query} />
+        <ExportMenu path="/api/admin/accounting/export" query={query} also={{ label: 'With every dashboard', param: ['dashboards', 'true'], suffix: ', with the dashboards' }} />
         <Button variant="ghost" size="sm" className="h-9" asChild>
           <Link to="/admin/settings#costs">
             <Settings2 /> Costs

@@ -13,7 +13,7 @@ namespace Llm.Api.Reports;
 /// </summary>
 public static class ReportXlsx
 {
-    private const int Plain = 0, Header = 1, Whole = 2, Dollars = 3, HoursStyle = 4, PercentStyle = 5, TimeStyle = 6, TitleStyle = 7;
+    private const int Plain = 0, Header = 1, Whole = 2, Dollars = 3, HoursStyle = 4, PercentStyle = 5, TimeStyle = 6, TitleStyle = 7, DecimalStyle = 8;
 
     private sealed class Strings
     {
@@ -43,7 +43,7 @@ public static class ReportXlsx
         {
             var columns = new List<ReportColumn> { new("Time", ReportKind.Time, 1.4) };
             columns.AddRange(chart.Series.Select(s => new ReportColumn(s, chart.Kind)));
-            var rows = chart.Buckets.Select(b => (object?[])[b.At, .. b.Values.Select(v => (object?)v)]).ToList();
+            var rows = chart.Buckets.Select(b => (object?[])[b.At, .. b.Values.Select(v => double.IsNaN(v) ? null : (object?)v)]).ToList();
             sheets.Add(new(Name(chart.Title, names), Table(new ReportTable(chart.Title, columns, rows), strings)));
         }
         foreach (var table in doc.Tables)
@@ -79,7 +79,7 @@ public static class ReportXlsx
     }
 
     /// <summary>Number formats: whole numbers, dollars, hours (2 places), percent (as written, 0 to 100) and times.</summary>
-    private const string Styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00"/><numFmt numFmtId="166" formatCode="0&quot;%&quot;"/><numFmt numFmtId="167" formatCode="yyyy-mm-dd hh:mm"/></numFmts><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEEF0F4"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFC8CCD4"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>""";
+    private const string Styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="5"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00"/><numFmt numFmtId="166" formatCode="0&quot;%&quot;"/><numFmt numFmtId="167" formatCode="yyyy-mm-dd hh:mm"/><numFmt numFmtId="168" formatCode="#,##0.###"/></numFmts><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEEF0F4"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFC8CCD4"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="168" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>""";
 
     private static string Summary(ReportDocument doc, Strings strings)
     {
@@ -153,6 +153,7 @@ public static class ReportXlsx
         ReportKind.Hours => HoursStyle,
         ReportKind.Percent => PercentStyle,
         ReportKind.Time => TimeStyle,
+        ReportKind.Fraction => DecimalStyle,
         _ => Plain,
     };
 

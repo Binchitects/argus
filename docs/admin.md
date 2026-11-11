@@ -2041,6 +2041,17 @@ at once taken) is not in the model's line yet, and is not shown.
 The dashboards come in three areas, each seen with its own permission, so a
 role can give one without the others (Admin → Access → Roles):
 
+**Export** (beside the time window) gives the dashboard as a PDF report, an
+Excel workbook or a CSV, for the window and the variables chosen: each stat as
+a figure (a **Now** one as it was when the file was made), each chart as a
+chart (lines, or stacked bars when the panel stacks; at most 12 series, the
+rest named under it) whose buckets are a sheet in Excel and a table in the
+CSV, each table (its first 1,000 rows) and log (its newest 1,000 lines), and
+the panels that could not be read and why. Admin → Accounting's **Export**
+has the same three **with the dashboards**: the accounting report followed
+by every dashboard the admin may see, over the same window. Each export is
+in the audit log (`dashboard.export`, `accounting.export`).
+
 A dashboard's header stats are marked **Now**: they show the value at this
 moment, whatever time window is picked, and refresh with the page. Totals
 over a window (requests, tokens, spend, tool calls) are under a heading that

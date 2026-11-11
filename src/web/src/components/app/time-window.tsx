@@ -124,13 +124,42 @@ export function TimeWindow({
   )
 }
 
-/** An export of a report for the window: PDF, Excel or CSV, each a download from <paramref name="path"/>. */
-export function ExportMenu({ path, query, label = 'Export', disabled }: { path: string; query: () => URLSearchParams; label?: string; disabled?: boolean }) {
-  const href = (format: string) => {
+/**
+ * An export of a report for the window: PDF, Excel or CSV, each a download from <paramref name="path"/>. With
+ * <paramref name="also"/>, a second set of the three with one more parameter (Accounting's with every dashboard).
+ */
+export function ExportMenu({ path, query, label = 'Export', disabled, also }: {
+  path: string
+  query: () => URLSearchParams
+  label?: string
+  disabled?: boolean
+  also?: { label: string; param: [string, string]; suffix: string }
+}) {
+  const href = (format: string, extra?: [string, string]) => {
     const q = query()
     q.set('format', format)
+    if (extra) q.set(extra[0], extra[1])
     return `${path}?${q}`
   }
+  const items = (extra?: [string, string], suffix = '') => (
+    <>
+      <DropdownMenuItem asChild>
+        <a href={href('pdf', extra)} download>
+          <FileText /> PDF report{suffix}
+        </a>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <a href={href('xlsx', extra)} download>
+          <FileSpreadsheet /> Excel workbook (.xlsx){suffix}
+        </a>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <a href={href('csv', extra)} download>
+          <Sheet /> CSV{suffix}
+        </a>
+      </DropdownMenuItem>
+    </>
+  )
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -138,24 +167,17 @@ export function ExportMenu({ path, query, label = 'Export', disabled }: { path: 
           <Download /> {label}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">For the time window shown</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href={href('pdf')} download>
-            <FileText /> PDF report
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href={href('xlsx')} download>
-            <FileSpreadsheet /> Excel workbook (.xlsx)
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href={href('csv')} download>
-            <Sheet /> CSV
-          </a>
-        </DropdownMenuItem>
+        {items()}
+        {also && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{also.label}</DropdownMenuLabel>
+            {items(also.param, also.suffix)}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

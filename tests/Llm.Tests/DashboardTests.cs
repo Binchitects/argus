@@ -83,6 +83,64 @@ public sealed class DashboardTests(AppFixture app)
         }
     }
 
+    private static string Window => $"from={Uri.EscapeDataString(LitellmSeed.From.ToString("O"))}&to={Uri.EscapeDataString(LitellmSeed.To.ToString("O"))}";
+
+    [Fact]
+    public async Task Every_dashboard_exports_as_pdf_excel_and_csv_with_what_the_page_shows()
+    {
+        var b = await Admin();
+        var all = await b.JsonAsync(await b.GetAsync("/api/dashboards/"));
+        foreach (var uid in all.EnumerateArray().Select(d => d.GetProperty("uid").GetString()!))
+        {
+            foreach (var (format, type) in new[] { ("pdf", "application/pdf"), ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), ("csv", "text/csv") })
+            {
+                var res = await b.GetAsync($"/api/dashboards/{uid}/export?{Window}&format={format}");
+                await StatusAssert.Is(HttpStatusCode.OK, res);
+                Assert.StartsWith(type, res.Content.Headers.ContentType!.ToString(), StringComparison.Ordinal);
+                Assert.True((await res.Content.ReadAsByteArrayAsync()).Length > 200, $"{uid} {format} is empty");
+            }
+        }
+        // The usage figures as the page has them, a chart's buckets and a table's rows in the CSV.
+        var csv = await (await b.GetAsync($"/api/dashboards/usage-by-user/export?{Window}&format=csv")).Content.ReadAsStringAsync();
+        Assert.Contains("Requests,4", csv, StringComparison.Ordinal);
+        Assert.Contains("Output tokens,22", csv, StringComparison.Ordinal);
+        Assert.Contains("Per person — every surface combined", csv, StringComparison.Ordinal);
+        Assert.Contains("alice@example.test", csv, StringComparison.Ordinal);
+        var perf = await (await b.GetAsync($"/api/dashboards/stack-performance/export?{Window}&format=csv")).Content.ReadAsStringAsync();
+        Assert.Contains("Tokens generated a second, by model", perf, StringComparison.Ordinal);
+        Assert.Contains("Tokens generated, by model", perf, StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.GetAsync($"/api/dashboards/usage-by-user/export?{Window}&format=docx"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await b.GetAsync($"/api/dashboards/nothing-here/export?{Window}&format=csv"));
+    }
+
+    [Fact]
+    public async Task A_dashboard_export_is_for_who_may_see_it_and_accounting_adds_every_dashboard_they_may()
+    {
+        var admin = await Admin();
+        var name = "dash-export-" + Guid.NewGuid().ToString("N")[..6];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", displayName = "Dash" }));
+        var them = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync($"/api/dashboards/usage-by-user/export?{Window}&format=csv"));
+        var csv = await (await admin.GetAsync($"/api/admin/accounting/export?{Window}&format=csv&dashboards=true")).Content.ReadAsStringAsync();
+        Assert.Contains("Running cost", csv, StringComparison.Ordinal);
+        Assert.Contains("Usage by person: at a glance", csv, StringComparison.Ordinal);
+        Assert.Contains("Stack Performance: Tokens generated, by model", csv, StringComparison.Ordinal);
+        var plain = await (await admin.GetAsync($"/api/admin/accounting/export?{Window}&format=csv")).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Usage by person: at a glance", plain, StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync($"/api/admin/accounting/export?{Window}&format=pdf&dashboards=true"));
+    }
+
+    [Theory]
+    [InlineData(0.4253, "percentunit", "42.5%")]
+    [InlineData(1536.0 * 1024 * 1024, "bytes", "1.5 GiB")]
+    [InlineData(350.0, "watt", "350 W")]
+    [InlineData(11100.0, "dtdurations", "3 hours 5 minutes")]
+    [InlineData(1234.0, "short", "1.23 K")]
+    [InlineData(0.000102, null, "0.000102")]
+    [InlineData(2.5e9, "hertz", "2.5 GHz")]
+    public void A_report_writes_a_value_as_the_page_does(double value, string? unit, string expected) =>
+        Assert.Equal(expected, Units.Format(value, unit));
+
     [Fact]
     public async Task Stack_performance_adds_up_each_models_generated_tokens_over_the_window()
     {

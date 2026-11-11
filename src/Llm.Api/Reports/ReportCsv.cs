@@ -22,7 +22,11 @@ public static class ReportCsv
         {
             Line(sb, [f.Label, f.Value]);
         }
-        foreach (var t in doc.Tables)
+        var charts = doc.ChartsAsTables
+            ? doc.Charts.Select(c => new ReportTable(c.Title, [new ReportColumn("Time", ReportKind.Time), .. c.Series.Select(x => new ReportColumn(x, c.Kind))],
+                [.. c.Buckets.Select(b => (object?[])[b.At, .. b.Values.Select(v => double.IsNaN(v) ? null : (object?)v)])], c.Note))
+            : [];
+        foreach (var t in charts.Concat(doc.Tables))
         {
             sb.Append("\r\n");
             Line(sb, [t.Title]);
