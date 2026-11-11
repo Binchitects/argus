@@ -126,7 +126,7 @@ def main() -> int:
     args = ap.parse_args()
 
     domain = env("DOMAIN", "llm.localhost") or "llm.localhost"
-    app, base, code-intel = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://code-intel.{domain}/mcp"
+    app, base, code_intel = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://code-intel.{domain}/mcp"
     xhr = {"X-Requested-With": "fetch"}
     print(f"Clients against {domain} (TLS {'checked against the system roots' if env('ACME_EMAIL') else 'with Traefik’s own certificate, not checked'})")
 
@@ -186,6 +186,11 @@ def main() -> int:
         said = "".join(b.get("text", "") for b in anth.get("content", [])) if isinstance(anth, dict) else ""
         check("the Anthropic Messages API answers too (Claude Code)", status == 200 and "PONG" in said.upper(), f"{status}: {said[:60] or str(anth)[:120]}")
 
+        status, _, resp = call(f"{base}/responses", {"model": model["name"], "input": "Reply with the single word PONG.", "max_output_tokens": 800}, auth)
+        said = "".join(c.get("text", "") for o in (resp.get("output", []) if isinstance(resp, dict) else []) if o.get("type") == "message"
+                       for c in o.get("content", []) if c.get("type") == "output_text")
+        check("OpenAI's Responses API answers too (Codex)", status == 200 and "PONG" in said.upper(), f"{status}: {said[:60] or str(resp)[:120]}")
+
         time.sleep(3)
         _, _, people = call(f"{app}/api/admin/people", headers=xhr)
         spent = next((p.get("spend") for p in people.get("people", []) if p.get("id") == pid), None)
@@ -208,7 +213,7 @@ def main() -> int:
         if not token:
             record("code-intel MCP", "SKIP", "no test GitLab (tools/test-gitlab/run.sh), or the app already has a dev_alpha")
         else:
-            rpc = mcp_session(code-intel, token)
+            rpc = mcp_session(code_intel, token)
             status, init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "clients-check", "version": "1"}})
             check("MCP initialize, with the person's API key", status == 200 and "result" in init, f"{status}")
             rpc("notifications/initialized", notify=True)
@@ -221,9 +226,9 @@ def main() -> int:
             if docs:
                 _, hit = rpc("tools/call", {"name": docs, "arguments": {"query": "CreateFileW", "name": "CreateFileW"}})
                 check(f"the Windows packs answer ({docs} CreateFileW)", "CreateFile" in json.dumps(hit), json.dumps(hit)[:160])
-            status, _, _ = call(code-intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer sk-wrong", "Accept": "application/json, text/event-stream"})
+            status, _, _ = call(code_intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": "Bearer sk-wrong", "Accept": "application/json, text/event-stream"})
             check("a wrong API key is refused", status in (401, 403), str(status))
-            status, _, _ = call(code-intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": f"Bearer {gitlab_token}", "Accept": "application/json, text/event-stream"})
+            status, _, _ = call(code_intel, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Authorization": f"Bearer {gitlab_token}", "Accept": "application/json, text/event-stream"})
             check("a GitLab token is refused, even a good one", status == 401, str(status))
 
         work = Path(tempfile.mkdtemp(prefix="clients-"))
@@ -242,7 +247,7 @@ def main() -> int:
             if token:
                 (q / ".qwen").mkdir(exist_ok=True)
                 (q / ".qwen" / "settings.json").write_text(json.dumps({"mcpServers": {"code-intel": {
-                    "httpUrl": code-intel, "headers": {"Authorization": f"Bearer {token}"}, "trust": True}}}))
+                    "httpUrl": code_intel, "headers": {"Authorization": f"Bearer {token}"}, "trust": True}}}))
                 code, out = run_client([args.qwen, "--yolo", "-p", "Use the code-intel find_symbol tool to find the symbol DecodeFrame. Reply with the repository path it is in, only."], openai, q)
                 check("Qwen Code calls code-intel over MCP", "root/eal-core" in out, out.strip()[-160:])
 
@@ -276,7 +281,7 @@ def main() -> int:
     config:
       serverName: code-intel
       transport: streamable-http
-      url: {code-intel}
+      url: {code_intel}
       headers:
         Authorization: !!js '`Bearer ${{process.env.CODE_INTEL_TOKEN}}`'
 """)
