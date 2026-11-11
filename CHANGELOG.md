@@ -116,6 +116,9 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 - Code Arena's tasks pane is resizable however narrow the chat (it was only
   once the chat was wide), and closing a task opened from its list goes back
   to the list.
+- A live thinking step (and a command's output) follows its newest words
+  only while it is left at the bottom: scrolled up to read, it stays there;
+  scrolled back to the end, it follows again. In the web chat too.
 - Code Arena's commands with no time limit take at most a quarter of the
   window: with several, only the newest running one shows its output, and
   they fold into one line.

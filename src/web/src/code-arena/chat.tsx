@@ -25,6 +25,7 @@ import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { typedOf } from '@/pages/chat/attached'
+import { useFollow } from '@/pages/chat/parts'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn, type AgainChange } from '@/pages/chat/turns'
 import { QueuedList } from '@/pages/chat/queued-list'
@@ -1342,10 +1343,8 @@ function JobBox({ job, onStopped, startOpen }: { job: LiveJob; onStopped: () => 
   const out = useRef<HTMLPreElement>(null)
   // The last 200 lines; the agent reads all of it with command_output.
   const text = job.output.split('\n').slice(-200).join('\n').trimEnd()
-  useEffect(() => {
-    const el = out.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [text, open])
+  // Its newest lines in view while the person leaves it at the bottom; scrolled up to read, it stays there.
+  const follow = useFollow(out, `${text}${open}`, true)
   const stop = async () => {
     setStopping(true)
     try {
@@ -1386,7 +1385,7 @@ function JobBox({ job, onStopped, startOpen }: { job: LiveJob; onStopped: () => 
         )}
       </div>
       {open && (
-        <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-32 overflow-x-hidden overflow-y-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+        <pre ref={out} onScroll={follow} aria-label={`Output of job ${job.id}`} className="max-h-32 overflow-x-hidden overflow-y-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
           {text || 'No output yet.'}
         </pre>
       )}

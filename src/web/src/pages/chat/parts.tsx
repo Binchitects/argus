@@ -1,7 +1,7 @@
 import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Orbit, PenTool, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNow } from './use-now'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -37,15 +37,29 @@ const isModel = (fileName: string) => /\.glb$/i.test(fileName)
  * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once
  * (`hurryLabel`: its words, Code Arena's "Skip thinking").
  */
+/**
+ * A box that keeps its newest words in view while they come, as long as the person leaves it at the bottom: scrolled
+ * up to read, it stays where they are; scrolled back to the end, it follows again. Give its onScroll the result.
+ */
+export function useFollow(box: RefObject<HTMLElement | null>, content: unknown, live: boolean) {
+  const atEnd = useRef(true)
+  useEffect(() => {
+    const el = box.current
+    if (live && el && atEnd.current) el.scrollTop = el.scrollHeight
+  }, [box, content, live])
+  return useCallback(() => {
+    const el = box.current
+    if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }, [box])
+}
+
 export function Thinking({ text, live, ms, since, onHurry, hurried, hurryLabel = 'Answer now' }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean; hurryLabel?: string }) {
   // Open while it thinks and folded after, unless the person chose otherwise.
   const [chosen, setOpen] = useState<boolean | null>(null)
   const open = chosen ?? live
   const box = useRef<HTMLDivElement>(null)
   const now = useNow(live)
-  useEffect(() => {
-    if (live && box.current) box.current.scrollTop = box.current.scrollHeight
-  }, [text, live])
+  const follow = useFollow(box, text, live)
   const [asked, setAsked] = useState(false)
   const label = live ? `Thinking… ${since ? seconds(now - since) : ''}` : ms !== null ? `Thought for ${seconds(ms)}${hurried ? ', cut short' : ''}` : 'Thought process'
   return (
@@ -73,7 +87,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried, hurryLabel =
         )}
       </div>
       <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        <div ref={box} dir="auto" className="bidi-lines mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div ref={box} onScroll={follow} dir="auto" className="bidi-lines mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
       </Collapsible.Content>
