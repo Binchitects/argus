@@ -92,7 +92,9 @@ public sealed class VectorTests(AppFixture app)
         var name = "vd" + Guid.NewGuid().ToString("N")[..10];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
         var b = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
-        var asked = (string tag) => app.Model.Requests.Count(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == tag && r.Body["user"]?.GetValue<string>() == $"{name}@example.test");
+        var asked = (string tag) => app.TaggedAsync(tag, $"{name}@example.test", f);
+        // The model's last call for this person: the step just done (the tag is the ledger's, not sent on to the engine).
+        var last = () => app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == $"{name}@example.test").Body;
 
         var config = await b.JsonAsync(await b.GetAsync("/api/media/vectors/config"));
         Assert.Contains(config.GetProperty("styles").EnumerateArray(), s => s.GetProperty("name").GetString() == "isometric");
@@ -103,10 +105,10 @@ public sealed class VectorTests(AppFixture app)
 
         // Drawn: its first answer not XML, then one without names: each sent back to fix.
         var broken = First(await DoneAsync(f, b, new { action = "draw", prompt = "[broken] a sun over hills", style = "flat", animate = "never" }));
-        Assert.Equal(2, asked("svg-draw"));
+        Assert.Equal(2, await asked("svg-draw"));
         var id = First(await DoneAsync(f, b, new { action = "draw", prompt = "[noids] a sun over hills", style = "cute", width = 512, height = 512, animate = "never" }));
-        Assert.Equal(4, asked("svg-draw"));
-        var fixedUp = app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "svg-draw").Body["messages"]!.AsArray();
+        Assert.Equal(4, await asked("svg-draw"));
+        var fixedUp = last()["messages"]!.AsArray();
         Assert.True(fixedUp.Last()!["content"]!.ToString().Contains("no part has an id", StringComparison.Ordinal), fixedUp.ToJsonString());
         var drawing = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{id}"));
         Assert.Contains("id=\"sun\"", drawing.GetProperty("still").GetString(), StringComparison.Ordinal);
@@ -122,11 +124,11 @@ public sealed class VectorTests(AppFixture app)
         var moved = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{moving}"));
         Assert.Equal((2, "sun", "spin"), (moved.GetProperty("version").GetInt32(), moved.GetProperty("motions")[0].GetProperty("target").GetString(),
             moved.GetProperty("motions")[0].GetProperty("kind").GetString()));
-        Assert.Contains("the sun spins", app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "svg-animate").Body.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("the sun spins", last().ToJsonString(), StringComparison.Ordinal);
 
         // Animated as asked: a part it named is not there, so it plans again.
         await DoneAsync(f, b, new { action = "animate", sourceId = id, prompt = "[badpart] the sun turns, the hills appear" });
-        Assert.Equal(3, asked("svg-animate"));
+        Assert.Equal(3, await asked("svg-animate"));
         drawing = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{id}"));
         Assert.Equal(["sun", "hills"], drawing.GetProperty("motions").EnumerateArray().Select(m => m.GetProperty("target").GetString()));
         Assert.Contains("@keyframes", drawing.GetProperty("markup").GetString(), StringComparison.Ordinal);

@@ -174,7 +174,11 @@ public sealed class MediaTests(AppFixture app)
         var (f, b, sandbox) = await NewAppAsync();
         await using var _f = f;
         await using var _s = sandbox;
-        app.Model.UnknownOnce["Omni"] = true;
+        // LiteLLM may not know a model just added for a moment (the app's own gateway routes from the app's own database).
+        if (AppFixture.GatewayMode != GatewayModes.Own)
+        {
+            app.Model.UnknownOnce["Omni"] = true;
+        }
         app.Model.LoadingOnce["Omni"] = true;
         var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { model = "Omni", useCodeIntel = false }))).GetProperty("id").GetGuid();
         var answer = await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello after a first start" })).Content.ReadAsStringAsync();

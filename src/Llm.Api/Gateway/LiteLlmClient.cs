@@ -22,7 +22,7 @@ public sealed class LiteLlmOptions
     /// Gateway:Mode, while the app's own gateway replaces LiteLLM: litellm (LiteLLM answers everything), chat (the app sends
     /// its own chat to the engines itself, ModelGateway) or own (the app answers all it serves).
     /// </summary>
-    public string Mode { get; set; } = GatewayModes.LiteLlm;
+    public string Mode { get; set; } = GatewayModes.Own;
 
     /// <summary>
     /// How long a new deployment's first chat waits, at most, for the gateway to make the chat's key (on a first start it

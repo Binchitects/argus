@@ -71,7 +71,8 @@ public sealed class BusinessMapTests(AppFixture app)
 
         // It read with code-intel's tools, as the person who asked; its requests are theirs, tagged business.
         Assert.Contains(app.CodeIntel.McpCalls, c => c.Method == "tools/call" && c.Email == email && c.Params?.GetProperty("name").GetString() == "find_symbol");
-        Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "business");
+        Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email);
+        Assert.Contains("business", await app.TagsAsync(email, f));
         var listed = (await b.JsonAsync(await b.GetAsync("/api/code/business"))).GetProperty("systems").EnumerateArray();
         Assert.Contains(listed, s => s.GetProperty("project").GetString() == project);
         // Mapped again on request.
@@ -141,9 +142,9 @@ public sealed class BusinessMapTests(AppFixture app)
         Assert.True(sent.IsSuccessStatusCode, await sent.Content.ReadAsStringAsync());
         await sent.Content.ReadAsStringAsync();
 
-        // The chat's own request (not the mapper's, tagged business).
+        // The chat's own request (not the mapper's): the one with the question asked.
         var asked = app.Model.Requests.First(r => r.Body["user"]?.GetValue<string>() == email && r.Body["tools"] is not null
-            && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() != "business").Body;
+            && r.Body["messages"]!.AsArray().Any(m => m!["content"]?.ToString().StartsWith("Why do refunds round half up?", StringComparison.Ordinal) == true)).Body;
         var functions = asked["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
         Assert.Contains("business_map", functions);
         Assert.Contains("business_explain", functions);

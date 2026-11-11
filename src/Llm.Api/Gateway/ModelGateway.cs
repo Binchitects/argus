@@ -50,6 +50,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     private readonly ConcurrentDictionary<string, int> _busy = new(StringComparer.Ordinal);
     private readonly Channel<GatewayRequest> _ledger = Channel.CreateBounded<GatewayRequest>(new BoundedChannelOptions(10_000) { FullMode = BoundedChannelFullMode.DropOldest });
     private Task? _writer;
+    private volatile bool _writing; // a batch read from the channel and not saved yet
 
     /// <summary>A line for the ledger, counted for the metrics as it goes.</summary>
     private void Write(GatewayRequest row)
@@ -605,6 +606,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         var batch = new List<GatewayRequest>();
         while (await _ledger.Reader.WaitToReadAsync())
         {
+            _writing = true;
             batch.Clear();
             while (batch.Count < 200 && _ledger.Reader.TryRead(out var row))
             {
@@ -632,13 +634,17 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             {
                 LogNotBooked(logger, batch.Count, ex.Message);
             }
+            finally
+            {
+                _writing = false;
+            }
         }
     }
 
     /// <summary>Every line booked so far is in the ledger (tests, and a replica stopping).</summary>
     public async Task FlushAsync(CancellationToken ct)
     {
-        for (var i = 0; i < 200 && _ledger.Reader.Count > 0; i++)
+        for (var i = 0; i < 200 && (_writing || _ledger.Reader.Count > 0); i++)
         {
             await Task.Delay(25, ct);
         }

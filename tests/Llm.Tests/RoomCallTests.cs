@@ -147,13 +147,14 @@ public sealed class RoomCallTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Conflict, await SayAsync(olivia, room, benPage));
 
         // Read in German: translated once, for all who read in it.
-        var asked = () => app.Model.Requests.Count(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "translate" && r.Body["messages"]![1]!["content"]!.GetValue<string>().Contains("capital of France", StringComparison.Ordinal));
+        var asked = () => app.Model.Requests.Count(r => r.Body["messages"] is System.Text.Json.Nodes.JsonArray { Count: > 1 } m && m[1]!["content"]?.ToString().Contains("capital of France", StringComparison.Ordinal) == true);
         var before = asked();
         var path = $"/api/rooms/{room}/call/captions/{caption.GetProperty("id").GetGuid()}/translation";
         var german = await olivia.JsonAsync(await olivia.PostAsync(path, new { language = "de" }));
         Assert.Equal("[German] What is the capital of France?", german.GetProperty("text").GetString());
         Assert.Equal("[German] What is the capital of France?", (await vera.JsonAsync(await vera.PostAsync(path, new { language = "de" }))).GetProperty("text").GetString());
         Assert.Equal(before + 1, asked());
+        Assert.Contains("translate", await app.TagsAsync(into: f));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await olivia.PostAsync(path, new { language = "xx" }));
         await StatusAssert.Is(HttpStatusCode.NotFound, await otto.PostAsync(path, new { language = "de" }));
         // Someone who joins late sees what was said.

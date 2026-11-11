@@ -71,7 +71,7 @@ public sealed class ReviewTests(AppFixture app)
         Assert.All(app.CodeIntel.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"), c => Assert.Equal(email, c.Email));
         var asked = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         Assert.Equal(5, asked.Count);
-        Assert.All(asked, r => Assert.Equal("review", r.Body["metadata"]!["tags"]![0]!.GetValue<string>()));
+        Assert.Equal(Enumerable.Repeat<string?>("review", 5), await app.TagsAsync(email));
 
         // Someone else does not see it; a room shares it.
         await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/code/reviews/{id}"));

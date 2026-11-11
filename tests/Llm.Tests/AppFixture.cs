@@ -169,7 +169,43 @@ public sealed class AppFixture : IAsyncLifetime
     /// does every few seconds: the apps read the ledger, and each read the shared log before. This app's (the shared one's when
     /// none is named): each other app reads the whole shared log at its first import.
     /// </summary>
+    /// <summary>The gateway mode the tests run in: own (the default), or ARENA_TEST_GATEWAY_MODE's.</summary>
+    public static string GatewayMode { get; } = Environment.GetEnvironmentVariable("ARENA_TEST_GATEWAY_MODE") is { Length: > 0 } m ? m : GatewayModes.Own;
+
     public Task MirrorAsync(WebApplicationFactory<Program>? into = null) => MirrorIntoAsync((into ?? Factory).Services);
+
+    /// <summary>
+    /// The tags of the model calls the app's own gateway booked (Gateway:Mode own, the default), oldest first: the tag is
+    /// the ledger's, since the gateway does not send LiteLLM's metadata on to the engine. Written lines are flushed first.
+    /// </summary>
+    public async Task<List<string?>> TagsAsync(string? person = null, WebApplicationFactory<Program>? into = null)
+    {
+        if (GatewayMode != Llm.Api.Gateway.GatewayModes.Own)
+        {
+            // Through LiteLLM the tag goes with the request, as its metadata: LiteLLM's own spend log keeps it.
+            return [.. Model.Requests.Where(r => person == null || r.Body["user"]?.ToString() == person)
+                .Select(r => r.Body["metadata"]?["tags"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } t ? t[0]!.ToString() : null)];
+        }
+        var services = (into ?? Factory).Services;
+        await services.GetRequiredService<Llm.Api.Gateway.ModelGateway>().FlushAsync(CancellationToken.None);
+        await using var scope = services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().GatewayRequests.AsNoTracking()
+            .Where(r => person == null || r.Person == person).OrderBy(r => r.StartedAt).Select(r => r.Tag).ToListAsync();
+    }
+
+    /// <summary>What the ledger has this person spend in all, the app's own gateway's lines flushed first.</summary>
+    public async Task<decimal> CostAsync(string person, WebApplicationFactory<Program>? into = null)
+    {
+        var services = (into ?? Factory).Services;
+        await services.GetRequiredService<Llm.Api.Gateway.ModelGateway>().FlushAsync(CancellationToken.None);
+        await using var scope = services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().GatewayRequests.AsNoTracking()
+            .Where(r => r.Person == person).SumAsync(r => r.Cost);
+    }
+
+    /// <summary>How many model calls the app booked with this tag (<see cref="TagsAsync"/>).</summary>
+    public async Task<int> TaggedAsync(string tag, string? person = null, WebApplicationFactory<Program>? into = null) =>
+        (await TagsAsync(person, into)).Count(t => t == tag);
 
     /// <summary>The same, into each running app that has this person: the app a test made them in.</summary>
     public async Task MirrorForAsync(string email)
@@ -260,11 +296,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:AlertmanagerUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:LokiUrl", "http://127.0.0.1:9");
-            // The chat-path classes run once more with the app's own gateway: dotnet test --environment ARENA_TEST_GATEWAY_MODE=chat.
-            if (Environment.GetEnvironmentVariable("ARENA_TEST_GATEWAY_MODE") is { Length: > 0 } mode)
-            {
-                b.UseSetting("Gateway:Mode", mode);
-            }
+            // The app's own gateway, as installed; any class runs in another mode with dotnet test --environment ARENA_TEST_GATEWAY_MODE=litellm.
+            b.UseSetting("Gateway:Mode", GatewayMode);
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>())
             {
                 b.UseSetting(k, v);

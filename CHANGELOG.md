@@ -48,8 +48,12 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   transcriptions, the model list and info, embeddings; with its own key checks
   and per-minute limits shared by every replica, a pool balanced by what each
   copy is busy with, fallbacks, a ledger row for every request (refusals
-  too), metrics and alert rules, and the Overview's health. LiteLLM is the
-  default until it is measured against it (`deploy/scripts/gateway-compare.py`).
+  too), metrics and alert rules, and the Overview's health. **own is the
+  default**, an upgrade from 7.x too: measured against LiteLLM
+  (`deploy/scripts/gateway-compare.py`, docs/measurements/gateway.md) it adds
+  6 ms at p95 over the engine against LiteLLM's 17, moves the same tokens a
+  second, books every answer and uses half the CPU. LiteLLM is still deployed:
+  set litellm to go back.
 - **Chats in step as it happens**: every change to a chat reaches its
   owner's pages and Code Arenas at once, on every replica.
 - **Code Arena without signing in**: with a provider of your own, or as an

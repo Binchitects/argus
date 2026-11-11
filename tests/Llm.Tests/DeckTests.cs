@@ -72,7 +72,7 @@ public sealed class DeckTests(AppFixture app)
         Assert.Equal(file, changed.GetProperty("slides")[1].GetProperty("picture").GetProperty("fileId").GetGuid());
         var request = app.Model.Requests.Last(r => r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You change slide decks", StringComparison.Ordinal));
         Assert.Contains("They are looking at slide 2", request.Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
-        Assert.Equal("deck", request.Body["metadata"]!["tags"]![0]!.GetValue<string>());
+        Assert.Contains("deck", await app.TagsAsync(into: f));
 
         // By hand: someone else's picture does not stay on a slide.
         var otherFile = (await other.JsonAsync(await other.PostAsync($"/api/decks", new { about = "Theirs" }))).GetProperty("id").GetGuid();

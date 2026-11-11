@@ -1675,10 +1675,12 @@ down (a restart); `fail_open` lets them through unchecked instead.
 **Settings → API keys → Model gateway** chooses who sends the requests to
 the models, from the next request on:
 
-- **litellm** (the default): LiteLLM, as before 8.0, with the checks above.
+- **litellm**: LiteLLM, as before 8.0, with the checks above. LiteLLM is still
+  deployed in 8.0, so this is the way back if the app's own gateway misbehaves.
 - **chat**: the app sends its own chat, pictures and speech to the engines
   itself; API keys still go by LiteLLM.
-- **own**: the app answers everything it serves: API keys' chat completions,
+- **own** (the default from 8.0, an upgrade too; measured in
+  [measurements/gateway.md](measurements/gateway.md)): the app answers everything it serves: API keys' chat completions,
   Anthropic's Messages API (Claude Code, with `x-api-key`) and
   `count_tokens`, OpenAI's Responses API (Codex), the legacy completions,
   pictures, speech and transcriptions (any format: json, text, srt, vtt,

@@ -174,7 +174,10 @@ public sealed class SecurityReviewTests(AppFixture app)
             && c.Params?.GetProperty("arguments").GetProperty("project").GetString() == "g/shop" && c.Email == $"{user}@example.test"), c => Assert.Equal("main", c.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString()));
         var asked = app.Model.Requests.Skip(before).Select(r => r.Body).Where(r => r["messages"]![0]!["content"]!.ToString().StartsWith("You are an application security engineer", StringComparison.Ordinal)).ToList();
         Assert.Equal(5, asked.Count);
-        Assert.All(asked, r => Assert.Equal("security", r["metadata"]!["tags"]![0]!.ToString()));
+        // Every call of the review is tagged security: the five reads above and the checks of what they found.
+        var tags = await app.TagsAsync($"{user}@example.test");
+        Assert.True(tags.Count >= asked.Count, string.Join(", ", tags));
+        Assert.All(tags, t => Assert.Equal("security", t));
         Assert.Contains(asked, r => r["messages"]![1]!["content"]!.ToString().Contains("orders.Find(Request.Query[\"id\"])", StringComparison.Ordinal));
         // What a scanner matched is told to the model as a pattern, not a proof; the scanners' sinks are read first.
         Assert.Contains("Scanners matched a pattern here (a pattern is not proof: judge the code):\n- line 4, opengrep, bandit (csharp-sql-built-from-strings, B608)",

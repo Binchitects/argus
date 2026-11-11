@@ -44,7 +44,9 @@ public sealed class MemoryReflectionTests(AppFixture app)
         [.. (await b.JsonAsync(await b.GetAsync("/api/account/memories"))).GetProperty("memories").EnumerateArray()];
 
     private string SystemSentFor(string email) =>
-        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() != MemoryReflection.Tag)
+        // The chat's, not the reflection's (whose instructions say what it keeps).
+        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email
+            && !r.Body["messages"]![0]!["content"]!.ToString().StartsWith("You keep what an AI assistant remembers", StringComparison.Ordinal))
             .Body["messages"]![0]!["content"]!.GetValue<string>();
 
     private static Task<int> ReflectAsync(WebApplicationFactory<Program> f, MovableClock clock)

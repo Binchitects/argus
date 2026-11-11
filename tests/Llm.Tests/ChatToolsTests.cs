@@ -734,7 +734,8 @@ public sealed class ChatToolsTests(AppFixture app)
     {
         // The gateway answers before it can make keys: the first two tries are refused.
         var gateway = new FakeGateway { ServiceKeyFailures = 2 };
-        await using var f = NewApp(gateway);
+        // LiteLLM's way: the app's own gateway needs no key for the chat.
+        await using var f = NewApp(gateway, new Dictionary<string, string?> { ["Gateway:Mode"] = Llm.Api.Gateway.GatewayModes.LiteLlm });
         var (b, _, _) = await PersonAsync(f);
         var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
         var events = await SendAsync(b, id, "Hello on day one");

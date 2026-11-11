@@ -179,7 +179,7 @@ public sealed class DataTests(AppFixture app)
         Assert.Contains("total numeric(10,2) -- In euros", system, StringComparison.Ordinal);
         Assert.Contains("Totals are in euros.", system, StringComparison.Ordinal);
         Assert.DoesNotContain("shop.secrets", system, StringComparison.Ordinal);
-        Assert.Equal("data", request.Body["metadata"]!["tags"]![0]!.GetValue<string>());
+        Assert.Contains("data", await app.TagsAsync(into: f));
 
         // A query that fails goes back to the model with why; its second try is run.
         var fixedUp = await ana.JsonAsync(await ana.PostAsync("/api/data/ask", new { sourceId = source, question = "Total spent? [sql:select sum(amount) from shop.orders][fix:select sum(total) as \"Spent\" from shop.orders]" }));

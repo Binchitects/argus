@@ -86,7 +86,7 @@ public sealed class AppTests(AppFixture app)
         Assert.StartsWith("Answer to: In a preview", (await ana.JsonAsync(await ana.PostAsync("/api/apps/ask", new { prompt = "In a preview" }))).GetProperty("text").GetString(), StringComparison.Ordinal);
         var request = app.Model.Requests.Last(r => r.Body["messages"]!.AsArray().Any(m => m!["content"]?.ToString() == "Name a colour"));
         Assert.Equal("Answer in one word.", request.Body["messages"]![0]!["content"]!.GetValue<string>());
-        Assert.Equal("app", request.Body["metadata"]!["tags"]![0]!.GetValue<string>());
+        Assert.Contains("app", await app.TagsAsync(into: f));
         await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.BlockedWords, r => (r.Enabled, r.Patterns) = (true, "project falcon"));
         Assert.False((await ben.PostAsync($"/api/apps/{id}/ask", new { prompt = "Tell me about project falcon" })).IsSuccessStatusCode);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ben.PostAsync($"/api/apps/{id}/ask", new { prompt = "" }));

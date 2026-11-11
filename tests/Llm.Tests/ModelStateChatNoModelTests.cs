@@ -146,6 +146,9 @@ public sealed class ModelStateChatNoModelTests(AppFixture app) : IDisposable
         var f = app.Create(app.ConnectionStringFor("nomodel_" + Guid.NewGuid().ToString("N")[..8]), gateway, settings, s =>
         {
             s.AddHttpClient<GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => router);
+            // The app's own gateway sends the chat to the engine's router itself.
+            s.AddHttpClient(Llm.Api.Gateway.ModelGateway.Upstream).ConfigurePrimaryHttpMessageHandler(() => router);
+            s.AddHttpClient(Llm.Api.Gateway.ModelGateway.UpstreamUnchecked).ConfigurePrimaryHttpMessageHandler(() => router);
             s.AddHttpClient(LlamaCppBackend.Client).ConfigurePrimaryHttpMessageHandler(() => engine);
         });
         using var scope = f.Services.CreateScope();

@@ -124,7 +124,7 @@ public sealed class MeetingTests(AppFixture app)
         Assert.Equal([("Fix the flaky payment test", "Ben", null), ("Write the release notes", "Ana", "2026-10-30"), ("Tell support", "Dana from support", null)],
             actions.Select(a => (a.GetProperty("text").GetString(), a.GetProperty("owner").GetString(), a.GetProperty("due").GetString())));
         Assert.Equal([1, 0], actions.Take(2).Select(a => a.GetProperty("speaker").GetInt32()));
-        Assert.Contains(app.Model.Requests, r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "meetings");
+        Assert.Contains("meetings", await app.TagsAsync(into: f));
         var bell = (await ana.JsonAsync(await ana.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray();
         Assert.Contains(bell, n => n.GetProperty("title").GetString() == "Minutes ready: Checkout launch");
 

@@ -229,18 +229,18 @@ public sealed class RoomTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await member.PostAsync($"/api/rooms/{room}/translations", new { language = "xx", ids }));
         await StatusAssert.Is(HttpStatusCode.NotFound, await stranger.PostAsync($"/api/rooms/{room}/translations", new { language = "fa", ids }));
 
-        var asked = () => app.Model.Requests.Count(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "translate");
-        var before = asked();
+        var asked = () => app.TaggedAsync("translate");
+        var before = await asked();
         var read = await member.JsonAsync(await member.PostAsync($"/api/rooms/{room}/translations", new { language = "fa", ids }));
         var got = read.GetProperty("translations").EnumerateArray().ToDictionary(t => t.GetProperty("id").GetGuid());
         Assert.Equal("[Persian] Shall we leave at nine?", got[ids[0]].GetProperty("text").GetString());
         Assert.True(got[ids[1]].GetProperty("same").GetBoolean());
-        Assert.Equal(before + 1, asked());
+        Assert.Equal(before + 1, await asked());
 
         // Kept: the owner reading in Persian too asks the model nothing.
         var again = await owner.JsonAsync(await owner.PostAsync($"/api/rooms/{room}/translations", new { language = "fa", ids }));
         Assert.Equal(2, again.GetProperty("translations").GetArrayLength());
-        Assert.Equal(before + 1, asked());
+        Assert.Equal(before + 1, await asked());
         var german = await owner.JsonAsync(await owner.PostAsync($"/api/rooms/{room}/translations", new { language = "de", ids = new[] { ids[0] } }));
         Assert.Equal("[German] Shall we leave at nine?", german.GetProperty("translations")[0].GetProperty("text").GetString());
     }

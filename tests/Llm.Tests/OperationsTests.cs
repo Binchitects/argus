@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Dashboards;
+using Llm.Api.Gateway;
 using Llm.Api.Operations;
 using Microsoft.Extensions.Options;
 using YamlDotNet.Serialization;
@@ -145,7 +146,11 @@ public sealed class OperationsTests(AppFixture app)
     {
         var admin = await Admin();
         var services = (await admin.JsonAsync(await admin.GetAsync("/api/admin/services"))).EnumerateArray().ToList();
-        Assert.Contains(services, s => s.GetProperty("name").GetString() == "Model gateway" && !s.GetProperty("ok").GetBoolean());
+        // Nothing listens at Prometheus's address here.
+        Assert.Contains(services, s => s.GetProperty("name").GetString() == "Prometheus" && !s.GetProperty("ok").GetBoolean());
+        // The model gateway: the app's own (no model servers here, so none to ask), or LiteLLM's, which does not answer here.
+        var gateway = services.Single(s => s.GetProperty("name").GetString() == "Model gateway");
+        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own, gateway.GetProperty("ok").GetBoolean());
         Assert.Contains(services, s => s.GetProperty("name").GetString() == $"{Brand.CodeIntel}");
     }
 

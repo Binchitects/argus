@@ -102,7 +102,8 @@ public sealed class SkillLearningTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await b.Http.PutAsJsonAsync(new Uri($"/api/chat/conversations/{chat}/messages/{answer.GetProperty("id").GetString()}/feedback", UriKind.Relative),
             new { up = false, comment = "listed the refactors again" }));
         Assert.Equal(1, await ReflectAsync(f, clock));
-        var asked = app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == MemoryReflection.Tag && r.Body["user"]?.GetValue<string>() == email)
+        Assert.Equal(MemoryReflection.Tag, (await app.TagsAsync(email, f)).Last());
+        var asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email)
             .Body["messages"]![1]!["content"]!.GetValue<string>();
         Assert.Contains("The skill /release-notes used here, its instructions:\nWrite the release notes from the commits", asked, StringComparison.Ordinal);
         Assert.Contains("(The person marked this answer bad: listed the refactors again.)", asked, StringComparison.Ordinal);

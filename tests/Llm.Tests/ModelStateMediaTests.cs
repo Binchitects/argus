@@ -576,10 +576,12 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
                 Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
             };
             req.Headers.Authorization = new("Bearer", bearer);
-            // On to the gateway at once, which refuses it; the picture server stays off.
-            await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(req).WaitAsync(Deadline));
+            // Refused at once, by the app's own gateway (the model not the key's, or no such key) or by LiteLLM (its fake
+            // answers here); the picture server stays off.
+            await StatusAssert.Is(AppFixture.GatewayMode != GatewayModes.Own ? HttpStatusCode.OK : bearer == key ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized,
+                await client.SendAsync(req).WaitAsync(Deadline));
         }
-        Assert.Equal(2, Pictures.Paths.Count);
+        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own ? 0 : 2, Pictures.Paths.Count);
         s.Media.Wake();
         await Task.Delay(1000);
         Assert.Equal("off", s.File);
@@ -612,8 +614,17 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
             Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
         };
         req.Headers.Authorization = new("Bearer", key);
-        await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(req).WaitAsync(Deadline));
-        Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
+        if (AppFixture.GatewayMode == GatewayModes.Own)
+        {
+            // The app's own gateway refuses it itself.
+            await StatusAssert.Is(HttpStatusCode.Forbidden, await client.SendAsync(req).WaitAsync(Deadline));
+            Assert.Empty(Pictures.Paths);
+        }
+        else
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(req).WaitAsync(Deadline));
+            Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
+        }
         s.Media.Wake();
         await Task.Delay(1000);
         Assert.Equal("off", s.File);

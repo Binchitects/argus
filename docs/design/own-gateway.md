@@ -705,7 +705,7 @@ Web and e2e:
 
 ## 6. Commits, in order
 
-Each commit builds, passes the full Llm.Tests and CodeArena.Tests suites and the tests/deploy suite, and is pushed and redeployed live before the next, per your no-parallel-agents memory note. Until commit 18, `Gateway:Mode` defaults to `litellm`, so every commit before it ships with today's behaviour on by default.
+Each commit builds, passes the full Llm.Tests and CodeArena.Tests suites and the tests/deploy suite, and is pushed and redeployed live before the next, per your no-parallel-agents memory note. Until commit 18, `Gateway:Mode` defaulted to `litellm`, so every commit before it shipped with the old behaviour on by default; from commit 18 it defaults to `own`.
 
 | # | Commit | What it changes | How it is verified |
 |---|---|---|---|
@@ -811,6 +811,14 @@ request and first-token histograms; tokens by kind; in flight by deployment; ups
 the ledger's lines pending), alert rules `rules/gateway.yml` (GatewayUpstreamErrors, GatewayLedgerBehind,
 GatewaySlowFirstToken; in the Helm chart too), and with Mode own Admin → Overview's "Model gateway" is the app's own
 health (each route's server asked: llama.cpp, vLLM and SGLang `/health`, others `/v1/models`). GatewayAlertTests.
+
+Commit 17 (2026-11-11): measured on the offline host, both modes three times
+([measurements/gateway.md](../measurements/gateway.md)); every gate passes.
+
+Commit 18 (2026-11-11): `Gateway:Mode` defaults to `own` (LiteLlmOptions.Mode and the Settings row), an upgrade
+from 7.x too, since the setting is stored only once an admin changes it. LiteLLM stays deployed: Settings → API keys →
+Model gateway → litellm goes back at the next request. The test suites now run in own by default; the classes that
+test LiteLLM's own way pin `litellm`.
 
 ---
 

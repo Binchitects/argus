@@ -24,6 +24,20 @@ public sealed class ApiPassageTests(AppFixture app)
         using var list = new HttpRequestMessage(HttpMethod.Get, new Uri("/v1/models", UriKind.Relative));
         list.Headers.Authorization = new("Bearer", key);
         var listed = await client.SendAsync(list);
+        if (AppFixture.GatewayMode == Llm.Api.Gateway.GatewayModes.Own)
+        {
+            // The app's own gateway answers them itself, the key checked first: one it does not know gets nothing, and
+            // nothing is passed on (OwnApiTests: what a known key is listed).
+            await StatusAssert.Is(HttpStatusCode.Unauthorized, listed);
+            using var unknown = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/embeddings", UriKind.Relative))
+            {
+                Content = new StringContent("""{"model":"embed","input":"hello"}""", Encoding.UTF8, "application/json"),
+            };
+            unknown.Headers.Authorization = new("Bearer", key);
+            await StatusAssert.Is(HttpStatusCode.Unauthorized, await client.SendAsync(unknown));
+            Assert.DoesNotContain(app.Model.Passed, p => p.Item2 == key);
+            return;
+        }
         await StatusAssert.Is(HttpStatusCode.OK, listed);
         Assert.Equal("Qwen3.8-Flash-Next", JsonDocument.Parse(await listed.Content.ReadAsStringAsync()).RootElement.GetProperty("data")[0].GetProperty("id").GetString());
 

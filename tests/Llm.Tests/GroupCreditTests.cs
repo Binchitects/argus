@@ -90,6 +90,8 @@ public sealed class GroupCreditTests(AppFixture app)
 
         Assert.StartsWith("Answer to:", await AskAsync(ann, "What is new?"), StringComparison.Ordinal);
         Assert.Equal("NONE", (await GuardrailAsync(f, benEmail, "hello")).GetProperty("action").GetString());
+        // That answer's own cost, at the model's prices (the app's own gateway books it; LiteLLM's fake does not).
+        var asked = await app.CostAsync(annEmail, f);
 
         // Ann's and Ben's chats together reach the group's chat credit; last month's spend does not count, nor the keys'.
         await app.SpendAsync(annEmail, 3m, Now.AddDays(-5));
@@ -107,8 +109,8 @@ public sealed class GroupCreditTests(AppFixture app)
         Assert.Contains("has used its API credit for this month ($3.00", api.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
 
         var detail = await admin.JsonAsync(await admin.GetAsync($"/api/admin/groups/{group}"));
-        Assert.Equal(9m, detail.GetProperty("spentThisMonth").GetDecimal());
-        Assert.Equal(5.5m, detail.GetProperty("spentByKind").GetProperty("chat").GetDecimal());
+        Assert.Equal(9m + asked, detail.GetProperty("spentThisMonth").GetDecimal());
+        Assert.Equal(5.5m + asked, detail.GetProperty("spentByKind").GetProperty("chat").GetDecimal());
         Assert.Equal(3.5m, detail.GetProperty("spentByKind").GetProperty("api").GetDecimal());
         Assert.Equal(5m, detail.GetProperty("policies").GetProperty("credits").GetProperty("chat").GetDecimal());
         Assert.Equal(JsonValueKind.Null, detail.GetProperty("policies").GetProperty("credits").GetProperty("pictures").ValueKind);
@@ -145,7 +147,10 @@ public sealed class GroupCreditTests(AppFixture app)
         var (cy, cyId, cyEmail) = await PersonAsync(f, admin, new { chat = 3, api = 1 });
         await app.SpendAsync(cyEmail, 2m, Now.AddDays(-2));
         await app.SpendAsync(cyEmail, 1.5m, Now.AddDays(-1), apiKey: true);
+        var spent = await app.CostAsync(cyEmail, f);
         Assert.StartsWith("Answer to:", await AskAsync(cy, "Still in?"), StringComparison.Ordinal);
+        // That answer's own cost (booked by the app's own gateway).
+        var answered = await app.CostAsync(cyEmail, f) - spent;
         var key = await GuardrailAsync(f, cyEmail, "x");
         Assert.Equal("BLOCKED", key.GetProperty("action").GetString());
         Assert.Contains("You have used all your API credit for this month ($1.00)", key.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
@@ -155,7 +160,7 @@ public sealed class GroupCreditTests(AppFixture app)
         // The person's page: each kind's spend and credit, the tightest group's, and what is used up.
         var page = await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{cyId}"));
         var credits = page.GetProperty("person").GetProperty("credits");
-        Assert.Equal(3m, credits.GetProperty("chat").GetProperty("spent").GetDecimal());
+        Assert.Equal(3m + answered, credits.GetProperty("chat").GetProperty("spent").GetDecimal());
         Assert.Equal(3m, credits.GetProperty("chat").GetProperty("credit").GetDecimal());
         Assert.Equal(JsonValueKind.Null, credits.GetProperty("video").GetProperty("credit").ValueKind);
         Assert.Equal(["chat", "api"], page.GetProperty("person").GetProperty("overCredit").EnumerateArray().Select(k => k.GetString()));

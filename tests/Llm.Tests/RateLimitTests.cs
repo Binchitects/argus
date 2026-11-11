@@ -542,10 +542,14 @@ public sealed class RateLimitTests(AppFixture app)
             var stream = await (await me.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
             Assert.Contains("\"done\"", stream, StringComparison.Ordinal);
         }
-        // The chat's requests go with the chat's own key, which carries no limit; the person's key is not used.
+        // The person's key is not used. With LiteLLM the chat's requests go with the chat's own key, which carries no
+        // limit; the app's own gateway sends them to the engine itself, with no key of LiteLLM's.
         var keys = app.Model.Requests.Skip(before).Select(r => r.Headers.GetValueOrDefault("Authorization", "")).Distinct().ToList();
         Assert.NotEmpty(keys);
-        Assert.All(keys, k => Assert.Contains(k.Replace("Bearer ", "", StringComparison.Ordinal), app.Gateway.ServiceKeys));
+        if (AppFixture.GatewayMode != GatewayModes.Own)
+        {
+            Assert.All(keys, k => Assert.Contains(k.Replace("Bearer ", "", StringComparison.Ordinal), app.Gateway.ServiceKeys));
+        }
         Assert.All(keys, k => Assert.DoesNotContain(app.Gateway.Keys.Values, g => "Bearer " + g.Secret == k));
     }
 

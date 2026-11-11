@@ -25,9 +25,12 @@ public sealed class OwnApiTests(AppFixture app)
     [Fact]
     public async Task The_gateway_is_chosen_in_the_settings_and_the_next_request_goes_the_new_way()
     {
-        await using var f = app.Create(app.ConnectionStringFor("gwmode_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        // LiteLLM first (the way back), then the app's own: the default, as installed.
+        await using var f = app.Create(app.ConnectionStringFor("gwmode_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Gateway:Mode"] = GatewayModes.LiteLlm });
         var gateway = f.Services.GetRequiredService<ModelGateway>();
         Assert.False(gateway.ForChat);
+        Assert.Equal(GatewayModes.Own, new Llm.Api.Gateway.LiteLlmOptions().Mode);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var saved = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new object[] { new { key = "Gateway:Mode", value = "own" } } });
         Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync());

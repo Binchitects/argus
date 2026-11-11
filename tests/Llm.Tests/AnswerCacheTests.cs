@@ -97,8 +97,12 @@ public sealed class AnswerCacheTests(AppFixture app)
         var answer = Words(await BodyAsync(first));
         Assert.StartsWith("Answer to: Opening hours?", answer, StringComparison.Ordinal);
         Assert.Equal(1, Asked(marker));
-        // The gateway got the caller's own key: the spend of a miss is theirs, as without the cache.
-        Assert.Equal($"Bearer {key}", app.Model.Requests.Last(r => r.Body.ToJsonString().Contains(marker, StringComparison.Ordinal)).Headers["Authorization"]);
+        // The spend of a miss is the caller's, as without the cache: LiteLLM gets their own key; the app's own gateway
+        // books it to them itself.
+        if (AppFixture.GatewayMode != GatewayModes.Own)
+        {
+            Assert.Equal($"Bearer {key}", app.Model.Requests.Last(r => r.Body.ToJsonString().Contains(marker, StringComparison.Ordinal)).Headers["Authorization"]);
+        }
 
         var again = await CallAsync(f, key, Question($"Opening hours? {marker}"));
         await StatusAssert.Is(HttpStatusCode.OK, again);
@@ -144,7 +148,8 @@ public sealed class AnswerCacheTests(AppFixture app)
     [Fact]
     public async Task Answers_are_kept_per_key_and_per_model()
     {
-        var (f, _) = NewApp("all");
+        var (f, gateway) = NewApp("all");
+        gateway.Models.Add(new("Other-Model", 32768, 8192, Vision: false, Tools: true, Thinking: false, 0.20m, 0.02m, 0.80m));
         await using var _f = f;
         var (_, mine) = await PersonAsync(f);
         var (_, theirs) = await PersonAsync(f);
@@ -203,7 +208,8 @@ public sealed class AnswerCacheTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{person}/api", UriKind.Relative), new { on = false }));
         app.Model.RevokedKeys[key] = true;
         var refused = await CallAsync(f, key, Question(marker));
-        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        // LiteLLM no longer knows the key; the app's own gateway says the person has no API access.
+        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized, refused.StatusCode);
         Assert.Null(Cache(refused));
 
         // A key the gateway does not know at all is not even looked up.

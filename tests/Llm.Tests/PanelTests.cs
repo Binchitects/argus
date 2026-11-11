@@ -42,7 +42,8 @@ public sealed class PanelTests(AppFixture app)
         Assert.StartsWith("Answer to:", panel.GetProperty("verdict").GetString(), StringComparison.Ordinal);
 
         // Each heard the others: the second speaker read the first; the assistant spoke with its own instructions.
-        var requests = app.Model.Requests.Where(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "panel").Select(r => r.Body["messages"]!.AsArray()).ToList();
+        Assert.Contains("panel", await app.TagsAsync(into: f));
+        var requests = app.Model.Requests.Select(r => r.Body["messages"]!.AsArray()).Where(m => m.Count > 1).ToList();
         Assert.Contains(requests, m => m[0]!["content"]!.GetValue<string>().Contains("You are The critic", StringComparison.Ordinal) && m[1]!["content"]!.GetValue<string>().Contains("The expert (round 1):", StringComparison.Ordinal));
         Assert.Contains(requests, m => m[0]!["content"]!.GetValue<string>().Contains("You are Release manager: You plan releases", StringComparison.Ordinal));
 
