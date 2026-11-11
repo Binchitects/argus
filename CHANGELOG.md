@@ -127,6 +127,13 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   with it. The web chat shows that answer as it comes, and what Arena
   missed while out of reach is tried again within 10 seconds (it was up to a
   minute).
+- Code Arena's VM tool no longer hangs on VMware: a command goes into the
+  guest as a script file (nothing for vmrun or cmd to unescape: quotes,
+  pipes, `&`, `%`, `$`; a Windows `for` loop's variables as a batch file
+  wants them), runs with its input empty, and is killed in the guest past
+  its time rather than left blocking the next calls; a start that waits on a
+  question in VMware's window says so after 3 minutes, and new VMs answer
+  such questions themselves (`msg.autoAnswer`).
 - A live thinking step (and a command's output) follows its newest words
   only while it is left at the bottom: scrolled up to read, it stays there;
   scrolled back to the end, it follows again. In the web chat too.

@@ -342,6 +342,20 @@ public sealed class VmToolTests : IDisposable
     }
 
     [Fact]
+    public void A_Windows_guest_command_is_a_batch_file_its_for_variables_doubled_and_its_code_written_once_it_ends()
+    {
+        Assert.Equal("for /f \"tokens=*\" %%i in ('dir /b') do echo %%~nxi & echo %PATH% %%i", Vmware.Batch("for /f \"tokens=*\" %i in ('dir /b') do echo %~nxi & echo %PATH% %i"));
+        Assert.Equal("for %%a in (1 2) do echo %%a %avar%", Vmware.Batch("for %a in (1 2) do echo %a %avar%"));
+        Assert.Equal("echo 100% done & dir \"C:\\Program Files\" | findstr /i \"x\"", Vmware.Batch("echo 100% done & dir \"C:\\Program Files\" | findstr /i \"x\""));
+        Assert.Equal("@echo off\r\nline 1\r\nline 2\r\n", Vmware.GuestScript("line 1\nline 2", windows: true));
+        var runner = Vmware.GuestRunner(@"C:\Windows\Temp\a.cmd", @"C:\Windows\Temp\a.txt", @"C:\Windows\Temp\a.done", windows: true);
+        Assert.Contains("cmd.exe /d /c \"C:\\Windows\\Temp\\a.cmd\" <NUL >\"C:\\Windows\\Temp\\a.txt\" 2>&1\r\n", runner, StringComparison.Ordinal);
+        // The code's redirection first: "echo 2>file" would send stream 2 there instead.
+        Assert.EndsWith(">\"C:\\Windows\\Temp\\a.done\" echo %ERRORLEVEL%\r\n", runner, StringComparison.Ordinal);
+        Assert.Equal("sh '/tmp/a.sh' </dev/null >'/tmp/a.txt' 2>&1\necho $? >'/tmp/a.done'\n", Vmware.GuestRunner("/tmp/a.sh", "/tmp/a.txt", "/tmp/a.done", windows: false));
+    }
+
+    [Fact]
     public async Task VMware_runs_a_command_through_a_file_in_the_guest_and_its_output_holds_no_password()
     {
         using var h = new Harness(_gateway);
@@ -375,9 +389,14 @@ public sealed class VmToolTests : IDisposable
             checkToolsState) echo "The tools are running";;
             runProgramInGuest)
               [ "$pw" = "@PASSWORD@" ] || { echo "Error: Invalid user name or password for the guest OS"; exit 255; }
-              shift; "$@"; code=$?
+              shift
+              if [ "$1" = "-noWait" ]; then shift; "$@" >/dev/null 2>&1 & echo "$!" > "$d/guest-pid"; exit 0; fi
+              "$@"; code=$?
               if [ $code -ne 0 ]; then echo "Guest program exited with non-zero exit code: $code"; exit 255; fi;;
-            CopyFileFromGuestToHost|CopyFileFromHostToGuest) cp "$2" "$3";;
+            CopyFileFromGuestToHost|CopyFileFromHostToGuest) cp "$2" "$3" 2>/dev/null || { echo "Error: A file was not found"; exit 255; };;
+            fileExistsInGuest) if [ -f "$2" ]; then echo "The file exists."; else echo "The file does not exist."; exit 255; fi;;
+            listProcessesInGuest) for p in $(pgrep -P "$(cat "$d/guest-pid" 2>/dev/null)" 2>/dev/null) $(cat "$d/guest-pid" 2>/dev/null); do echo "pid=$p, owner=admin, cmd=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)"; done;;
+            killProcessInGuest) kill -9 "$2" 2>/dev/null; echo "killed $2" >> "$d/killed";;
             deleteFileInGuest) rm -f "$2";;
             directoryExistsInGuest) echo "The directory does not exist.";;
             captureScreen) cp "$d/screen.png" "$2";;
@@ -385,9 +404,20 @@ public sealed class VmToolTests : IDisposable
             """);
         SecretTool(bin, "admin", Password);
         Calls(("vm_list", "{}"), ("vm_power", """{"vm":"Web server","action":"start"}"""),
-            ("vm_run", $$"""{"vm":"Web server","command":"echo the password is $(cat {{bin}}/kept-password); exit 2"}"""));
+            ("vm_run", $$"""{"vm":"Web server","command":"echo the password is $(cat {{bin}}/kept-password); exit 2"}"""),
+            // Quotes, a pipe and a dollar go through untouched (the command is a file in the guest); a question gets nothing and goes on.
+            ("vm_run", new JsonObject { ["vm"] = "Web server", ["command"] = "printf '%s|%s\\n' \"a b\" '$HOME' | tr a A; read answer; echo \"got [$answer]\"" }.ToJsonString()),
+            // Past its time: killed in the guest, what it said so far kept.
+            ("vm_run", """{"vm":"Web server","command":"echo started; sleep 30; echo never","timeout":3}"""));
         Assert.Equal(0, await h.Run("", "-p", "run it", "--mode", "yolo"));
         var results = Results();
+        Assert.StartsWith("Exit code 0", results[3], StringComparison.Ordinal);
+        Assert.Contains("A b|$HOME", results[3], StringComparison.Ordinal);
+        Assert.Contains("got []", results[3], StringComparison.Ordinal);
+        Assert.StartsWith("Gave up after 3s: it was stopped in the guest.", results[4], StringComparison.Ordinal);
+        Assert.Contains("started", results[4], StringComparison.Ordinal);
+        Assert.DoesNotContain("never", results[4], StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(bin, "killed")));
         Assert.Contains("VMware Workstation", results[0], StringComparison.Ordinal);
         Assert.Contains("- Web server: off", results[0], StringComparison.Ordinal);
         Assert.StartsWith("Exit code 2", results[2], StringComparison.Ordinal);

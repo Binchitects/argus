@@ -571,7 +571,7 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
             throw;
         }
         var said = run.TimedOut
-            ? $"Gave up after {Fmt.Duration(timeout)} (it may still run in the guest)."
+            ? $"Gave up after {Fmt.Duration(timeout)}{(run.Stopped ? ": it was stopped in the guest" : " (it may still run in the guest)")}."
             : $"Exit code {run.ExitCode}, after {Fmt.Duration(clock.Elapsed)}.";
         if (run.TimedOut || run.ExitCode != 0)
         {

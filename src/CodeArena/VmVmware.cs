@@ -22,6 +22,9 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
 
     private IEnumerable<string> T => ["-T", type];
 
+    /// <summary>How long vmrun start may take: a start that takes longer waits on a question in VMware's window.</summary>
+    internal static TimeSpan StartWait { get; set; } = TimeSpan.FromMinutes(3);
+
     /// <summary>The device of VMware's monitor module on Linux (vmmon), without which no VM starts.</summary>
     internal static string MonitorDevice { get; set; } = "/dev/vmmon";
 
@@ -174,6 +177,8 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
             ("scsi0:0.present", "TRUE"), ("scsi0:0.fileName", spec.Name + ".vmdk"),
             ("ethernet0.present", "TRUE"), ("ethernet0.connectionType", "nat"), ("ethernet0.virtualDev", "e1000"), ("ethernet0.addressType", "generated"),
             ("usb.present", "TRUE"), ("tools.syncTime", "TRUE"),
+            // VMware answers its own questions (moved or copied?) with their defaults: a start with no window never waits on one.
+            ("msg.autoAnswer", "TRUE"),
         };
         if (spec.Os == "windows")
         {
@@ -245,9 +250,19 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
     /// </summary>
     public override async Task StartAsync(VmInfo vm, bool gui, CancellationToken ct)
     {
+        var r = await CallAsync([.. T, "start", vm.Id, gui ? "gui" : "nogui"], StartWait, ct);
+        if (r.TimedOut)
+        {
+            // vmrun start waits, without a word, on a question VMware asks in its window (was the VM moved or copied?).
+            throw new ToolError($"{Title} did not start {vm.Name} within {Fmt.Duration(StartWait)}: it is most likely waiting on a question in its window " +
+                "(was the VM moved or copied?). Open the VM in VMware and answer it, or put msg.autoAnswer = \"TRUE\" in its .vmx so VMware answers such questions itself.");
+        }
         try
         {
-            await MustAsync([.. T, "start", vm.Id, gui ? "gui" : "nogui"], Long, ct);
+            if (r.ExitCode != 0)
+            {
+                throw new ToolError($"{Title}: {Said(r)}");
+            }
         }
         catch (ToolError e) when (OperatingSystem.IsLinux() && !File.Exists(MonitorDevice))
         {
@@ -282,35 +297,106 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
     }
 
     /// <summary>
-    /// runProgramInGuest gives no output: the command's goes to a file in the guest's temporary folder, copied back and
-    /// deleted. Its exit code is the one vmrun reports ("Guest program exited with non-zero exit code: 3").
+    /// A command in the guest, with nothing for vmrun or the guest's shell to unescape: the command goes into a script
+    /// file of its own (copied in), run by a second one that sends its output to a file and writes its exit code to
+    /// another when it ends. vmrun starts it and returns at once (-noWait), so no vmrun call waits on the command: the
+    /// end is looked for every <see cref="Hypervisor.Poll"/>, and past the time allowed the command is killed in the
+    /// guest (vmrun killed with it would leave it running, and the guest's next calls waiting behind it). Its input is
+    /// empty (NUL, /dev/null): a command that asks for something gets nothing and goes on, rather than waiting until the end.
     /// </summary>
     public override async Task<GuestRun> RunAsync(VmInfo vm, GuestLogin? login, string command, TimeSpan timeout, CancellationToken ct)
     {
         var windows = await WindowsAsync(vm, ct);
-        var id = Guid.NewGuid().ToString("N")[..12];
-        var guestOut = windows ? $@"C:\Windows\Temp\code-arena-{id}.txt" : $"/tmp/code-arena-{id}.txt";
-        string[] program = windows
-            ? [@"C:\Windows\System32\cmd.exe", "/c", $"({command}) > \"{guestOut}\" 2>&1"]
-            : ["/bin/sh", "-c", $"({command}) > {Sh(guestOut)} 2>&1"];
-        var r = await CallAsync([.. T, .. As(login), "runProgramInGuest", vm.Id, .. program], timeout, ct);
-        var said = Clean(r.Output + "\n" + r.Error);
-        var code = r.ExitCode;
-        if (ExitCode().Match(said) is { Success: true } m)
+        var id = "code-arena-" + Guid.NewGuid().ToString("N")[..12];
+        var (dir, sep) = windows ? (@"C:\Windows\Temp", '\\') : ("/tmp", '/');
+        string Guest(string suffix) => dir + sep + id + suffix;
+        var (script, runner, output, done) = windows ? (Guest(".cmd"), Guest("-run.cmd"), Guest(".txt"), Guest(".done")) : (Guest(".sh"), Guest("-run.sh"), Guest(".txt"), Guest(".done"));
+        var files = new List<string>();
+        try
         {
-            code = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            foreach (var (guest, text) in new[] { (script, GuestScript(command, windows)), (runner, GuestRunner(script, output, done, windows)) })
+            {
+                var host = HostTemp(windows ? ".cmd" : ".sh");
+                files.Add(host);
+                await File.WriteAllTextAsync(host, text, new System.Text.UTF8Encoding(false), ct);
+                await MustAsync([.. T, .. As(login), "CopyFileFromHostToGuest", vm.Id, host, guest], Short, ct);
+            }
+            string[] program = windows ? [@"C:\Windows\System32\cmd.exe", "/d", "/c", runner] : ["/bin/sh", runner];
+            await MustAsync([.. T, .. As(login), "runProgramInGuest", vm.Id, "-noWait", .. program], Short, ct);
+
+            var until = DateTime.UtcNow + timeout;
+            int? code = null;
+            var stopped = false;
+            while (true)
+            {
+                if (await ExistsAsync(vm, login, done, ct))
+                {
+                    code = int.TryParse((await ReadGuestAsync(vm, login, done, ct)).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var c) ? c : -1;
+                    break;
+                }
+                if (DateTime.UtcNow >= until)
+                {
+                    stopped = await KillAsync(vm, login, id, ct);
+                    break;
+                }
+                await Task.Delay(Poll, ct);
+            }
+            var said = await ReadGuestAsync(vm, login, output, ct);
+            return new GuestRun(code ?? -1, said.TrimEnd(), code is null, stopped);
         }
-        else if (r.ExitCode != 0 && !r.TimedOut)
+        finally
         {
-            throw new ToolError($"{Title}: {Said(r)}");
+            foreach (var guest in new[] { script, runner, output, done })
+            {
+                await CallAsync([.. T, .. As(login), "deleteFileInGuest", vm.Id, guest], Short, CancellationToken.None);
+            }
+            files.ForEach(Delete);
         }
+    }
+
+    /// <summary>The command as a script of its own: a Windows batch file (a for loop's %i written %%i, as a batch file wants it), or sh.</summary>
+    internal static string GuestScript(string command, bool windows) => windows
+        ? "@echo off\r\n" + Batch(command).Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n"
+        : command + "\n";
+
+    /// <summary>
+    /// What runs the script: in UTF-8, its input empty, its output and errors to one file, then its exit code to another
+    /// (written once it ended, so that file is the sign it did). A Windows script runs in a cmd of its own, so its "exit 2" ends only it;
+    /// the code's redirection goes first, as "echo 2>file" would send stream 2 to the file instead.
+    /// </summary>
+    internal static string GuestRunner(string script, string output, string done, bool windows) => windows
+        ? $"@echo off\r\nchcp 65001 >NUL\r\ncmd.exe /d /c \"{script}\" <NUL >\"{output}\" 2>&1\r\n>\"{done}\" echo %ERRORLEVEL%\r\n"
+        : $"sh {Sh(script)} </dev/null >{Sh(output)} 2>&1\necho $? >{Sh(done)}\n";
+
+    /// <summary>A line typed at cmd's prompt as a batch file holds it: a for loop's variables (%i, %~nxi) doubled, the rest as it was.</summary>
+    internal static string Batch(string command)
+    {
+        var letters = ForVariable().Matches(command).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var l in letters)
+        {
+            command = Regex.Replace(command, $@"(?<!%)%(~[a-zA-Z$:]*)?{Regex.Escape(l)}(?![A-Za-z0-9_]*%)(?![A-Za-z0-9_])", m => "%" + m.Value);
+        }
+        return command;
+    }
+
+    [GeneratedRegex(@"(?i)\bfor\b(?:\s+/[a-z]+(?:\s+""[^""]*"")?)*\s+(?<!%)%([a-zA-Z])\b")]
+    private static partial Regex ForVariable();
+
+    /// <summary>Whether a file is in the guest (vmrun fileExistsInGuest: "The file exists.").</summary>
+    private async Task<bool> ExistsAsync(VmInfo vm, GuestLogin? login, string guest, CancellationToken ct)
+    {
+        var r = await CallAsync([.. T, .. As(login), "fileExistsInGuest", vm.Id, guest], Short, ct);
+        return Clean(r.Output).Contains("The file exists", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>A guest file's text, copied out ("" when it is not there).</summary>
+    private async Task<string> ReadGuestAsync(VmInfo vm, GuestLogin? login, string guest, CancellationToken ct)
+    {
         var host = HostTemp(".txt");
         try
         {
-            var copied = await CallAsync([.. T, .. As(login), "CopyFileFromGuestToHost", vm.Id, guestOut, host], Short, ct);
-            var output = copied.ExitCode == 0 && File.Exists(host) ? await File.ReadAllTextAsync(host, ct) : "";
-            await CallAsync([.. T, .. As(login), "deleteFileInGuest", vm.Id, guestOut], Short, ct);
-            return new GuestRun(r.TimedOut ? -1 : code, output.TrimEnd(), r.TimedOut);
+            var copied = await CallAsync([.. T, .. As(login), "CopyFileFromGuestToHost", vm.Id, guest, host], Short, ct);
+            return copied.ExitCode == 0 && File.Exists(host) ? await File.ReadAllTextAsync(host, ct) : "";
         }
         finally
         {
@@ -318,8 +404,24 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
         }
     }
 
-    [GeneratedRegex(@"exit code:\s*(-?\d+)", RegexOptions.IgnoreCase)]
-    private static partial Regex ExitCode();
+    /// <summary>The command's processes in the guest, found by its files' name in their command line, killed.</summary>
+    private async Task<bool> KillAsync(VmInfo vm, GuestLogin? login, string id, CancellationToken ct)
+    {
+        var listed = await CallAsync([.. T, .. As(login), "listProcessesInGuest", vm.Id], Short, ct);
+        var killed = false;
+        foreach (var line in Clean(listed.Output).Split('\n').Where(l => l.Contains(id, StringComparison.Ordinal)))
+        {
+            if (GuestPid().Match(line) is { Success: true } m)
+            {
+                killed |= (await CallAsync([.. T, .. As(login), "killProcessInGuest", vm.Id, m.Groups[1].Value], Short, ct)).ExitCode == 0;
+            }
+        }
+        return killed;
+    }
+
+    [GeneratedRegex(@"pid=(\d+)")]
+    private static partial Regex GuestPid();
+
 
     /// <summary>A folder goes file by file, its folders made first.</summary>
     public override async Task CopyInAsync(VmInfo vm, GuestLogin? login, string host, string guest, CancellationToken ct)

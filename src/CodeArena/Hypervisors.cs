@@ -14,7 +14,8 @@ internal sealed record VmInfo(string Name, string Id, Hypervisor Host, bool Runn
 }
 
 /// <summary>How a command in a guest ended: its exit code, what it printed (stdout and stderr together), and whether its time ran out.</summary>
-internal sealed record GuestRun(int ExitCode, string Output, bool TimedOut);
+/// <param name="Stopped">Past its time, it was killed in the guest (not left running there).</param>
+internal sealed record GuestRun(int ExitCode, string Output, bool TimedOut, bool Stopped = false);
 
 /// <summary>
 /// A new VM: its name, memory (MB), processors, an empty disk (GB), the installer's ISO in its drive (a host path), and its

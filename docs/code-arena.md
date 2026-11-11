@@ -2301,7 +2301,7 @@ sandbox, since they talk to the hypervisor's own service.
 | | commands and files | screen | keys and text | click |
 |---|---|---|---|---|
 | VirtualBox (`VBoxManage`) | `guestcontrol`, through the Guest Additions; signs in | `screenshotpng` | `keyboardputstring`, scancodes | no |
-| VMware (`vmrun`) | `runProgramInGuest`, its output through a file in the guest; through VMware Tools; signs in | `captureScreen` (signs in) | `typeKeystrokesInGuest`: text, Enter and Tab only | no |
+| VMware (`vmrun`) | the command as a script file copied into the guest (a batch file on Windows, its `for` variables doubled; `sh` elsewhere), so no quote, pipe, `&`, `%` or `$` is unescaped on the way; started with `runProgramInGuest -noWait`, its input empty, its end and exit code read from files there; past `timeout` it is killed in the guest (`killProcessInGuest`), what it said kept; through VMware Tools; signs in | `captureScreen` (signs in) | `typeKeystrokesInGuest`: text, Enter and Tab only | no |
 | libvirt (`virsh`, `qemu:///system` or `LIBVIRT_DEFAULT_URI`) | the QEMU guest agent (`qemu-guest-agent` in the guest): no sign-in | `screenshot` | `send-key` (text as a US keyboard types it) | QEMU's input events, with a tablet |
 | Hyper-V (PowerShell's Hyper-V module) | PowerShell Direct, Windows guests; signs in | the VM's video | the VM's keyboard | the VM's mouse |
 
