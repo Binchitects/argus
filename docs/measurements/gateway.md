@@ -130,13 +130,22 @@ The own gateway does LiteLLM's work in the app for about 1 point more of the app
 | Abort: slot freed within 1 s | **pass**: 0.11–0.14 s |
 | No 500s with the engine down | **pass**: 502 naming the server |
 
-## Not covered by this run
+## After commit 18: the gates left (2026-11-12)
 
-- **Two app replicas** (the limit counted across replicas, `scale.yml`): the test host runs one.
-- **Pool balance** across two copies (`flash@0`, `flash@1`): the test host has one GPU and one copy.
-- **vLLM and SGLang** copies killed mid-run (W8's fallback to the other copy): llama.cpp only here.
-- **Media (W7)**: pictures, speech and transcription through the gateway.
-- **`clients-check.py`** with Claude Code, Codex, Qwen Code, Aider and the OpenAI SDK.
-- **The 24-hour soak** of commit 18, with the dashboards against LiteLLM's baseline week.
+On the same test host with the own gateway the default, run by `deploy/scripts/gateway-scale-check.py` and
+`clients-check.py`, the app as two replicas (`scale.yml`):
 
-These need the H200 host or a live stack. They stand between this result and removing LiteLLM.
+| Gate | Result |
+|---|---|
+| Limits across two replicas: a 5-a-minute key, 8 requests asked of each replica in turn | **pass**: 5 answered, 3 got 429 with Retry-After, both replicas asked |
+| Pool balance: the model twice (llama.cpp, and the same engine through a proxy, added as another GPU server), 40 answers 8 at once | **pass**: 19 and 21 (47.5% and 52.5% for equal weights) |
+| A copy killed mid-run (the proxy stopped), 20 answers next | **pass**: 20 of 20 answered, none failed, 2 retried on the other copy (attempts 2 in the ledger), none by the copy gone. This found a gap, fixed in 335ba91d: a copy not reached went to the model's fallback, not to the pool's other copy |
+| Media: speech and its transcription with a person's key | **pass**: both answered (the words heard back), booked with their characters and seconds at their prices |
+| Media: a picture | **not measured**: the host has no picture model's file (FLUX.2-klein-4B did not load within five minutes; the gateway said so with 503 model_not_ready) |
+| `clients-check.py` | **pass**, 15 of 15: the OpenAI API (list, chat, stream, tool call), Anthropic's Messages and OpenAI's Responses, the spend booked, Qwen Code answering and writing its file through the gateway. Claude Code, Codex and Aider are not installed here; their wire (Messages, Responses) is checked |
+
+## Still to measure
+
+- **vLLM and SGLang** copies, and their health: llama.cpp only here (H200 host).
+- **A picture through the gateway**, on a host with a picture model.
+- **The 24-hour soak** (`deploy/scripts/gateway-soak.py`): error rate, the first token's p95 and the app's memory hour by hour, and every answer in the ledger.

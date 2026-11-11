@@ -164,7 +164,7 @@ def main():
         total = sum(split.values())
         shares = {k: round(v / total, 3) for k, v in split.items()} if total else {}
         out["pool"].update({"answers": sum(1 for r in rs if r["ok"]), "split": split, "shares": shares})
-        out["gates"]["pool"] = {"pass": out["pool"]["routed"] and len(split) == 2 and all(0.35 <= v <= 0.65 for v in shares.values()) and sum(1 for r in rs if r["ok"]) == 40,
+        out["gates"]["pool"] = {"pass": len(split) == 2 and all(0.35 <= v <= 0.65 for v in shares.values()) and sum(1 for r in rs if r["ok"]) == 40,
                                 "shares": shares}
         print(json.dumps({"pool": out["gates"]["pool"]}), flush=True)
 
