@@ -333,7 +333,8 @@ public static class DownloadEndpoints
         StartupWMClass=code-arena
         DESKTOP
             command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$share/applications" >/dev/null 2>&1
-            echo "Code Arena is in your applications menu, and offered to open folders."
+        {{FolderMenusSh}}
+            echo "Code Arena is in your applications menu, and \"Open in Code Arena\" is on folders (Files, Dolphin, Nemo, Caja, Thunar)."
           elif [ "$os" = osx ]; then
             app="$HOME/Applications/Code Arena.app"
             rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -357,9 +358,154 @@ public static class DownloadEndpoints
           <key>LSMinimumSystemVersion</key><string>12.0</string>
         </dict></plist>
         PLIST
-            echo "Code Arena is in your Applications folder ($app): Launchpad, Spotlight and the Dock find it."
+        {{MacQuickActionSh}}
+            echo "Code Arena is in your Applications folder ($app): Launchpad, Spotlight and the Dock find it; \"Open in Code Arena\" is in Finder's Quick Actions on a folder."
           fi
         fi
+        """;
+
+    /// <summary>
+    /// "Open in Code Arena" on a folder and in a folder's empty space, in each Linux file manager that takes one from the
+    /// person's own folders (src/CodeArena/AppInstall.cs takes them off, by the same names): GNOME Files (a script under
+    /// Scripts, and with nautilus-python an item of its own), Dolphin (a service menu, KDE 5 and 6), Nemo (two actions),
+    /// Caja (a script) and Thunar (a custom action in uca.xml, added once). Each runs code-arena -C FOLDER.
+    /// </summary>
+    private static string FolderMenusSh => """
+            cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+            # GNOME Files: right click > Scripts > Open in Code Arena (the folder chosen, else the one open).
+            for scripts in "$share/nautilus/scripts" "$cfg/caja/scripts"; do
+              mkdir -p "$scripts"
+              cat > "$scripts/Open in Code Arena" <<OPENER
+        #!/bin/sh
+        dir="\$(printf '%s\n' "\${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-\$CAJA_SCRIPT_SELECTED_FILE_PATHS}" | head -n 1)"
+        [ -d "\$dir" ] || dir="\$PWD"
+        exec "$dir/code-arena" -C "\$dir"
+        OPENER
+              chmod 755 "$scripts/Open in Code Arena"
+            done
+            # GNOME Files with nautilus-python: an item of its own in the menu, on a folder and in its empty space.
+            mkdir -p "$share/nautilus-python/extensions"
+            cat > "$share/nautilus-python/extensions/code_arena.py" <<PYEXT
+        import subprocess
+        from gi.repository import GObject, Nautilus
+
+
+        class CodeArena(GObject.GObject, Nautilus.MenuProvider):
+            def _item(self, path):
+                item = Nautilus.MenuItem(name="CodeArena::Open", label="Open in Code Arena", tip="Open this folder in Code Arena")
+                item.connect("activate", lambda *_: subprocess.Popen(["$dir/code-arena", "-C", path], start_new_session=True))
+                return [item]
+
+            def get_file_items(self, *args):
+                files = args[-1]
+                if len(files) == 1 and files[0].is_directory() and files[0].get_location() and files[0].get_location().get_path():
+                    return self._item(files[0].get_location().get_path())
+                return []
+
+            def get_background_items(self, *args):
+                folder = args[-1]
+                return self._item(folder.get_location().get_path()) if folder.get_location() and folder.get_location().get_path() else []
+        PYEXT
+            # Dolphin (KDE 6, and KDE 5's folder): on a folder and in its empty space.
+            for menus in "$share/kio/servicemenus" "$share/kservices5/ServiceMenus"; do
+              mkdir -p "$menus"
+              cat > "$menus/code-arena.desktop" <<KDEMENU
+        [Desktop Entry]
+        Type=Service
+        ServiceTypes=KonqPopupMenu/Plugin
+        MimeType=inode/directory;
+        Actions=openInCodeArena;
+        X-KDE-Priority=TopLevel
+
+        [Desktop Action openInCodeArena]
+        Name=Open in Code Arena
+        Icon=code-arena
+        Exec="$dir/code-arena" -C %f
+        KDEMENU
+              chmod 755 "$menus/code-arena.desktop"
+            done
+            # Nemo: on a folder, and in a folder's empty space.
+            mkdir -p "$share/nemo/actions"
+            printf '[Nemo Action]\nName=Open in Code Arena\nComment=Open this folder in Code Arena\nExec="%s" -C %%F\nIcon-Name=code-arena\nSelection=s\nExtensions=dir;\n' "$dir/code-arena" > "$share/nemo/actions/code-arena.nemo_action"
+            printf '[Nemo Action]\nName=Open in Code Arena\nComment=Open this folder in Code Arena\nExec="%s" -C %%P\nIcon-Name=code-arena\nSelection=none\nExtensions=any;\n' "$dir/code-arena" > "$share/nemo/actions/code-arena-here.nemo_action"
+            # Thunar: a custom action, added to uca.xml once (the person's own actions kept).
+            uca="$cfg/Thunar/uca.xml"
+            action="<action><icon>code-arena</icon><name>Open in Code Arena</name><submenu></submenu><unique-id>code-arena</unique-id><command>\"$dir/code-arena\" -C %f</command><description>Open this folder in Code Arena</description><range></range><patterns>*</patterns><directories/></action>"
+            mkdir -p "$cfg/Thunar"
+            if [ ! -f "$uca" ]; then
+              printf '<?xml version="1.0" encoding="UTF-8"?>\n<actions>\n%s\n</actions>\n' "$action" > "$uca"
+            elif ! grep -q '<unique-id>code-arena</unique-id>' "$uca"; then
+              tmp="$uca.code-arena"
+              awk -v a="$action" '/<\/actions>/ && !done { print a; done = 1 } { print }' "$uca" > "$tmp" && mv "$tmp" "$uca"
+            fi
+        """;
+
+    /// <summary>
+    /// macOS: "Open in Code Arena" among Finder's Quick Actions on a folder (right click > Quick Actions, and the Services
+    /// menu): an Automator workflow in ~/Library/Services running code-arena -C for each folder chosen.
+    /// </summary>
+    private static string MacQuickActionSh => """
+            flow="$HOME/Library/Services/Open in Code Arena.workflow/Contents"
+            rm -rf "$HOME/Library/Services/Open in Code Arena.workflow"; mkdir -p "$flow"
+            cat > "$flow/Info.plist" <<QPLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>NSServices</key><array><dict>
+            <key>NSMenuItem</key><dict><key>default</key><string>Open in Code Arena</string></dict>
+            <key>NSMessage</key><string>runWorkflowAsService</string>
+            <key>NSRequiredContext</key><dict><key>NSApplicationIdentifier</key><string>com.apple.finder</string></dict>
+            <key>NSSendFileTypes</key><array><string>public.folder</string></array>
+          </dict></array>
+        </dict></plist>
+        QPLIST
+            cat > "$flow/document.wflow" <<QFLOW
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>AMApplicationBuild</key><string>523</string>
+          <key>AMApplicationVersion</key><string>2.10</string>
+          <key>AMDocumentVersion</key><string>2</string>
+          <key>actions</key><array><dict>
+            <key>action</key><dict>
+              <key>AMAccepts</key><dict><key>Container</key><string>List</string><key>Optional</key><true/><key>Types</key><array><string>com.apple.cocoa.path</string></array></dict>
+              <key>AMActionVersion</key><string>2.0.3</string>
+              <key>AMApplication</key><array><string>Automator</string></array>
+              <key>AMParameterProperties</key><dict><key>COMMAND_STRING</key><dict/><key>CheckedForUserDefaultShell</key><dict/><key>inputMethod</key><dict/><key>shell</key><dict/><key>source</key><dict/></dict>
+              <key>AMProvides</key><dict><key>Container</key><string>List</string><key>Types</key><array><string>com.apple.cocoa.string</string></array></dict>
+              <key>ActionBundlePath</key><string>/System/Library/Automator/Run Shell Script.action</string>
+              <key>ActionName</key><string>Run Shell Script</string>
+              <key>ActionParameters</key><dict>
+                <key>COMMAND_STRING</key><string>for f in "\$@"; do "$dir/code-arena" -C "\$f" &amp; done</string>
+                <key>CheckedForUserDefaultShell</key><true/>
+                <key>inputMethod</key><integer>1</integer>
+                <key>shell</key><string>/bin/sh</string>
+                <key>source</key><string></string>
+              </dict>
+              <key>BundleIdentifier</key><string>com.apple.RunShellScript</string>
+              <key>CFBundleVersion</key><string>2.0.3</string>
+              <key>CanShowSelectedItemsWhenRun</key><false/>
+              <key>CanShowWhenRun</key><true/>
+              <key>Category</key><array><string>AMCategoryUtilities</string></array>
+              <key>Class Name</key><string>RunShellScriptAction</string>
+              <key>InputUUID</key><string>6A5C2C3E-4C1A-4B8E-9C2D-1F0E5A7B3C11</string>
+              <key>OutputUUID</key><string>7B6D3D4F-5D2B-4C9F-8D3E-2A1F6B8C4D22</string>
+              <key>UUID</key><string>8C7E4E5A-6E3C-4DA0-9E4F-3B2A7C9D5E33</string>
+              <key>UnlocalizedApplications</key><array><string>Automator</string></array>
+              <key>isViewVisible</key><true/>
+            </dict>
+            <key>isViewVisible</key><true/>
+          </dict></array>
+          <key>connectors</key><dict/>
+          <key>workflowMetaData</key><dict>
+            <key>serviceInputTypeIdentifier</key><string>com.apple.Automator.fileSystemObject.folder</string>
+            <key>serviceOutputTypeIdentifier</key><string>com.apple.Automator.nothing</string>
+            <key>serviceProcessesInput</key><integer>0</integer>
+            <key>workflowTypeIdentifier</key><string>com.apple.Automator.servicesMenu</string>
+          </dict>
+        </dict></plist>
+        QFLOW
+            /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
         """;
 
     /// <summary>
@@ -517,7 +663,7 @@ public static class DownloadEndpoints
               Set-ItemProperty -Path $app -Name NoRepair -Value 1 -Type DWord
               Set-ItemProperty -Path $app -Name EstimatedSize -Value ([int]((Get-Item $exe).Length / 1KB)) -Type DWord
               $opener = if ($ideSum) { $ide } else { $exe }
-              foreach ($menu in 'Directory\shell\CodeArena', 'Directory\Background\shell\CodeArena') {
+              foreach ($menu in 'Directory\shell\CodeArena', 'Directory\Background\shell\CodeArena', 'Drive\shell\CodeArena') {
                 $key = "HKCU:\Software\Classes\$menu"
                 New-Item -Path "$key\command" -Force | Out-Null
                 Set-ItemProperty -Path $key -Name '(default)' -Value 'Open in Code Arena'

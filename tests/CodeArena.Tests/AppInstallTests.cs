@@ -35,13 +35,19 @@ public sealed class AppInstallTests : IDisposable
         var entry = Put(AppInstall.DesktopEntry(share), "[Desktop Entry]");
         var icon = Put(AppInstall.Icon(share), "png");
         var other = Put(Path.Combine(home, ".local", "bin", "something-else"), "not ours");
+        var config = Path.Combine(home, ".config");
+        var menus = AppInstall.FolderMenus(share, config).Select(m => Put(m)).ToList();
+        var uca = Put(AppInstall.ThunarActions(config), "<?xml version=\"1.0\"?>\n<actions>\n<action><icon>mine</icon><unique-id>1</unique-id><command>true</command></action>\n" +
+            "<action><icon>code-arena</icon><name>Open in Code Arena</name><unique-id>code-arena</unique-id><command>\"x\" -C %f</command><directories/></action>\n</actions>\n");
         Directory.CreateDirectory(h.Paths.SessionsDir);
 
         Assert.Equal(0, await h.RunAs(exe, "uninstall"));
-        foreach (var gone in new[] { exe, ca, entry, icon })
+        foreach (var gone in new[] { exe, ca, entry, icon }.Concat(menus))
         {
             Assert.False(File.Exists(gone), gone);
         }
+        // Thunar's own actions stay; Code Arena's goes.
+        Assert.Equal("<?xml version=\"1.0\"?>\n<actions>\n<action><icon>mine</icon><unique-id>1</unique-id><command>true</command></action>\n</actions>\n", File.ReadAllText(uca));
         Assert.True(File.Exists(other));
         Assert.True(Directory.Exists(h.Paths.SessionsDir));
         Assert.Contains("Your sessions and settings stay", h.Out, StringComparison.Ordinal);

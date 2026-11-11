@@ -343,6 +343,10 @@ public sealed class DownloadTests(AppFixture app)
                     await run.WaitForExitAsync();
                     return (run.ExitCode, said);
                 }
+                // Thunar has an action of the person's own already: kept, Code Arena's added once however often it installs.
+                Directory.CreateDirectory(Path.Combine(dir, "home", ".config", "Thunar"));
+                await File.WriteAllTextAsync(Path.Combine(dir, "home", ".config", "Thunar", "uca.xml"),
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<actions>\n<action><icon>mine</icon><name>Mine</name><unique-id>1</unique-id><command>true</command><patterns>*</patterns><directories/></action>\n</actions>\n");
                 // A machine that trusts nothing of this Arena's, or another CA: installed, and the Arena's CA kept beside it for updates.
                 foreach (var trusted in new[] { null, otherCa })
                 {
@@ -355,6 +359,33 @@ public sealed class DownloadTests(AppFixture app)
                     Assert.Contains("MimeType=inode/directory;", entry, StringComparison.Ordinal);
                     Assert.Contains($"Comment=An IDE in your browser around a coding agent, on {Branding.Brand.Product}", entry, StringComparison.Ordinal);
                     Assert.Contains("in your applications menu", output, StringComparison.Ordinal);
+                    // "Open in Code Arena" on folders in each file manager, each starting code-arena -C FOLDER.
+                    var home = Path.Combine(dir, "home");
+                    var exe = Path.Combine(dir, "bin", "code-arena");
+                    var nautilus = Path.Combine(home, "share", "nautilus", "scripts", "Open in Code Arena");
+                    foreach (var script in new[] { nautilus, Path.Combine(home, ".config", "caja", "scripts", "Open in Code Arena") })
+                    {
+                        Assert.Contains($"exec \"{exe}\" -C \"$dir\"", await File.ReadAllTextAsync(script), StringComparison.Ordinal);
+                        Assert.True(File.GetUnixFileMode(script).HasFlag(UnixFileMode.UserExecute), script);
+                    }
+                    Assert.Contains($"[\"{exe}\", \"-C\", path]", await File.ReadAllTextAsync(Path.Combine(home, "share", "nautilus-python", "extensions", "code_arena.py")), StringComparison.Ordinal);
+                    foreach (var menu in new[] { Path.Combine(home, "share", "kio", "servicemenus", "code-arena.desktop"), Path.Combine(home, "share", "kservices5", "ServiceMenus", "code-arena.desktop") })
+                    {
+                        Assert.Contains($"Exec=\"{exe}\" -C %f", await File.ReadAllTextAsync(menu), StringComparison.Ordinal);
+                        Assert.True(File.GetUnixFileMode(menu).HasFlag(UnixFileMode.UserExecute), menu);
+                    }
+                    Assert.Contains($"Exec=\"{exe}\" -C %F", await File.ReadAllTextAsync(Path.Combine(home, "share", "nemo", "actions", "code-arena.nemo_action")), StringComparison.Ordinal);
+                    Assert.Contains($"Exec=\"{exe}\" -C %P", await File.ReadAllTextAsync(Path.Combine(home, "share", "nemo", "actions", "code-arena-here.nemo_action")), StringComparison.Ordinal);
+                    var uca = await File.ReadAllTextAsync(Path.Combine(home, ".config", "Thunar", "uca.xml"));
+                    Assert.Contains($"<command>\"{exe}\" -C %f</command>", uca, StringComparison.Ordinal);
+                    Assert.Contains("<action><icon>mine</icon>", uca, StringComparison.Ordinal);
+                    Assert.Single(System.Text.RegularExpressions.Regex.Matches(uca, "<unique-id>code-arena</unique-id>"));
+                    // The script picks the folder chosen, else the one open.
+                    using (var check = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sh", ["-n", nautilus]) { RedirectStandardError = true })!)
+                    {
+                        await check.WaitForExitAsync();
+                        Assert.Equal(0, check.ExitCode);
+                    }
                     Assert.True(File.Exists(Path.Combine(dir, "bin", "code-arena")));
                     Assert.Equal(ca.ExportCertificatePem().Trim(), (await File.ReadAllTextAsync(Path.Combine(dir, "bin", "code-arena-signing-ca.pem"))).Trim());
                     Directory.Delete(Path.Combine(dir, "bin"), true);

@@ -16,7 +16,29 @@ internal static class AppInstall
     public const string UninstallKey = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeArena";
 
     /// <summary>Windows: "Open in Code Arena" on a folder, and in a folder's empty space.</summary>
-    public static readonly string[] FolderMenuKeys = [@"HKCU\Software\Classes\Directory\shell\CodeArena", @"HKCU\Software\Classes\Directory\Background\shell\CodeArena"];
+    public static readonly string[] FolderMenuKeys = [@"HKCU\Software\Classes\Directory\shell\CodeArena", @"HKCU\Software\Classes\Directory\Background\shell\CodeArena", @"HKCU\Software\Classes\Drive\shell\CodeArena"];
+
+    /// <summary>
+    /// Linux: "Open in Code Arena" in the file managers, as install.sh leaves it (src/Llm.Api/Downloads/DownloadEndpoints.cs,
+    /// FolderMenusSh): GNOME Files' and Caja's scripts, nautilus-python's extension, Dolphin's service menus, Nemo's actions.
+    /// Thunar's is an action in its uca.xml (<see cref="ThunarActions"/>).
+    /// </summary>
+    public static string[] FolderMenus(string share, string config) =>
+    [
+        Path.Combine(share, "nautilus", "scripts", "Open in Code Arena"), Path.Combine(config, "caja", "scripts", "Open in Code Arena"),
+        Path.Combine(share, "nautilus-python", "extensions", "code_arena.py"),
+        Path.Combine(share, "kio", "servicemenus", "code-arena.desktop"), Path.Combine(share, "kservices5", "ServiceMenus", "code-arena.desktop"),
+        Path.Combine(share, "nemo", "actions", "code-arena.nemo_action"), Path.Combine(share, "nemo", "actions", "code-arena-here.nemo_action"),
+    ];
+
+    /// <summary>Thunar's custom actions, where install.sh adds Code Arena's (unique-id code-arena).</summary>
+    public static string ThunarActions(string config) => Path.Combine(config, "Thunar", "uca.xml");
+
+    /// <summary>macOS: the Quick Action on a folder in Finder.</summary>
+    public static string MacQuickAction(string home) => Path.Combine(home, "Library", "Services", "Open in Code Arena.workflow");
+
+    /// <summary>The person's config folder: XDG_CONFIG_HOME, else ~/.config.</summary>
+    public static string ConfigHome(Func<string, string?> env, string home) => env("XDG_CONFIG_HOME") is { Length: > 0 } x ? x : Path.Combine(home, ".config");
 
     /// <summary>Linux: its desktop entry and its icon, in the person's own share folder (XDG).</summary>
     public static string DesktopEntry(string share) => Path.Combine(share, "applications", "code-arena.desktop");
@@ -77,19 +99,24 @@ internal static class AppInstall
         }
         else if (OperatingSystem.IsMacOS())
         {
-            if (Directory.Exists(MacApp(home)))
+            foreach (var app in new[] { MacApp(home), MacQuickAction(home) }.Where(Directory.Exists))
             {
-                Directory.Delete(MacApp(home), recursive: true);
-                gone.Add(MacApp(home));
+                Directory.Delete(app, recursive: true);
+                gone.Add(app);
             }
         }
         else
         {
             var share = Share(env.Env, home);
-            foreach (var file in new[] { DesktopEntry(share), Icon(share) }.Where(File.Exists))
+            var config = ConfigHome(env.Env, home);
+            foreach (var file in new[] { DesktopEntry(share), Icon(share) }.Concat(FolderMenus(share, config)).Where(File.Exists))
             {
                 File.Delete(file);
                 gone.Add(file);
+            }
+            if (WithoutThunarAction(ThunarActions(config)))
+            {
+                gone.Add($"Open in Code Arena from {ThunarActions(config)}");
             }
         }
         foreach (var file in Beside.Select(b => Path.Combine(folder, b)).Where(File.Exists))
@@ -128,6 +155,24 @@ internal static class AppInstall
             ? "Code Arena is taken off this computer, with your sessions and settings."
             : $"Code Arena is taken off this computer. Your sessions and settings stay in {env.Paths.ConfigDir} and {env.Paths.DataDir} (code-arena uninstall --all takes them too; install it again from your Arena's Connect your tools).");
         return 0;
+    }
+
+    /// <summary>Thunar's uca.xml without Code Arena's action (the person's own kept): whether there was one.</summary>
+    internal static bool WithoutThunarAction(string file)
+    {
+        if (!File.Exists(file))
+        {
+            return false;
+        }
+        var text = File.ReadAllText(file);
+        var kept = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]*<action>(?:(?!</action>).)*<unique-id>code-arena</unique-id>(?:(?!</action>).)*</action>\r?\n?", "",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (kept == text)
+        {
+            return false;
+        }
+        File.WriteAllText(file, kept);
+        return true;
     }
 
     /// <summary>reg.exe with these arguments, quietly: whether it did it (false when the key is not there).</summary>

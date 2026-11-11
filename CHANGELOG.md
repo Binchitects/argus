@@ -127,6 +127,10 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   with it. The web chat shows that answer as it comes, and what Arena
   missed while out of reach is tried again within 10 seconds (it was up to a
   minute).
+- "Open in Code Arena" on a folder wherever it is right-clicked, as VS
+  Code's: Explorer (a folder, its empty space, a drive), GNOME Files,
+  Dolphin, Nemo, Caja and Thunar, and Finder's Quick Actions; set up by
+  Code Arena's installer, taken off by `code-arena uninstall`.
 - `sudo arenactl reset-admin-password` sets a forgotten admin password anew,
   root only (asked twice and never echoed, or `--generate`): the lockout
   cleared, the sessions signed out, `--two-factor-off` for a lost phone;

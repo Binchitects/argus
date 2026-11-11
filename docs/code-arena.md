@@ -38,6 +38,15 @@ none). `CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
 `curl --cacert ca.crt -fsSL …/install.sh | CODE_ARENA_CA=ca.crt sh`. Or
 download the file for a system yourself:
 
+**Open in Code Arena** is on folders wherever you right-click one, as VS
+Code's "Open with Code" is (`CODE_ARENA_NO_DESKTOP=1` leaves it out, with the
+menu entries): on Windows on a folder, in a folder's empty space and on a
+drive (Explorer); on Linux in GNOME Files (Scripts, and an item of its own
+with nautilus-python), Dolphin, Nemo, Caja and Thunar (its custom actions,
+yours kept), besides "Open with" from the desktop entry; on macOS among
+Finder's Quick Actions. Each opens the IDE in that folder
+(`code-arena -C FOLDER`). `code-arena uninstall` takes them all off.
+
 ```bash
 curl -fLo code-arena https://DOMAIN/api/downloads/code-arena/linux-x64
 chmod +x code-arena && mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/
