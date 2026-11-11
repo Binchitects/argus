@@ -138,7 +138,8 @@ def stream(base, key, model, prompt, max_tokens, path="/v1/chat/completions", cl
 
 
 def plain(base, key, model, body_extra):
-    body = {"model": model, "messages": [{"role": "user", "content": "What is 2+2? Answer with the number."}], "max_tokens": 64, "temperature": 0}
+    # Room for a thinking model's reasoning before its answer or tool call.
+    body = {"model": model, "messages": [{"role": "user", "content": "What is 2+2? Answer with the number."}], "max_tokens": 1024, "temperature": 0}
     body.update(body_extra)
     req = urllib.request.Request(base.rstrip("/") + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
@@ -255,7 +256,14 @@ def one():
     with urllib.request.urlopen(req, timeout=600) as r:
         for raw in r:
             line = raw.decode().strip()
-            if line.startswith("data:") and '"content"' in line and first is None:
+            if not line.startswith("data:") or line[5:].strip() == "[DONE]" or first is not None:
+                continue
+            try:
+                chunk = json.loads(line[5:].strip())
+            except ValueError:
+                continue
+            # The first token as the gateways' runs count it: content, reasoning or a tool call (not the empty role chunk).
+            if any((c.get("delta") or {{}}).get(k) for c in chunk.get("choices") or [] for k in ("content", "reasoning_content", "tool_calls")):
                 first = time.perf_counter() - s
     return first, time.perf_counter() - s
 print(json.dumps([one() for _ in range({n})]))
@@ -276,12 +284,24 @@ def slot_watcher(seconds=30):
     if not net:
         return None
     code = f"""
-import json, os, time, urllib.request
+import json, os, time, urllib.error, urllib.parse, urllib.request
+H = {{"Authorization": "Bearer " + os.environ.get("K", "")}}
+def get(path):
+    return json.loads(urllib.request.urlopen(urllib.request.Request("http://llamacpp:8080" + path, headers=H), timeout=2).read())
+# A router (several models) answers /slots per model only: each model's then.
+try:
+    paths = ["/slots?model=" + urllib.parse.quote(m["id"]) for m in get("/v1/models")["data"]]
+except Exception:
+    paths = ["/slots"]
 busy, end = False, time.time() + {seconds}
 while time.time() < end:
     try:
-        req = urllib.request.Request("http://llamacpp:8080/slots", headers={{"Authorization": "Bearer " + os.environ.get("K", "")}})
-        now = any(s.get("is_processing") for s in json.loads(urllib.request.urlopen(req, timeout=2).read()))
+        now = False
+        for path in paths:
+            try:
+                now = now or any(s.get("is_processing") for s in get(path))
+            except urllib.error.HTTPError:
+                pass
         if busy and not now:
             print(time.time(), flush=True)
         busy = now
@@ -310,6 +330,8 @@ def ledger_check(person, since):
 def run_mode(admin, mode, key, person, model, args, out):
     set_mode(admin, mode)
     res = {"mode": mode}
+    # The engine on its own, in this run too: the GPU's state (warm, shared) is the same as the gateway's beside it.
+    res["direct"] = direct_baseline(model, args.requests, 64)
     since = psql("select now()")[0][0]
     # Warm the model (its first request after a switch loads nothing new, but a cache may be cold).
     stream(GATEWAY, key, model, "Say hello.", 8)
@@ -354,6 +376,38 @@ def run_mode(admin, mode, key, person, model, args, out):
     res["limits"] = {"passed": sum(1 for r in rs if r["ok"]), "refused_429": sum(1 for r in rs if r["status"] == 429),
                      "retry_after": sorted({r.get("retry_after") for r in rs if r["status"] == 429} - {None})}
     admin.call("PUT", f"/api/admin/people/{out['person_id']}/limits", {"requestsPerMinute": None, "tokensPerMinute": None})
+    # W2: a long prompt nobody sent before (about 16k tokens, a fresh word first so no cache helps): time to the first
+    # token, and never cut off.
+    w2 = []
+    for i in range(args.long_prompts):
+        words = " ".join(f"w{secrets.token_hex(2)}" for _ in range(args.long_words))
+        w2.append(stream(GATEWAY, key, model, f"{secrets.token_hex(8)} Here is a list of words: {words}\n\nHow many words start with w1? Answer in one word.", 16))
+    res["w2"] = summary(w2)
+    # W4: two people at once (multiuser-bench.py: who waits for whom, a long paste beside a chat, nothing leaking).
+    if args.w4 and out.get("key_b"):
+        w4 = Path(f"/tmp/gateway-compare-w4-{mode}-{secrets.token_hex(3)}.json")
+        subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("multiuser-bench.py")), "--base-url", GATEWAY, "--key-a", key, "--key-b", out["key_b"],
+                        "--model", model, "--rounds", "1", "--max-tokens", "128", "--scenarios", args.w4, "--json", str(w4)],
+                       capture_output=True, text=True, timeout=7200)
+        try:
+            res["w4"] = json.loads(w4.read_text(encoding="utf-8"))
+            w4.unlink()
+        except (OSError, ValueError):
+            res["w4"] = None
+    # W8: the engine stopped: what a person gets (a clear 502/503 at once, never a 500 or a hang), and the first answer
+    # after it is back. Opt-in: it stops the stack's llama.cpp for a moment.
+    if args.engine_down:
+        subprocess.run(["docker", "stop", "-t", "5", "llamacpp"], capture_output=True, timeout=120)
+        down = [stream(GATEWAY, key, model, "Hi", 4) for _ in range(3)]
+        subprocess.run(["docker", "start", "llamacpp"], capture_output=True, timeout=120)
+        back, t0 = None, time.perf_counter()
+        while time.perf_counter() - t0 < 600:
+            if stream(GATEWAY, key, model, "Hi", 4)["ok"]:
+                back = round(time.perf_counter() - t0, 1)
+                break
+            time.sleep(2)
+        res["w8"] = {"statuses": [r["status"] for r in down], "seconds": [round(r["total"] or 0, 2) for r in down],
+                     "errors": [(r["error"] or "")[:160] for r in down], "answered_again_after_s": back}
     # Abort: closed after 5 tokens of a long answer; then how soon llama.cpp's slots are all idle again (watched from its
     # network by a helper started first, which says when each time they went idle).
     watcher = slot_watcher()
@@ -376,7 +430,12 @@ def main():
     p.add_argument("--model", default=env("MODEL_NAME"))
     p.add_argument("--requests", type=int, default=50, help="W1's answers per run")
     p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--concurrency", default="1,4,8,16,32")
+    p.add_argument("--concurrency", default="1,4,8,16,32,64,128")
+    p.add_argument("--long-prompts", type=int, default=3, help="W2's long prompts per run")
+    p.add_argument("--long-words", type=int, default=5000, help="W2's words a prompt (about 3 tokens each)")
+    p.add_argument("--w4", default="single,parallel,staggered,longpaste,overflow,isolation,prefix",
+                   help="multiuser-bench.py's scenarios (empty: no W4)")
+    p.add_argument("--engine-down", action="store_true", help="W8: stop llama.cpp for a moment in each run")
     p.add_argument("--modes", default="litellm,own")
     p.add_argument("--out", default=str(ROOT / "gateway-compare.json"))
     args = p.parse_args()
@@ -390,19 +449,90 @@ def main():
         sys.exit(f"could not make the test person: {status} {made}")
     out = {"model": args.model, "person": f"{name}@example.test", "person_id": made["id"], "runs": []}
     key = made["apiKey"]
+    made_b = None
+    if args.w4:
+        status, made_b = admin.call("POST", "/api/admin/people", {"userName": name + "b", "email": f"{name}b@example.test"})
+        if status in (200, 201):
+            out["key_b"] = made_b["apiKey"]
+        else:
+            made_b = None
     try:
-        out["direct"] = direct_baseline(args.model, args.requests, 64)
         for run in range(args.runs):
             for mode in args.modes.split(","):
                 r = run_mode(admin, mode, key, out["person"], args.model, args, out)
                 r["run"] = run + 1
                 out["runs"].append(r)
-                print(json.dumps({"mode": mode, "run": run + 1, "w1": r["w1"], "ledger": r["ledger"], "limits": r["limits"]}), flush=True)
+                print(json.dumps({"mode": mode, "run": run + 1, "w1": r["w1"], "direct": r.get("direct"), "w2": r.get("w2"), "ledger": r["ledger"],
+                                  "limits": r["limits"], "abort": r["abort"], "w5_tool": r["w5_tool"], "w8": r.get("w8")}), flush=True)
     finally:
         set_mode(admin, "litellm")
         admin.call("DELETE", f"/api/admin/people/{made['id']}")
+        if made_b:
+            admin.call("DELETE", f"/api/admin/people/{made_b['id']}")
+        out.pop("key_b", None)
+        out["verdict"] = verdict(out["runs"])
         Path(args.out).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    for line in out["verdict"]["lines"]:
+        print(line)
     print(f"written: {args.out}")
+
+
+def verdict(runs):
+    """The design's gates (docs/design/own-gateway.md §7), each the median of the runs of a mode."""
+    def med(mode, get):
+        vals = [v for v in (get(r) for r in runs if r["mode"] == mode) if v is not None]
+        return statistics.median(vals) if vals else None
+
+    def overhead(r, p):
+        d, g = (r.get("direct") or {}).get(f"ttft_p{p}"), r["w1"].get(f"ttft_p{p}")
+        return None if d is None or g is None else g - d
+
+    lines, gates = [], {}
+
+    def row(name, get, fmt="{:.4f}", better="lower"):
+        a, b = med("litellm", get), med("own", get)
+        show = lambda v: "-" if v is None else fmt.format(v)  # noqa: E731
+        lines.append(f"  {name:<44} litellm {show(a):>10}   own {show(b):>10}")
+        if a is not None and b is not None:
+            return b <= a if better == "lower" else b >= a
+        return None
+
+    lines.append("medians of the runs:")
+    gates["overhead_p95"] = row("W1 TTFT overhead over the engine p95 (s)", lambda r: overhead(r, 95))
+    row("W1 TTFT overhead over the engine p50 (s)", lambda r: overhead(r, 50))
+    row("W1 TTFT p99 (s)", lambda r: r["w1"]["ttft_p99"])
+    row("W1 total p50 (s)", lambda r: r["w1"]["total_p50"])
+    row("W2 long prompt TTFT p50 (s)", lambda r: (r.get("w2") or {}).get("ttft_p50"), "{:.2f}")
+    gates["w2_never_cut"] = all((r.get("w2") or {}).get("errors", 0) == 0 for r in runs if r["mode"] == "own")
+    levels = sorted({int(n) for r in runs for n in r["w3"]})
+    tput = []
+    for n in levels:
+        # Within 2% of LiteLLM at each level counts as equal: the engine, not the gateway, sets the pace there.
+        a = med("litellm", lambda r, n=n: r["w3"].get(str(n), {}).get("tokens_per_second"))
+        b = med("own", lambda r, n=n: r["w3"].get(str(n), {}).get("tokens_per_second"))
+        row(f"W3 tokens/s at {n}", lambda r, n=n: r["w3"].get(str(n), {}).get("tokens_per_second"), "{:.1f}", "higher")
+        tput.append(a is None or b is None or b >= a * 0.98)
+        row(f"W3 errors at {n}", lambda r, n=n: r["w3"].get(str(n), {}).get("errors"), "{:.0f}")
+    gates["throughput"] = all(tput)
+    gates["errors"] = all(r["w3"][n]["errors"] <= 0 for r in runs if r["mode"] == "own" for n in r["w3"]) or None
+    cpu = lambda r, who: max((v["cpu_mean_percent"] for s in r["w3"].values() for k, v in (s.get("resources") or {}).items() if (k == "app") == (who == "app")), default=None)  # noqa: E731
+    mem = lambda r, who: max((v["memory_peak_mib"] for s in r["w3"].values() for k, v in (s.get("resources") or {}).items() if (k == "app") == (who == "app")), default=None)  # noqa: E731
+    row("CPU % of the app (highest W3 level mean)", lambda r: cpu(r, "app"), "{:.1f}")
+    row("CPU % of LiteLLM (highest W3 level mean)", lambda r: cpu(r, "litellm"), "{:.1f}")
+    row("memory of the app, peak (MiB)", lambda r: mem(r, "app"), "{:.0f}")
+    row("memory of LiteLLM, peak (MiB)", lambda r: mem(r, "litellm"), "{:.0f}")
+    gates["ledger"] = all(r["ledger"]["usage_not_in_ledger"] == 0 for r in runs if r["mode"] == "own")
+    gates["shapes"] = all(r["w5_plain"]["status"] == 200 and r["w5_plain"]["usage"] and r["w5_tool"]["calls"] > 0 and r["w5_tool"]["valid_json"] for r in runs if r["mode"] == "own")
+    gates["limits"] = all(r["limits"]["passed"] == 5 and r["limits"]["refused_429"] == 3 for r in runs if r["mode"] == "own")
+    row("abort: engine slot free after (s)", lambda r: r["abort"]["slot_free_after_s"], "{:.2f}")
+    ab = [r["abort"]["slot_free_after_s"] for r in runs if r["mode"] == "own"]
+    gates["abort"] = all(a is not None and a <= 1.0 for a in ab) if ab else None
+    if any("w8" in r for r in runs):
+        gates["engine_down"] = all(all(s in (502, 503) for s in r["w8"]["statuses"]) for r in runs if r["mode"] == "own" and "w8" in r)
+    lines.append("gates (own mode):")
+    for k, v in gates.items():
+        lines.append(f"  {k:<16} {'PASS' if v else ('-' if v is None else 'FAIL')}")
+    return {"gates": gates, "lines": lines}
 
 
 if __name__ == "__main__":
