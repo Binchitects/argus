@@ -2095,7 +2095,15 @@ also has **Per GPU and model**: the tokens a second each model makes, named with
 the GPUs its engine runs on (Prometheus's `gpus` label, which the app writes in
 its scrape targets: a vLLM or SGLang copy's GPUs, a llama.cpp model's own or
 `all`), and each model's decode speed, beside its GPU row (utilisation, memory,
-power, clocks). **Tokens and cost per person** (LLM and users, Usage by person)
+power, clocks). Its **Token generation per model, in the time window** adds up
+the ledger per model, whatever engine or copy answered: the tokens generated and
+the share of all, the window's average a second (the tokens over the window's
+seconds), the busiest minute, a request's decode speed, the input uncached and
+cached, the median first token; and over time each model's tokens a second and
+its tokens in each bucket. The stack's own figures (**Stack throughput**, **the
+stack** in Tokens a second) are the sum over every engine and model, not an
+average; **a request** is one answer's speed, averaged over answers by their
+tokens. **Tokens and cost per person** (LLM and users, Usage by person)
 has each person's **Output tokens a second**: their answers' tokens after the
 first over the time after the first, from the ledger. The ledger's token panels
 are a second over each interval, not a count per bucket.

@@ -957,7 +957,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 48
       },
       "panels": []
     },
@@ -974,7 +974,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 49
       },
       "targets": [
         {
@@ -1054,7 +1054,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 49
       },
       "targets": [
         {
@@ -1132,7 +1132,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 57
       },
       "targets": [
         {
@@ -1222,7 +1222,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 57
       },
       "targets": [
         {
@@ -1308,7 +1308,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 65
       },
       "panels": []
     },
@@ -1325,7 +1325,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 66
       },
       "targets": [
         {
@@ -1393,7 +1393,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 66
       },
       "targets": [
         {
@@ -1461,7 +1461,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 74
       },
       "targets": [
         {
@@ -1551,7 +1551,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 56
+        "y": 74
       },
       "targets": [
         {
@@ -1629,7 +1629,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 64
+        "y": 82
       },
       "targets": [
         {
@@ -1731,7 +1731,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 64
+        "y": 82
       },
       "targets": [
         {
@@ -1797,7 +1797,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 64
+        "y": 82
       },
       "targets": [
         {
@@ -1836,7 +1836,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 90
       },
       "panels": []
     },
@@ -1853,7 +1853,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 91
       },
       "targets": [
         {
@@ -1916,6 +1916,176 @@
           }
         },
         "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Token generation per model, in the time window",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Tokens generated, by model",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "Every answer the gateway booked, whichever engine served it, added up per model over the time window: the tokens it generated and its share of all, the window's average a second (the tokens over the window's seconds), the busiest minute, a request's decode speed (after its first token), the input read uncached and from the cache, and the median time to the first token.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(completion_tokens),0) AS \"Tokens generated\", round(100.0*COALESCE(sum(completion_tokens),0)/NULLIF(sum(sum(completion_tokens)) OVER (),0),1) AS \"Share %\", round((COALESCE(sum(completion_tokens),0)::numeric / GREATEST($__range_s,1)),2) AS \"Tokens a second, the window\", round((SELECT max(m.t) FROM (SELECT sum(r2.completion_tokens)/60.0 AS t FROM requests r2 WHERE r2.model = requests.model AND $__timeFilter(r2.started_at) AND r2.status <> 'refused' GROUP BY date_trunc('minute', r2.started_at)) m)::numeric,1) AS \"Busiest minute, tokens a second\", round((sum(completion_tokens - 1) FILTER (WHERE (completion_tokens > 1 AND first_token_at IS NOT NULL AND ended_at > first_token_at)) / NULLIF(sum(extract(epoch FROM (ended_at - first_token_at))) FILTER (WHERE (completion_tokens > 1 AND first_token_at IS NOT NULL AND ended_at > first_token_at)),0))::numeric,1) AS \"Decode speed a request\", COALESCE(sum(greatest(prompt_tokens - cached_tokens,0)),0) AS \"Input, uncached\", COALESCE(sum(cached_tokens),0) AS \"Input, cached\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM (first_token_at - started_at))),0)::numeric,2) AS \"Median first token, s\" FROM requests WHERE $__timeFilter(started_at) AND status <> 'refused' GROUP BY model ORDER BY \"Tokens generated\" DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens generated a second, by model",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "Each model's generated tokens in a bucket over the bucket's seconds: what it sustained, summed over its copies and engines.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), model AS metric, sum(completion_tokens) / ($__interval_ms / 1000.0) AS \"tokens a second\" FROM requests WHERE $__timeFilter(started_at) AND status <> 'refused' GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens generated, by model (each bucket)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "How many tokens each model generated in each bucket, stacked: the legend's Total is the window's.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), model AS metric, sum(completion_tokens) AS \"tokens\" FROM requests WHERE $__timeFilter(started_at) AND status <> 'refused' GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max",
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     }
   ]

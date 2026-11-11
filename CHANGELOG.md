@@ -97,6 +97,10 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 - A dashboard's header stats are the value now (marked **Now**): the time
   window does not change them. Totals of a window sit under a heading that
   says so ("In the time window").
+- Stack Performance: token generation per model over the time window (the
+  tokens and share, the average and busiest minute a second, a request's
+  decode speed, input cached and not, the first token), and each model's
+  tokens a second and per bucket over time, from the ledger.
 
 ### :bug: Bugs fixed
 

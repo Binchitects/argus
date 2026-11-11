@@ -64,12 +64,13 @@ public sealed class DashboardTests(AppFixture app)
     public async Task Every_sql_panel_of_the_real_dashboards_runs_without_error()
     {
         var b = await Admin();
-        foreach (var uid in new[] { "usage-by-user", "llm-overview" })
+        var all = await b.JsonAsync(await b.GetAsync("/api/dashboards/"));
+        foreach (var uid in all.EnumerateArray().Select(d => d.GetProperty("uid").GetString()!))
         {
             var d = await b.JsonAsync(await b.GetAsync($"/api/dashboards/{uid}"));
             var sqlPanels = d.GetProperty("panels").EnumerateArray()
-                .Where(p => p.GetProperty("supported").GetBoolean() && p.GetProperty("type").GetString() is not ("text" or "row")).ToList();
-            Assert.NotEmpty(sqlPanels);
+                .Where(p => p.GetProperty("supported").GetBoolean() && p.GetProperty("type").GetString() is not ("text" or "row")
+                    && p.GetProperty("datasources").EnumerateArray().Any(s => s.GetString() is SqlDatasource.Uid or GatewayDatasource.Uid)).ToList();
             foreach (var p in sqlPanels)
             {
                 var r = await Query(b, uid, p.GetProperty("key").GetInt32(), 3_600_000);
@@ -80,6 +81,29 @@ public sealed class DashboardTests(AppFixture app)
                 }
             }
         }
+    }
+
+    [Fact]
+    public async Task Stack_performance_adds_up_each_models_generated_tokens_over_the_window()
+    {
+        var b = await Admin();
+        var (_, k) = await Load(b, "stack-performance");
+        var table = (await Query(b, "stack-performance", k["Tokens generated, by model"])).GetProperty("results")[0].GetProperty("table");
+        var columns = table.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()!).ToList();
+        var row = Assert.Single(table.GetProperty("rows").EnumerateArray());
+        double At(string column) => row[columns.IndexOf(column)].GetDouble();
+        Assert.Equal("qwen", row[columns.IndexOf("Model")].GetString());
+        Assert.Equal(4, At("Requests"));
+        Assert.Equal(22, At("Tokens generated"));  // 10 + 6 + 5 + 1; r5 is outside the window
+        Assert.Equal(100, At("Share %"));
+        Assert.Equal(Math.Round(22 / (LitellmSeed.To - LitellmSeed.From).TotalSeconds, 2), At("Tokens a second, the window"), 6);
+        Assert.Equal(0.2, At("Busiest minute, tokens a second"), 6);  // r1's 10 tokens in its minute
+        Assert.Equal(5.1, At("Decode speed a request"), 6);  // (9 + 5 + 4) tokens after the first over (1 + 2 + 0.5) s; r4 has one token
+        Assert.Equal(40, At("Input, cached"));
+        // Over time, each bucket's tokens over its seconds.
+        var series = (await Query(b, "stack-performance", k["Tokens generated a second, by model"], 3_600_000)).GetProperty("results")[0].GetProperty("series");
+        var points = Assert.Single(series.EnumerateArray()).GetProperty("points").EnumerateArray().Select(p => p[1].GetDouble()).ToList();
+        Assert.Equal(22 / 3600.0, points.Sum(), 9);
     }
 
     [Fact]
