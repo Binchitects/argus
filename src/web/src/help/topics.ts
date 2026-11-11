@@ -1292,7 +1292,7 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'LLM Overview and Stack Performance', text: 'Requests, tokens, cost and latency at the gateway; how fast the model answers, its queues and its cache.' },
-      { name: 'Resources, GPU Hardware, Host & Containers', text: 'CPU, memory, GPU, disk and network, of the machine and of each container.' },
+      { name: 'Resources, GPU Hardware, Host', text: 'CPU, memory, GPU, disk and network of the machine.' },
       { name: 'Stack Health & Alerts and Logs', text: 'Which services answer, the alerts firing now, and every service\'s logs.' },
       { name: `${codeIntelName} and its index`, text: `Who asked ${codeIntelName} what, and its index runs.` },
     ],
@@ -1318,7 +1318,7 @@ export const topics = {
       'stack-health': { name: 'Stack Health & Alerts', text: 'Which services answer, the alerts firing now, and Prometheus itself.' },
       resources: { name: 'Resources (CPU, Memory, GPU)', text: 'CPU, memory and GPU of the machine and of each service.' },
       'gpu-hardware': { name: 'GPU Hardware', text: 'The GPU: utilisation, memory, temperature, power and clocks.' },
-      'host-containers': { name: 'Host & Containers', text: 'The host and each container: CPU, memory, disk and network.' },
+      'host-containers': { name: 'Host', text: 'The host: CPU, memory, disk and network.' },
       'stack-logs': { name: 'Logs (Loki)', text: 'Every service\'s logs, by container, searchable, and their volume.' },
       'code-intel': { name: `${codeIntelName}: who asked what`, text: `Who asked ${codeIntelName} what: tool calls, people, refusals and timings.` },
       'stack-indexing': { name: `Indexing: ${codeIntelName} code index`, text: `${codeIntelName}'s index runs: repositories, files, symbols and failures.` },

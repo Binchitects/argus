@@ -77,11 +77,11 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
         var b = await Admin();
         app.Observe.Answers["/api/v1/query_range"] = _ => """
             {"status":"success","data":{"resultType":"matrix","result":[
-              {"metric":{"name":"llamacpp"},"values":[[1790000000,"0.5"],[1790000015,"NaN"]]}]}}
+              {"metric":{"mountpoint":"/"},"values":[[1790000000,"0.5"],[1790000015,"NaN"]]}]}}
             """;
         var d = await b.JsonAsync(await b.GetAsync("/api/dashboards/host-containers"));
-        // Its query is sum by (name) (...), legend "{{name}}".
-        var panel = d.GetProperty("panels").EnumerateArray().First(p => p.TryGetProperty("title", out var t) && t.GetString() == "Container CPU (cores)");
+        // Its legend is "{{mountpoint}}".
+        var panel = d.GetProperty("panels").EnumerateArray().First(p => p.TryGetProperty("title", out var t) && t.GetString() == "Disk usage by mount");
         var from = new DateTimeOffset(2026, 9, 20, 11, 0, 7, TimeSpan.Zero);
         var res = await b.Http.PostAsJsonAsync(new Uri($"/api/dashboards/host-containers/panels/{panel.GetProperty("key").GetInt32()}/query", UriKind.Relative),
             new { from, to = End.AddSeconds(7), intervalMs = 30_000 });
@@ -92,7 +92,7 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
         Assert.Equal(Unix(End).ToString(CultureInfo.InvariantCulture), asked.Args["end"]);
         Assert.Equal("30", asked.Args["step"]);
         var series = r.GetProperty("results")[0].GetProperty("series")[0];
-        Assert.Equal("llamacpp", series.GetProperty("name").GetString());
+        Assert.Equal("/", series.GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.Null, series.GetProperty("points")[1][1].ValueKind);
     }
 
