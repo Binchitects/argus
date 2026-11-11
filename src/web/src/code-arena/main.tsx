@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Providers } from '@/app/providers'
+import { WrapCode } from '@/pages/chat/code-block'
 import '@/styles/index.css'
 import { App } from './app'
 
@@ -18,7 +19,10 @@ window.addEventListener('scroll', () => {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Providers>
-      <App />
+      {/* Nothing but the editor scrolls sideways: a code block in the chat wraps its lines (its button unwraps them). */}
+      <WrapCode value>
+        <App />
+      </WrapCode>
     </Providers>
   </StrictMode>,
 )

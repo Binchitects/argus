@@ -1261,14 +1261,16 @@ export function Thread({
       )}
       </div>
       {tasksOpen && (
-        // Over the thread while the chat is narrow; beside it, as wide as the person dragged it, once it is wide.
-        <div className="hidden @3xl:flex">
+        // Beside the thread once the chat is wide; over its right side while it is narrow (never wider than the chat).
+        // Either way as wide as the person dragged it, by the line on its left.
+        <div
+          style={{ '--tasks-w': `${tasksW}px` } as CSSProperties}
+          className="absolute inset-y-0 right-0 z-20 flex w-[min(var(--tasks-w),100%)] min-w-0 animate-enter bg-background shadow-lg @3xl:static @3xl:w-(--tasks-w) @3xl:shrink-0 @3xl:shadow-none"
+        >
           <Splitter label="Resize the tasks" orientation="vertical" value={tasksW} min={layoutBounds.tasks[0]} max={layoutBounds.tasks[1]} grow={-1} onChange={setTasksW} />
-        </div>
-      )}
-      {tasksOpen && (
-        <div style={{ '--tasks-w': `${tasksW}px` } as CSSProperties} className="absolute inset-0 z-20 flex animate-enter shadow-lg @3xl:static @3xl:w-(--tasks-w) @3xl:shrink-0 @3xl:shadow-none">
-          <TasksPanel selected={taskShown} onSelect={setTaskShown} onClose={() => setTasksOpen(false)} plan={state.mode === 'plan'} />
+          <div className="flex min-w-0 flex-1">
+            <TasksPanel selected={taskShown} onSelect={setTaskShown} onClose={() => setTasksOpen(false)} plan={state.mode === 'plan'} />
+          </div>
         </div>
       )}
       </div>
@@ -1299,18 +1301,43 @@ function useFolderHistory(): Older {
  * read every second), how it ended, and Stop. The turn does not wait for them:
  * when one with no time limit ends, the agent is told and carries on.
  */
+/**
+ * The commands with no time limit, above the box: never more than a quarter of the window (a fifth when short), however
+ * many there are or however much they print. With several, only the newest one running shows its output; the others
+ * open on a click. Many fold into one line, opened on a click.
+ */
 function Jobs({ jobs, onStopped }: { jobs: LiveJob[]; onStopped: () => void }) {
+  const [folded, setFolded] = useState(false)
+  const newest = [...jobs].reverse().find((j) => j.running) ?? jobs[jobs.length - 1]
+  const running = jobs.filter((j) => j.running).length
   return (
-    <section aria-label="Commands with no time limit" className="mb-2 grid max-h-[45vh] gap-2 overflow-y-auto">
-      {jobs.map((j) => (
-        <JobBox key={j.id} job={j} onStopped={onStopped} />
-      ))}
+    <section aria-label="Commands with no time limit" className="mb-2 grid min-w-0 gap-1">
+      {jobs.length > 1 && (
+        <button
+          type="button"
+          aria-expanded={!folded}
+          onClick={() => setFolded(!folded)}
+          className="flex min-w-0 items-center gap-1.5 rounded-sm px-1 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
+        >
+          <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', folded && '-rotate-90')} aria-hidden="true" />
+          <span className="truncate">
+            {jobs.length} commands{running ? `, ${running} running` : ''}
+          </span>
+        </button>
+      )}
+      {!folded && (
+        <div className="grid max-h-[min(25vh,18rem)] min-w-0 gap-2 overflow-x-hidden overflow-y-auto [@media(max-height:700px)]:max-h-[20vh]">
+          {jobs.map((j) => (
+            <JobBox key={j.id} job={j} onStopped={onStopped} startOpen={jobs.length === 1 || j === newest} />
+          ))}
+        </div>
+      )}
     </section>
   )
 }
 
-function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
-  const [open, setOpen] = useState(true)
+function JobBox({ job, onStopped, startOpen }: { job: LiveJob; onStopped: () => void; startOpen: boolean }) {
+  const [open, setOpen] = useState(startOpen)
   const [stopping, setStopping] = useState(false)
   const out = useRef<HTMLPreElement>(null)
   // The last 200 lines; the agent reads all of it with command_output.
@@ -1359,7 +1386,7 @@ function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
         )}
       </div>
       {open && (
-        <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-48 overflow-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
+        <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-32 overflow-x-hidden overflow-y-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
           {text || 'No output yet.'}
         </pre>
       )}

@@ -132,7 +132,8 @@ function TaskDetail({ id, onBack, onStopped }: { id: string; onBack: () => void;
         {q.isPending && <Skeleton className="h-24" />}
         {q.error && <Alert variant="destructive">{errorMessage(q.error)}</Alert>}
         {task && (
-          <div className="grid min-w-0 gap-3">
+          // A word longer than the panel (a path, a token) breaks rather than pushing the panel sideways.
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 [overflow-wrap:anywhere]">
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground tabular-nums">
               <TaskStatusIcon status={task.status} />
               <span>{statusWords[task.status]}</span>
@@ -274,8 +275,9 @@ export function TasksPanel({ selected, onSelect, onClose, plan }: { selected: st
           </Button>
         </Tooltip>
         <PartHelp part="tasks" className="size-8 rounded-md [&_svg]:size-4" />
-        <Tooltip content="Close the tasks">
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close the tasks">
+        {/* With a task open, closing goes back to the list; from the list, it closes the panel. */}
+        <Tooltip content={shown ? 'Close the task' : 'Close the tasks'}>
+          <Button variant="ghost" size="icon-sm" onClick={() => (shown ? onSelect(null) : onClose())} aria-label={shown ? 'Close the task' : 'Close the tasks'}>
             <X />
           </Button>
         </Tooltip>

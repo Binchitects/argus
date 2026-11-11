@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Code2, Copy, Download, PanelRightOpen, Play, Workflow, WrapText } from 'lucide-react'
-import { use, useMemo, useState } from 'react'
+import { createContext, use, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -10,6 +10,9 @@ import { InlineDiagram } from './live-preview'
 
 const COLLAPSE_OVER = 40
 const COLLAPSED_LINES = 24
+
+/** Whether a code block opens with its lines wrapped: Code Arena's do, so nothing but its editor scrolls sideways. */
+export const WrapCode = createContext(false)
 
 /**
  * A code block: its language or file name, copy, wrap, download, open in the Files panel, a live preview,
@@ -37,7 +40,7 @@ export function CodeBlock({
   /** Draw a diagram in place of its code (not while it is still being written). */
   draw?: boolean
 }) {
-  const [wrap, setWrap] = useState(false)
+  const [wrap, setWrap] = useState(use(WrapCode))
   const [view, setView] = useState<'diagram' | 'code' | null>(null)
   const [drawError, setDrawError] = useState<string | null>(null)
   const drawable = draw && preview === 'mermaid' && !drawError

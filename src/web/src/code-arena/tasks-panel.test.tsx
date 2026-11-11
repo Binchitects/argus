@@ -64,8 +64,9 @@ describe('the Tasks panel', () => {
       'GET /api/agent-tasks/call_1': () => ({ json: detail }),
     })
     const onSelect = vi.fn()
+    const onClose = vi.fn()
     // The chat's line opens it by its call's id.
-    wrap(<TasksPanel selected="call_1" onSelect={onSelect} onClose={vi.fn()} plan={false} />)
+    wrap(<TasksPanel selected="call_1" onSelect={onSelect} onClose={onClose} plan={false} />)
     const panel = await screen.findByRole('complementary', { name: 'Tasks' })
     expect(await within(panel).findByRole('region', { name: 'What it was asked' })).toHaveTextContent('Find where class Parser is defined.')
     expect(panel).toHaveTextContent('Tools: grep, read_file')
@@ -73,6 +74,11 @@ describe('the Tasks panel', () => {
     expect(panel).toHaveTextContent(/class Parser/)
     await userEvent.click(within(panel).getByRole('button', { name: 'Back to the tasks' }))
     expect(onSelect).toHaveBeenCalledWith(null)
+    // Closing an open task goes back to the list; the panel stays.
+    onSelect.mockClear()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Close the task' }))
+    expect(onSelect).toHaveBeenCalledWith(null)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('starts a task of the persons in the background, as an assistant, changing files only when they say', async () => {

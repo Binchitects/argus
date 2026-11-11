@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, use, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { AlertTriangle, Blocks, Ellipsis, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { BroadcastBanner, type ActiveBroadcast } from '@/components/app/broadcasts'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { SendFeedbackDialog } from '@/components/app/send-feedback'
@@ -9,7 +9,7 @@ import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip } from '@/components/ui/tooltip'
-import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, menuContent, menuItem } from '@/components/ui/dropdown-menu'
 import { ContextMenu } from 'radix-ui'
 import { ApiError, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -460,6 +460,77 @@ const tabLabel = (t: PanelTab) => (t === 'terminal' ? 'Terminal' : t === 'consol
  * A tab of the panel: drags to another place among the tabs or, a view's, back into the activity bar; its right-click
  * menu moves a view back to the side bar and the panel below the editor or beside it.
  */
+/**
+ * The panel's tabs, as many as fit; the rest in a "…" menu, as VS Code has them, so the strip never scrolls sideways.
+ * The open tab is always among those shown. Each label's width is read from a hidden copy of the row.
+ */
+function PanelTabStrip({ tabs, layout, change }: { tabs: PanelTab[]; layout: Layout; change: (c: Partial<Layout>) => void }) {
+  const box = useRef<HTMLDivElement>(null)
+  const ruler = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState(tabs.length)
+  const names = tabs.join('|')
+  useLayoutEffect(() => {
+    const gap = 12
+    const more = 24
+    const measure = () => {
+      const room = box.current?.clientWidth ?? 0
+      const widths = [...(ruler.current?.children ?? [])].map((c) => (c as HTMLElement).offsetWidth)
+      const all = widths.reduce((sum, w, i) => sum + w + (i ? gap : 0), 0)
+      // Not laid out yet (hidden, or no layout at all): every tab, until there is a width to fit them in.
+      if (room === 0 || all <= room) return setFit(widths.length)
+      let used = 0
+      let n = 0
+      for (const w of widths) {
+        const next = used + (n ? gap : 0) + w
+        if (next + gap + more > room) break
+        used = next
+        n++
+      }
+      setFit(Math.max(1, n))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined' || !box.current) return
+    const watch = new ResizeObserver(measure)
+    watch.observe(box.current)
+    return () => watch.disconnect()
+  }, [names])
+  let shown = tabs.slice(0, fit)
+  if (fit < tabs.length && !shown.includes(layout.panelTab) && tabs.includes(layout.panelTab)) shown = [...shown.slice(0, -1), layout.panelTab]
+  const rest = tabs.filter((t) => !shown.includes(t))
+  return (
+    <div ref={box} className="relative flex min-w-0 flex-1 items-end gap-3 overflow-hidden text-[0.6875rem] font-semibold tracking-wider uppercase">
+      <div ref={ruler} aria-hidden="true" className="pointer-events-none invisible absolute flex gap-3 whitespace-nowrap">
+        {tabs.map((t) => (
+          <span key={t} className="pb-1">
+            {tabLabel(t)}
+          </span>
+        ))}
+      </div>
+      <div role="tablist" aria-label="Panel" className="flex min-w-0 items-end gap-3">
+        {shown.map((t) => (
+          <PanelTabButton key={t} tab={t} layout={layout} change={change} />
+        ))}
+      </div>
+      {rest.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="More panel views" title="More panel views" className="mb-0.5 shrink-0 rounded-sm px-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring">
+              <Ellipsis className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {rest.map((t) => (
+              <DropdownMenuItem key={t} onSelect={() => change({ panelTab: t })}>
+                {tabLabel(t)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  )
+}
+
 function PanelTabButton({ tab, layout, change }: { tab: PanelTab; layout: Layout; change: (c: Partial<Layout>) => void }) {
   const [over, setOver] = useState(false)
   const isView = !(panelParts as readonly string[]).includes(tab)
@@ -1602,14 +1673,12 @@ function Workbench({
           }
         }}
       >
-        <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto text-[0.6875rem] font-semibold tracking-wider uppercase [scrollbar-width:none]">
-          {layout.panelTabs
-            // Ports are Code Studio's (a workspace on the server or a machine); code-arena's own page is on the machine already.
-            .filter((t) => t !== 'ports' || !ownPage())
-            .map((t) => (
-              <PanelTabButton key={t} tab={t} layout={layout} change={arrange} />
-            ))}
-        </div>
+        <PanelTabStrip
+          // Ports are Code Studio's (a workspace on the server or a machine); code-arena's own page is on the machine already.
+          tabs={layout.panelTabs.filter((t) => t !== 'ports' || !ownPage())}
+          layout={layout}
+          change={arrange}
+        />
       </div>
       <div hidden={layout.panelTab !== 'terminal'} className="min-h-0 flex-1">
         <Suspense

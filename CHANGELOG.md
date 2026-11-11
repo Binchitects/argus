@@ -109,6 +109,17 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 ### :bug: Bugs fixed
 
+- Code Arena never scrolls sideways but in its editor: code blocks in the
+  chat wrap their lines (their button unwraps them), diffs wrap, a task's
+  long call or prompt breaks, and the panel's tabs that do not fit go into a
+  "…" menu as VS Code's do.
+- Code Arena's tasks pane is resizable however narrow the chat (it was only
+  once the chat was wide), and closing a task opened from its list goes back
+  to the list.
+- Code Arena's commands with no time limit take at most a quarter of the
+  window: with several, only the newest running one shows its output, and
+  they fold into one line.
+
 - A language server sent `exit` gets a second to end before it is killed.
 - A program just written is started again when Linux says it is busy
   (ETXTBSY), which failed a debug adapter's check under load.

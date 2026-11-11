@@ -212,7 +212,8 @@ function DiffLines({ diff, numbered, path }: { diff: FileDiff; numbered: boolean
   return (
     <>
       {/* Relative: the lines' screen-reader words (absolute) stay in this box, not laid out past its end in the thread. */}
-      <div className="relative max-h-96 overflow-auto">
+      {/* Long lines wrap (break anywhere): nothing but the editor scrolls sideways. */}
+      <div className="relative max-h-96 overflow-x-hidden overflow-y-auto">
         <table className="w-full border-collapse font-mono leading-5">
           <tbody>
             {diff.lines.map(([op, a, b, text], i) =>
@@ -240,7 +241,7 @@ function DiffLines({ diff, numbered, path }: { diff: FileDiff; numbered: boolean
                     <span aria-hidden="true">{op === ' ' ? '' : op === '-' ? '−' : '+'}</span>
                     <span className="sr-only">{op === '-' ? 'Removed:' : op === '+' ? 'Added:' : ''}</span>
                   </td>
-                  <td className="pr-3 pl-2 whitespace-pre">{text}</td>
+                  <td className="pr-3 pl-2 break-all whitespace-pre-wrap">{text}</td>
                 </tr>
               ),
             )}
