@@ -74,6 +74,33 @@ public sealed class OwnGatewayTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_copy_that_is_down_passes_the_request_to_the_pools_other_copy_and_is_passed_over_for_a_while()
+    {
+        var cs = app.ConnectionStringFor("owngw_" + Guid.NewGuid().ToString("N")[..8]);
+        await using var f = app.Create(cs, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own" },
+            s => s.AddSingleton<IRoutesSource>(new Given(Route("pool2", Deployment.Remote, $"http://{FakeModel.DownHost}/v1", weight: 4), Route("pool2", Deployment.Remote, weight: 4))));
+        var gateway = f.Services.GetRequiredService<ModelGateway>();
+        async Task<Llm.Core.Gateway.GatewayRequest> AskAsync(string tag)
+        {
+            var res = await gateway.ChatAsync(new JsonObject
+            {
+                ["model"] = "pool2", ["stream"] = true, ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = tag }),
+            }, new GatewayCaller("pool@example.test", Tag: tag), [], default);
+            Assert.Contains($"\"content\":\"{tag}\"", await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            res.Dispose();
+            await gateway.FlushAsync(default);
+            await using var scope = f.Services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>().GatewayRequests.AsNoTracking().SingleAsync(r => r.Tag == tag);
+        }
+        // The down copy is the first chosen (both idle): the other answers, the ledger says it took two tries, with no fallback.
+        var first = await AskAsync("first");
+        Assert.Equal((Llm.Core.Gateway.GatewayRequest.Done, (short)2, null, "engine.test"), (first.Status, first.Attempts, first.FallbackFrom, first.Deployment));
+        // It is passed over while it is down: the next goes straight to the one that answers.
+        var next = await AskAsync("next");
+        Assert.Equal(((short)1, "engine.test"), (next.Attempts, next.Deployment));
+    }
+
+    [Fact]
     public async Task The_chat_is_answered_by_the_engine_itself_and_booked_in_the_ledger_with_its_person_chat_tokens_and_cost()
     {
         var cs = app.ConnectionStringFor("owngw_" + Guid.NewGuid().ToString("N")[..8]);

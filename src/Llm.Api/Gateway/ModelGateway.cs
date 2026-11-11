@@ -259,6 +259,13 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     /// </summary>
     public Deployment Pick(IReadOnlyList<Deployment> copies)
     {
+        // A copy that just refused a connection is passed over while others are up (all down: tried all the same).
+        var now = clock.GetUtcNow();
+        var up = copies.Where(d => !(_down.TryGetValue(Key(d), out var until) && until > now)).ToList();
+        if (up.Count > 0)
+        {
+            copies = up;
+        }
         Deployment? best = null;
         var score = double.MaxValue;
         foreach (var full in new[] { false, true })
@@ -285,6 +292,14 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
     }
 
     private static string Key(Deployment d) => d.BaseUrl + "|" + d.Model;
+
+    /// <summary>How long a copy that refused a connection is passed over (Pick), while the pool's other copies answer.</summary>
+    public static TimeSpan DownFor { get; set; } = TimeSpan.FromSeconds(10);
+
+    // The copies that refused a connection, and until when they are passed over.
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _down = new(StringComparer.Ordinal);
+
+    private void Down(Deployment d) => _down[Key(d)] = clock.GetUtcNow() + DownFor;
 
     /// <summary>The body as this deployment takes it: its model's name there, only the fields its engine reads, usage on every stream.</summary>
     public static JsonObject Shape(JsonObject body, Deployment d)
@@ -337,80 +352,93 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                 lastStatus ??= 404;
                 continue;
             }
-            var d = Pick(copies);
-            attempts++;
-            var key = Key(d);
-            _busy.AddOrUpdate(key, 1, (_, n) => n + 1);
-            var released = false;
-            void Release()
+            // Each copy of the model at most once: one not reached, or that cannot take it now (502, 503, 504), passes the
+            // request to another before the model's fallback is asked. Never once its answer started.
+            var tried = new HashSet<string>(StringComparer.Ordinal);
+            var refused = false;
+            while (!refused && copies.Where(c => !tried.Contains(Key(c))).ToList() is { Count: > 0 } left)
             {
-                if (!released)
+                var d = Pick(left);
+                tried.Add(Key(d));
+                attempts++;
+                var key = Key(d);
+                _busy.AddOrUpdate(key, 1, (_, n) => n + 1);
+                var released = false;
+                void Release()
                 {
-                    released = true;
-                    _busy.AddOrUpdate(key, 0, (_, n) => Math.Max(0, n - 1));
+                    if (!released)
+                    {
+                        released = true;
+                        _busy.AddOrUpdate(key, 0, (_, n) => Math.Max(0, n - 1));
+                    }
                 }
-            }
-            HttpResponseMessage res;
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + endpoint)
+                HttpResponseMessage res;
+                try
                 {
-                    Content = new StringContent(Shape(body, d).ToJsonString(), Encoding.UTF8, "application/json"),
-                };
-                req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-                if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
-                {
-                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+                    using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + endpoint)
+                    {
+                        Content = new StringContent(Shape(body, d).ToJsonString(), Encoding.UTF8, "application/json"),
+                    };
+                    req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+                    if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
+                    {
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+                    }
+                    res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
                 }
-                res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-            }
-            catch (HttpRequestException ex)
-            {
-                // Not reached (the engine restarting, a server down): its fallback, when there is one.
-                Release();
-                (lastError, lastStatus) = ($"The model server could not be reached: {ex.Message}", 502);
-                continue;
-            }
-            catch
-            {
-                Release();
-                throw;
-            }
-            if (res.IsSuccessStatusCode)
-            {
-                var meter = new SseMeter(clock);
-                var row = Row(caller, name, d, name == asked ? null : asked, attempts, started);
-                if (endpoint != "/chat/completions")
+                catch (HttpRequestException ex)
                 {
-                    row.Call = "completion";
+                    // Not reached (the engine restarting, a server down): another copy, else its fallback, when there is one.
+                    Release();
+                    Down(d);
+                    (lastError, lastStatus) = ($"The model server could not be reached: {ex.Message}", 502);
+                    continue;
                 }
-                var inner = await res.Content.ReadAsStreamAsync(ct);
-                var metered = new MeteredStream(inner, meter, ended =>
+                catch
                 {
                     Release();
-                    Book(row, meter, d, ended, caller);
-                });
-                var content = new StreamContent(metered);
-                foreach (var h in res.Content.Headers)
-                {
-                    content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                    throw;
                 }
-                res.Content = content;
-                return res;
+                if (res.IsSuccessStatusCode)
+                {
+                    var meter = new SseMeter(clock);
+                    var row = Row(caller, name, d, name == asked ? null : asked, attempts, started);
+                    if (endpoint != "/chat/completions")
+                    {
+                        row.Call = "completion";
+                    }
+                    var inner = await res.Content.ReadAsStreamAsync(ct);
+                    var metered = new MeteredStream(inner, meter, ended =>
+                    {
+                        Release();
+                        Book(row, meter, d, ended, caller);
+                    });
+                    var content = new StreamContent(metered);
+                    foreach (var h in res.Content.Headers)
+                    {
+                        content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                    }
+                    res.Content = content;
+                    return res;
+                }
+                string text;
+                using (res)
+                {
+                    text = await res.Content.ReadAsStringAsync(ct);
+                }
+                Release();
+                (lastError, lastStatus) = (text, (int)res.StatusCode);
+                // A server that cannot take it now (restarting, overloaded, gone): another copy, else its fallback. Anything else is the request's.
+                if ((int)res.StatusCode is 502 or 503 or 504)
+                {
+                    continue;
+                }
+                refused = true;
             }
-            string text;
-            using (res)
+            if (refused)
             {
-                text = await res.Content.ReadAsStringAsync(ct);
+                break;
             }
-            Release();
-            (lastError, lastStatus) = (text, (int)res.StatusCode);
-            // A server that cannot take it now (restarting, overloaded, gone): its fallback. Anything else is the request's.
-            if ((int)res.StatusCode is 502 or 503 or 504)
-            {
-                continue;
-            }
-            break;
         }
         var failed = Row(caller, asked, null, null, attempts, started);
         failed.Status = GatewayRequest.Failed;
@@ -451,24 +479,38 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             Write(row);
             throw new ChatGatewayException($"There is no model {model}.", 404);
         }
-        var d = Pick(copies);
-        row.Deployment = Uri.TryCreate(d.BaseUrl, UriKind.Absolute, out var u) ? u.Authority : d.BaseUrl;
+        // A copy not reached passes it to another (the body made again for each), as a chat's does.
+        Deployment d;
         HttpResponseMessage res;
-        try
+        var tried = new HashSet<string>(StringComparer.Ordinal);
+        while (true)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + (path.StartsWith("/v1/", StringComparison.Ordinal) ? path[3..] : path)) { Content = await RenameAsync(content(), d.Model) };
-            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
-            if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
+            d = Pick([.. copies.Where(c => !tried.Contains(Key(c)))]);
+            tried.Add(Key(d));
+            row.Attempts = (short)tried.Count;
+            row.Deployment = Uri.TryCreate(d.BaseUrl, UriKind.Absolute, out var u) ? u.Authority : d.BaseUrl;
+            try
             {
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+                using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + (path.StartsWith("/v1/", StringComparison.Ordinal) ? path[3..] : path)) { Content = await RenameAsync(content(), d.Model) };
+                req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+                if ((d.EngineKey ? engine.Value.ApiKey : d.Key) is { Length: > 0 } bearer)
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+                }
+                res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                break;
             }
-            res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        }
-        catch (HttpRequestException ex)
-        {
-            (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
-            Write(row);
-            throw new ChatGatewayException("The model server could not be reached: " + ex.Message, 502);
+            catch (HttpRequestException ex)
+            {
+                Down(d);
+                if (tried.Count < copies.Count)
+                {
+                    continue;
+                }
+                (row.Status, row.HttpStatus, row.Error, row.EndedAt) = (GatewayRequest.Failed, 502, Short(ex.Message), clock.GetUtcNow());
+                Write(row);
+                throw new ChatGatewayException("The model server could not be reached: " + ex.Message, 502);
+            }
         }
         decimal Unit(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x : 0m;
         if (!res.IsSuccessStatusCode)
