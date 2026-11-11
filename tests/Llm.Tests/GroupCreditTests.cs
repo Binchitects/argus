@@ -195,6 +195,22 @@ public sealed class GroupCreditTests(AppFixture app)
     }
 
     [Fact]
+    public void The_running_cost_shared_out_adds_up_to_the_total_to_the_cent_and_spend_is_kept_exact()
+    {
+        // Three equal shares of $1.00: rounded each alone they are 0.33 three times, a cent short; shared out, one gets it.
+        static Llm.Api.Reports.AccountRow R(string name, double share, decimal charged) => new("person", null, name, null, null, 1, 1, 10, 0, charged, share, Math.Round(1.00m * (decimal)share, 2));
+        var rows = Llm.Api.Reports.Accounting.Whole([R("a", 1 / 3d, 0.000033333m), R("b", 1 / 3d, 0.000033333m), R("c", 1 / 3d, 0.000033334m)], 1.00m);
+        Assert.Equal(1.00m, rows.Sum(r => r.Cost));
+        Assert.Equal([0.34m, 0.33m, 0.33m], rows.Select(r => r.Cost));
+        // Spend is not rounded: the rows add up to the whole exactly.
+        Assert.Equal(0.0001m, rows.Sum(r => r.Charged));
+        // $10.00 by 0.125 / 0.375 / 0.5: exact already.
+        Assert.Equal([1.25m, 3.75m, 5.00m], Llm.Api.Reports.Accounting.Whole([R("a", 0.125, 1), R("b", 0.375, 3), R("c", 0.5, 4)], 10m).Select(r => r.Cost));
+        // Nothing used: left as it is.
+        Assert.Equal([0m], Llm.Api.Reports.Accounting.Whole([R("a", 0, 0)], 10m).Select(r => r.Cost));
+    }
+
+    [Fact]
     public async Task Accounting_shares_the_running_cost_of_power_hardware_and_service_out_to_people_groups_and_projects_by_their_use()
     {
         // Power at $0.50 a kWh with no overhead, 1 kW for the machine besides its GPUs (none measured here), and $730.50 of

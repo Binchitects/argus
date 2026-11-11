@@ -124,6 +124,29 @@ public static class Accounting
         _ => allCharged > 0 ? (double)(charged / allCharged) : 0,
     };
 
+    /// <summary>
+    /// The running cost shared out over a breakdown that is the whole (each request in one row: people, projects, models,
+    /// sources, kinds) in cents that add up to the total: each row's exact share rounded down, the cents left over to the
+    /// rows rounded down most (the largest remainder). Rows sharing nothing keep 0; groups and tags, which overlap, are not
+    /// passed here.
+    /// </summary>
+    public static List<AccountRow> Whole(List<AccountRow> rows, decimal total)
+    {
+        var shareSum = rows.Sum(r => r.Share);
+        if (rows.Count == 0 || total <= 0 || Math.Abs(shareSum - 1) > 0.001)
+        {
+            return rows;
+        }
+        var exact = rows.Select(r => total * (decimal)(r.Share / shareSum)).ToList();
+        var cents = exact.Select(e => Math.Floor(e * 100) / 100).ToList();
+        var left = (int)Math.Round((total - cents.Sum()) * 100);
+        foreach (var i in Enumerable.Range(0, rows.Count).OrderByDescending(i => exact[i] - cents[i]).ThenBy(i => i).Take(Math.Max(0, left)))
+        {
+            cents[i] += 0.01m;
+        }
+        return [.. rows.Select((r, i) => r with { Cost = cents[i] })];
+    }
+
     /// <summary>How much b is more (or less) than a, as a fraction; null when a is nothing.</summary>
     public static double? Change(double before, double now) => before > 0 ? Math.Round((now - before) / before, 4) : null;
 
@@ -199,7 +222,7 @@ public static class Accounting
             parts.Add(part);
             var c = Sum(o, [part]);
             var used = byTime.GetValueOrDefault(at.ToUnixTimeSeconds());
-            series.Add(new AccountBucket(at, c.Power, c.Hardware, c.Service, c.Total, Math.Round(used.Charged, 4), used.Tokens, used.Requests, c.Kwh));
+            series.Add(new AccountBucket(at, c.Power, c.Hardware, c.Service, c.Total, used.Charged, used.Tokens, used.Requests, c.Kwh));
         }
         var running = Sum(o, parts);
         long allTokens = rows.Sum(r => r.Tokens), allRequests = rows.Sum(r => r.Requests);
@@ -212,7 +235,7 @@ public static class Accounting
             var seconds = u.Sum(x => x.Seconds);
             var charged = u.Sum(x => x.Charged);
             var share = ShareOf(by, tokens, seconds, charged, allTokens, allSeconds, allCharged);
-            return new AccountRow(kind, id, name, email, centre, people, requests, tokens, Math.Round(seconds / 3600, 2), Math.Round(charged, 4), Math.Round(share, 6),
+            return new AccountRow(kind, id, name, email, centre, people, requests, tokens, Math.Round(seconds / 3600, 2), charged, Math.Round(share, 6),
                 Math.Round(running.Total * (decimal)share, 2), creditOf, members, u.Sum(x => x.Input), u.Sum(x => x.Cached), u.Sum(x => x.Output));
         }
         static List<AccountRow> Ordered(IEnumerable<AccountRow> r) => [.. r.OrderBy(x => x.Name.StartsWith('(')).ThenByDescending(x => x.Cost).ThenByDescending(x => x.Requests)];
@@ -306,14 +329,15 @@ public static class Accounting
                 from gateway.requests r
                 where r.started_at >= @from and r.started_at < @to and r.status <> 'refused'
                 """, new Dictionary<string, object> { ["from"] = prevFrom.ToUniversalTime(), ["to"] = from.ToUniversalTime() }, ct)).Rows[0];
-            var prevUse = new AccountUse(Num(prev[0]), Num(prev[1]), Math.Round(Dbl(prev[2]) / 3600, 2), Math.Round(Dec(prev[3]), 4), (int)Num(prev[4]), Num(prev[5]), Num(prev[6]), Num(prev[7]));
+            var prevUse = new AccountUse(Num(prev[0]), Num(prev[1]), Math.Round(Dbl(prev[2]) / 3600, 2), Dec(prev[3]), (int)Num(prev[4]), Num(prev[5]), Num(prev[6]), Num(prev[7]));
             var prevWatts = await ScalarAsync(prom, $"sum(avg_over_time(nvidia_smi_power_draw_watts[{(long)Math.Max(60, length.TotalSeconds)}s]))", from, log, ct);
             var prevCost = Cost(o, prevFrom, from, prevWatts is { } pw ? pw * length.TotalHours / 1000 : null);
             before = new AccountBefore(prevFrom, from, prevCost.Total, prevUse, Change((double)prevCost.Total, (double)running.Total), Change((double)prevUse.Charged, (double)allCharged),
                 Change(prevUse.Tokens, allTokens));
         }
-        return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, Math.Round(allCharged, 4), active, rows.Sum(r => r.Input), rows.Sum(r => r.Cached), rows.Sum(r => r.Output)), unit, health, before, interval, series,
-            Ordered(people), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(projects), Ordered(models), Ordered(sources), Ordered(kinds),
+        return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, allCharged, active, rows.Sum(r => r.Input), rows.Sum(r => r.Cached), rows.Sum(r => r.Output)), unit, health, before, interval, series,
+            Ordered(Whole(people, running.Total)), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(Whole(projects, running.Total)),
+            Ordered(Whole(models, running.Total)), Ordered(Whole(sources, running.Total)), Ordered(Whole(kinds, running.Total)),
             Ordered(tags));
     }
 
