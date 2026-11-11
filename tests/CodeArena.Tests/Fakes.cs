@@ -865,6 +865,10 @@ public sealed class FakeChats
         public DateTimeOffset Updated { get; set; } = DateTimeOffset.UtcNow;
         /// <summary>Code Arena's turn holds it until then.</summary>
         public DateTimeOffset? Turn { get; set; }
+        /// <summary>The answer Code Arena is writing, as it last sent it (PUT draft); null once the answer came, or the turn ended.</summary>
+        public string? Draft { get; set; }
+        /// <summary>Every draft sent, in order.</summary>
+        public List<string> Drafts { get; } = [];
         /// <summary>What the person queued on the web while Code Arena's turn holds it: taken in at the turn's next step.</summary>
         public List<string> Queued { get; } = [];
         /// <summary>The project it is in (Arena's Projects); null: none.</summary>
@@ -1836,7 +1840,13 @@ public sealed class FakeChats
             }
             else if (parts is ["chats", var id4, "messages"] && method == "POST")
             {
-                (reply, status) = Append(All.First(x => x.Id == id4), JsonNode.Parse(body)!.AsObject());
+                var posted = JsonNode.Parse(body)!.AsObject();
+                (reply, status) = Append(All.First(x => x.Id == id4), posted);
+                // An answer in: its draft goes, as Arena's does.
+                if (status == 200 && (posted["messages"] as JsonArray ?? []).Any(m => m?["role"]?.ToString() == "assistant"))
+                {
+                    All.First(x => x.Id == id4).Draft = null;
+                }
             }
             else if (parts is ["chats", var id5, "turn"] && method == "POST")
             {
@@ -1844,8 +1854,23 @@ public sealed class FakeChats
                 Turns.Add("hold");
                 reply = new JsonObject { ["until"] = DateTimeOffset.UtcNow.AddSeconds(90).ToString("o") };
             }
+            else if (parts is ["chats", var id9, "draft"] && method == "PUT")
+            {
+                var c = All.First(x => x.Id == id9);
+                if (c.Turn is null)
+                {
+                    (reply, status) = (new JsonObject { ["status"] = "no_turn" }, 409);
+                }
+                else
+                {
+                    c.Draft = JsonNode.Parse(body)!["text"]?.ToString();
+                    c.Drafts.Add(c.Draft ?? "");
+                    (reply, status) = (null, 204);
+                }
+            }
             else if (parts is ["chats", var id6, "turn"] && method == "DELETE")
             {
+                All.First(x => x.Id == id6).Draft = null;
                 All.First(x => x.Id == id6).Turn = null;
                 Turns.Add("end");
                 (reply, status) = (null, 204);

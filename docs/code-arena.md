@@ -3199,10 +3199,23 @@ folder's sessions; a session kept with a chat has a cloud mark.
 
 Messages are sent in the background as they are added, in order, and again
 until Arena has them: a session goes on while Arena is out of reach, and what
-it missed is sent when Arena answers (at the latest when the session is next
-opened). Each message carries its place in the session, so one sent twice
-(its answer lost) is never kept twice. A chat deleted in Arena ends the sync
-for that session, which goes on here.
+it missed is sent when Arena answers (tried again within 10 seconds, at the
+latest when the session is next opened). Each message carries its place in the
+session, so one sent twice (its answer lost) is never kept twice. A chat
+deleted in Arena ends the sync for that session, which goes on here.
+
+While a turn works, the answer being written goes to its chat every few
+seconds too: the web page shows its thinking and words as they come ("Code
+Arena is writing this answer"), and the answer itself takes their place once
+it is in.
+
+Nothing a session had is lost when Code Arena closes, is killed, crashes or
+the machine goes off: each message is on the disk before Code Arena goes on,
+and the answer being written is kept every few seconds beside the session
+(`SESSION.jsonl.draft`). The next time the session opens, an answer left so
+becomes the answer it got to, ending "(Code Arena closed before this answer
+ended.)", and is sent to its chat. A line a power-off cut short never takes
+the next one with it.
 
 The session keeps Arena's id of each message, and both sides go by those ids:
 the session reads what follows the last message both have, and adds after it.

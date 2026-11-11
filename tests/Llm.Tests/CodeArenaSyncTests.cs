@@ -690,6 +690,35 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         Assert.Empty((await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null))).GetProperty("messages").EnumerateArray());
     }
 
+    [Fact]
+    public async Task The_answer_Code_Arena_writes_shows_on_the_web_as_it_comes_only_while_its_turn_holds_the_chat_and_goes_once_it_is_in()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var (_, otherKey) = await PersonAsync(f);
+        var id = await ChatAsync(arena, "draft-1");
+        var ids = await SendAsync(arena, id, null, [User("Explain the parser")]);
+        async Task<JsonElement> Draft() => await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/code-arena-draft"));
+        // No turn: no draft taken.
+        await StatusAssert.Is(HttpStatusCode.Conflict, await arena.PutAsJsonAsync($"/api/code-arena/chats/{id}/draft", new { text = "early", reasoning = "" }));
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.PostAsync($"/api/code-arena/chats/{id}/turn", null));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.PutAsJsonAsync($"/api/code-arena/chats/{id}/draft", new { text = "The parser reads", reasoning = "Look at Parse" }));
+        var d = await Draft();
+        Assert.Equal("The parser reads", d.GetProperty("text").GetString());
+        Assert.Equal("Look at Parse", d.GetProperty("reasoning").GetString());
+        // Not someone else's.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).PutAsJsonAsync($"/api/code-arena/chats/{id}/draft", new { text = "x" }));
+        // The answer comes: the draft goes.
+        await SendAsync(arena, id, ids[0], [Answer("The parser reads tokens.")]);
+        Assert.Equal(JsonValueKind.Null, (await Draft()).GetProperty("text").ValueKind);
+        // A draft then the turn's end: gone too.
+        await arena.PutAsJsonAsync($"/api/code-arena/chats/{id}/draft", new { text = "Next", reasoning = "" });
+        Assert.Equal("Next", (await Draft()).GetProperty("text").GetString());
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.DeleteAsync($"/api/code-arena/chats/{id}/turn"));
+        Assert.Equal(JsonValueKind.Null, (await Draft()).GetProperty("text").ValueKind);
+    }
+
     private static MultipartFormDataContent Text(string name, string text)
     {
         var form = new MultipartFormDataContent();

@@ -55,7 +55,11 @@ public sealed class ChatChangesOnSave(ChatWatch watch) : SaveChangesInterceptor
         foreach (var e in context.ChangeTracker.Entries<Conversation>().Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted))
         {
             var c = e.Entity;
-            changes.Add((c.UserId, c.Id, e.State == EntityState.Deleted || c.DeletedAt is not null ? "deleted" : e.State == EntityState.Added ? "added" : "chat"));
+            // Only Code Arena's answer as it comes (and its turn's hold): "draft", so a page reads that alone, not the chat.
+            var draft = e.State == EntityState.Modified && e.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name)
+                .All(n => n is nameof(Conversation.CodeArenaDraft) or nameof(Conversation.CodeArenaTurnUntil))
+                && e.Property(nameof(Conversation.CodeArenaDraft)).IsModified;
+            changes.Add((c.UserId, c.Id, e.State == EntityState.Deleted || c.DeletedAt is not null ? "deleted" : e.State == EntityState.Added ? "added" : draft ? "draft" : "chat"));
         }
         var messages = context.ChangeTracker.Entries<ChatMessage>().Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Select(e => e.Entity.ConversationId).Distinct().ToList();

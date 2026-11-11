@@ -66,6 +66,9 @@ public sealed record SyncSummary(Guid UpTo, string? Text);
 /// summary its compaction wrote. <paramref name="Branch"/>: they go on a branch of their own from <paramref name="Parent"/>,
 /// shown from then on (Code Arena went back to before a turn, or kept its own way while the web moved elsewhere).
 /// </summary>
+/// <summary>The answer Code Arena is writing in its turn, as it stands.</summary>
+public sealed record SyncDraft(string? Text, string? Reasoning);
+
 public sealed record SyncAppend(Guid? Parent, bool Branch, List<SyncMessage>? Messages, SyncSummary? Summary = null);
 
 /// <summary>
@@ -115,6 +118,7 @@ public static partial class CodeArenaSync
         g.MapGet("/chats/{id:guid}", ReadAsync);
         g.MapPost("/chats/{id:guid}/messages", AppendAsync);
         g.MapPost("/chats/{id:guid}/turn", TurnAsync);
+        g.MapPut("/chats/{id:guid}/draft", DraftAsync);
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
         g.MapPost("/chats/{id:guid}/queue/take", TakeQueuedAsync);
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
@@ -431,7 +435,7 @@ public static partial class CodeArenaSync
     {
         var now = DateTimeOffset.UtcNow;
         if (await db.Conversations.Where(c => c.Id == id && c.CodeArenaTurnUntil != null && c.CodeArenaTurnUntil <= now)
-                .ExecuteUpdateAsync(s => s.SetProperty(c => c.CodeArenaTurnUntil, (DateTimeOffset?)null), ct) == 0)
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.CodeArenaTurnUntil, (DateTimeOffset?)null).SetProperty(c => c.CodeArenaDraft, (string?)null), ct) == 0)
         {
             return false;
         }
@@ -667,6 +671,11 @@ public static partial class CodeArenaSync
             {
                 c.Model = Clip(answer.Model, 200);
             }
+            // The answer being written is in the chat now: its draft goes.
+            if (rest.Any(m => m.Role == "assistant"))
+            {
+                c.CodeArenaDraft = null;
+            }
         }
         if (leaf != c.CurrentLeafId && (rest.Count > 0 || body.Branch))
         {
@@ -807,6 +816,35 @@ public static partial class CodeArenaSync
         return Results.Ok(new { until = c.CodeArenaTurnUntil });
     }
 
+    /// <summary>The most of a draft kept: the web shows its end while it comes, the whole answer arrives with its message.</summary>
+    public const int DraftChars = 200_000;
+
+    /// <summary>
+    /// The answer Code Arena is writing in its turn, as it stands (sent every few seconds): the web chat shows it as it comes.
+    /// Only while its turn holds the chat (409 otherwise); its message, or the turn's end, takes its place. Renews the hold.
+    /// </summary>
+    private static async Task<IResult> DraftAsync(Guid id, SyncDraft body, HttpContext http, McpPeople people, AppDbContext db, TimeProvider clock)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (await db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, http.RequestAborted) is not { } c)
+        {
+            return Gone();
+        }
+        if (!Answering(c))
+        {
+            return AuthEndpoints.Problem(409, "no_turn", "Code Arena's turn does not hold this chat: a draft goes only while it does.");
+        }
+        static string Last(string? s, int most) => s is null ? "" : s.Length <= most ? s : s[^most..];
+        c.CodeArenaDraft = System.Text.Json.JsonSerializer.Serialize(new { text = Last(body.Text, DraftChars), reasoning = Last(body.Reasoning, DraftChars / 4), at = clock.GetUtcNow() });
+        Renew(c);
+        await db.SaveChangesAsync(http.RequestAborted);
+        return Results.NoContent();
+    }
+
     /// <summary>
     /// Code Arena's turn takes in, at its next step, what the person queued on the web while it works: the first ones in line that
     /// may go into an answer (QueuedMessages.TakesIn: no files, skill or deep research, no model a safeguard chose), out of line, in
@@ -853,9 +891,10 @@ public static partial class CodeArenaSync
         {
             return Gone();
         }
-        if (c.CodeArenaTurnUntil is not null)
+        if (c.CodeArenaTurnUntil is not null || c.CodeArenaDraft is not null)
         {
             c.CodeArenaTurnUntil = null;
+            c.CodeArenaDraft = null;
             await db.SaveChangesAsync(http.RequestAborted);
             await queue.StartNextAsync(id);
         }

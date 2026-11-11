@@ -1313,6 +1313,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("CodeArenaDraft")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("CodeArenaTurnUntil")
                         .HasColumnType("timestamp with time zone");
 

@@ -89,6 +89,7 @@ public static partial class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/hurry", HurryAsync);
         g.MapGet("/conversations/{id:guid}/summary", SummaryAsync);
         g.MapGet("/conversations/{id:guid}/stamp", StampAsync);
+        g.MapGet("/conversations/{id:guid}/code-arena-draft", CodeArenaDraftAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapGet("/conversations/{id:guid}/rewind", RewindPreviewAsync);
@@ -975,6 +976,20 @@ public static partial class ChatEndpoints
     /// (in another tab or device, or by Code Arena keeping its session in step). The stamp changes with the branch on
     /// screen, the chat's last change, its latest compaction, its title, its line of queued messages and its settings.
     /// </summary>
+    /// <summary>The answer Code Arena is writing in this chat, as it last sent it (text, reasoning, at); null when it writes none.</summary>
+    private static async Task<IResult> CodeArenaDraftAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var c = await RoomAccess.FindAsync(db, id, me, Need.Read, ct);
+        if (c is null)
+        {
+            return Results.NotFound();
+        }
+        return CodeArenaSync.Answering(c) && c.CodeArenaDraft is { } draft
+            ? Results.Text(draft, "application/json")
+            : Results.Json(new { text = (string?)null, reasoning = (string?)null, at = (DateTimeOffset?)null });
+    }
+
     private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, QueuedMessages queue, CancellationToken ct)
     {
         var me = await Me(p, users);

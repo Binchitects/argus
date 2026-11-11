@@ -422,6 +422,8 @@ internal sealed class SessionStore
                 Opened.Remove(gone);
             }
             Opened[full] = new WeakReference<SessionStore>(store);
+            // An answer a Code Arena that stopped left half-written becomes the answer it got to.
+            store.Recover();
             return store;
         }
     }
@@ -450,6 +452,64 @@ internal sealed class SessionStore
     {
         Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents, Context = context }));
         Added?.Invoke(message);
+    }
+
+    /// <summary>
+    /// The answer being written, as it stands: kept every few seconds while it streams, in a file of its own beside the
+    /// session's (replaced each time, gone once the answer is written), so Code Arena closed, killed or the machine off
+    /// mid-answer loses at most those seconds (<see cref="Recover"/> makes it the answer at the next open).
+    /// </summary>
+    public void Draft(string text, string reasoning)
+    {
+        PrivateFiles.WriteAllText(DraftFile, Json.Line(new JsonObject { ["text"] = text, ["reasoning"] = reasoning }), durable: true);
+        Drafted?.Invoke(text, reasoning);
+    }
+
+    /// <summary>Told of the answer being written as it stands (the chat in Arena shows it as it comes).</summary>
+    public event Action<string, string>? Drafted;
+
+    /// <summary>The turn ended: no answer is being written.</summary>
+    public void DropDraft()
+    {
+        try
+        {
+            System.IO.File.Delete(DraftFile);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left: the next open finds it and keeps it as the answer it got to.
+        }
+    }
+
+    /// <summary>Where the answer being written is kept.</summary>
+    public string DraftFile => File + ".draft";
+
+    /// <summary>What a recovered answer ends with: it was cut short where Code Arena stopped.</summary>
+    public const string CutShort = "(Code Arena closed before this answer ended.)";
+
+    /// <summary>A draft not written for this long was left by a Code Arena that stopped (a live one writes every few seconds).</summary>
+    public static TimeSpan DraftLeft { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// An answer left half-written by a Code Arena that stopped (closed, killed, a crash, the machine off): written as the
+    /// answer it got to, marked cut short, so the session and its chat in Arena keep it. True when there was one.
+    /// </summary>
+    public bool Recover()
+    {
+        var file = DraftFile;
+        if (!System.IO.File.Exists(file) || DateTime.UtcNow - System.IO.File.GetLastWriteTimeUtc(file) < DraftLeft)
+        {
+            return false;
+        }
+        var d = Json.ParseObject(Text(System.IO.File.ReadAllBytes(file)));
+        var text = d?.Str("text") ?? "";
+        var answer = new JsonObject { ["role"] = "assistant", ["content"] = text.Trim().Length > 0 ? text.TrimEnd() + "\n\n" + CutShort : CutShort };
+        if (d?.Str("reasoning") is { Length: > 0 } reasoning)
+        {
+            answer["reasoning_content"] = reasoning;
+        }
+        Message(answer);
+        return true;
     }
 
     /// <summary>Told of each message the session adds (the chat in Arena is sent it).</summary>
@@ -723,7 +783,13 @@ internal sealed class SessionStore
                     line[k] = v;
                 }
             }
-            PrivateFiles.AppendLine(File, Json.Line(line));
+            // On the disk before it returns: a crash or a power-off loses no message the session had.
+            PrivateFiles.AppendLine(File, Json.Line(line), durable: true);
+            if (line.Str("type") == "message" && line["message"]?.Str("role") == "assistant")
+            {
+                // The answer is written whole: the draft of it goes.
+                System.IO.File.Delete(DraftFile);
+            }
             _state.Apply(line, DateTimeOffset.UtcNow);
             Length = Size(File);
         }
@@ -748,7 +814,7 @@ internal sealed class SessionStore
         TokenUsage? pending = null;
         foreach (var (_, _, bytes) in Lines(file, Math.Max(0, scan.LastCompact), scan.Length))
         {
-            if (Json.ParseObject(Encoding.UTF8.GetString(bytes)) is not { } entry)
+            if (Json.ParseObject(Text(bytes)) is not { } entry)
             {
                 continue;
             }
@@ -802,13 +868,16 @@ internal sealed class SessionStore
         var written = new DateTimeOffset(System.IO.File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
         foreach (var (_, _, bytes) in Lines(file, 0, new FileInfo(file).Length))
         {
-            if (Json.ParseObject(Encoding.UTF8.GetString(bytes)) is { } entry)
+            if (Json.ParseObject(Text(bytes)) is { } entry)
             {
                 data.Apply(entry, written);
             }
         }
         return data;
     }
+
+    /// <summary>A line's text, without the zeros a power-off can leave before it.</summary>
+    private static string Text(ReadOnlySpan<byte> bytes) => Encoding.UTF8.GetString(bytes).TrimStart('\0');
 
     private static TokenUsage Usage(JsonObject entry) => new(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
 
@@ -924,7 +993,7 @@ internal sealed class SessionStore
             if (line.StartsWith(TypeMessage))
             {
                 messages++;
-                var whole = bytes.Length < HeadBytes || !Skip(bytes) ? Json.ParseObject(Encoding.UTF8.GetString(line)) : null;
+                var whole = bytes.Length < HeadBytes || !Skip(bytes) ? Json.ParseObject(Text(line)) : null;
                 if (preview.Length == 0 && whole?["message"] is JsonObject m && m.Str("role") == "user")
                 {
                     preview = Fmt.OneLine(Quotes.Split(m.Str("content") ?? "").Text, 70);
@@ -939,7 +1008,7 @@ internal sealed class SessionStore
                 }
                 continue;
             }
-            if (Json.ParseObject(Encoding.UTF8.GetString(line)) is not { } entry)
+            if (Json.ParseObject(Text(line)) is not { } entry)
             {
                 continue;
             }

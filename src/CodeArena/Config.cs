@@ -597,7 +597,7 @@ internal static class PrivateFiles
     }
 
     /// <summary>Written to a temporary file first, created 0600, then moved over the old one.</summary>
-    public static void WriteAllText(string file, string text)
+    public static void WriteAllText(string file, string text, bool durable = false)
     {
         EnsureDirectory(Path.GetDirectoryName(Path.GetFullPath(file))!);
         var tmp = file + ".tmp";
@@ -608,9 +608,16 @@ internal static class PrivateFiles
             options.UnixCreateMode = OwnerFile;
         }
         using (var stream = new FileStream(tmp, options))
-        using (var writer = new StreamWriter(stream))
         {
-            writer.Write(text);
+            using (var writer = new StreamWriter(stream, leaveOpen: true))
+            {
+                writer.Write(text);
+            }
+            if (durable)
+            {
+                // On the disk before it takes the old one's place: a power-off leaves the old or the new, never neither.
+                stream.Flush(flushToDisk: true);
+            }
         }
         File.Move(tmp, file, overwrite: true);
         if (!OperatingSystem.IsWindows())
@@ -619,17 +626,45 @@ internal static class PrivateFiles
         }
     }
 
-    /// <summary>Appends a line, creating the file 0600 when it is new.</summary>
-    public static void AppendLine(string file, string line)
+    /// <summary>
+    /// Appends a line, creating the file 0600 when it is new. <paramref name="durable"/>: on the disk before it returns
+    /// (fsync), so a sudden power-off keeps it; and a line cut short by one before (no newline at the end) is ended first,
+    /// so this one is never glued to it and lost with it.
+    /// </summary>
+    public static void AppendLine(string file, string line, bool durable = false)
     {
         var options = new FileStreamOptions { Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.Read };
-        if (!OperatingSystem.IsWindows() && !File.Exists(file))
+        var exists = File.Exists(file);
+        if (!OperatingSystem.IsWindows() && !exists)
         {
             options.UnixCreateMode = OwnerFile;
         }
+        var torn = durable && exists && EndsTorn(file);
         using var stream = new FileStream(file, options);
-        using var writer = new StreamWriter(stream);
-        writer.Write(line);
-        writer.Write('\n');
+        using (var writer = new StreamWriter(stream, leaveOpen: true))
+        {
+            if (torn)
+            {
+                writer.Write('\n');
+            }
+            writer.Write(line);
+            writer.Write('\n');
+        }
+        if (durable)
+        {
+            stream.Flush(flushToDisk: true);
+        }
+    }
+
+    /// <summary>Whether the file's last byte is not a newline (a line cut short, or zeros left by a power-off).</summary>
+    private static bool EndsTorn(string file)
+    {
+        using var read = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (read.Length == 0)
+        {
+            return false;
+        }
+        read.Seek(-1, SeekOrigin.End);
+        return read.ReadByte() != '\n';
     }
 }

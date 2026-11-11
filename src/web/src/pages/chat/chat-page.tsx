@@ -51,6 +51,7 @@ import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
 import { readsAloud, voiceQuery } from '@/lib/voice'
+import { CodeArenaDraft } from './code-arena-draft'
 import { QueuedList, type Queued } from './queued-list'
 import { speak, voicePrefix } from './sound'
 import { TalkBar, TalkButton } from './talk'
@@ -1465,6 +1466,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                         </div>
                       )
                     })}
+                    {id && <CodeArenaDraft chatId={id} on={!!data?.codeArena && !streaming} />}
                     <QueuedList
                       queued={queue}
                       elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}

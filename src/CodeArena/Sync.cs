@@ -62,6 +62,9 @@ internal sealed class ChatSync : IAsyncDisposable
     private bool _lease;
     private DateTime _leaseAt;
 
+    /// <summary>The longest wait between tries while Arena cannot be reached.</summary>
+    public static TimeSpan RetryAtMost { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>The most messages one request sends.</summary>
     public const int Batch = 200;
 
@@ -101,6 +104,7 @@ internal sealed class ChatSync : IAsyncDisposable
         _notice = notice;
         _vision = vision ?? (() => false);
         store.Added += Added;
+        store.Drafted += Drafted;
         // A summary goes when it is written, not with the next message: nothing else may come before the session ends.
         store.SummaryWaiting += Wake;
         store.PlanWaiting += Wake;
@@ -154,6 +158,54 @@ internal sealed class ChatSync : IAsyncDisposable
 
     private void Added(JsonObject message) => Wake();
 
+    /// <summary>A draft on its way to Arena: the next waits for it (a newer one replaces any not sent yet).</summary>
+    private int _drafting;
+
+    /// <summary>
+    /// The answer being written, as it stands, to the chat in Arena while this end's turn holds it: the web chat shows it as
+    /// it comes. In the background; a newer draft while one is on its way waits for the next (they come every few seconds).
+    /// </summary>
+    private void Drafted(string text, string reasoning)
+    {
+        string? conversation;
+        lock (_gate)
+        {
+            conversation = _lease ? _store.Read(d => d.Conversation) : null;
+        }
+        if (conversation is null || Interlocked.Exchange(ref _drafting, 1) == 1)
+        {
+            return;
+        }
+        // The messages the session had as this was written: one added since (the answer itself) makes it old news.
+        var keys = _store.Read(d => d.Keys);
+        _ = Task.Run(async () =>
+        {
+            var held = false;
+            try
+            {
+                // In turn with the messages' sends: never after the answer it is a draft of.
+                await _store.Busy.WaitAsync(_stop.Token);
+                held = true;
+                if (_store.Read(d => d.Keys) == keys)
+                {
+                    await SendAsync(HttpMethod.Put, $"/api/code-arena/chats/{conversation}/draft", new JsonObject { ["text"] = text, ["reasoning"] = reasoning }, _stop.Token);
+                }
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or OperationCanceledException or IOException or System.Text.Json.JsonException)
+            {
+                // Out of reach: the answer goes whole with its message.
+            }
+            finally
+            {
+                if (held)
+                {
+                    _store.Busy.Release();
+                }
+                Volatile.Write(ref _drafting, 0);
+            }
+        });
+    }
+
     private void Wake()
     {
         lock (_wake)
@@ -200,8 +252,9 @@ internal sealed class ChatSync : IAsyncDisposable
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
-                // Arena out of reach, or restarting (or the session's file not writable): again in a while, longer each time (at most a minute).
-                wait = wait == TimeSpan.Zero ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(Math.Min(60, wait.TotalSeconds * 2));
+                // Arena out of reach, or restarting (or the session's file not writable): again soon, a little longer each time
+                // (at most RetryAtMost), so the chat in Arena is in step within seconds of Arena answering again.
+                wait = wait == TimeSpan.Zero ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(Math.Min(RetryAtMost.TotalSeconds, wait.TotalSeconds * 2));
                 Problem($"Arena cannot be reached ({Fmt.OneLine(e.Message, 120)}): the session is sent when it can be");
             }
         }
@@ -1274,7 +1327,8 @@ internal sealed class ChatSync : IAsyncDisposable
                     // Ended: opened again at once, unless it ends as soon as it opens (a proxy that cuts it): asked meanwhile.
                     return opened.Elapsed >= TimeSpan.FromSeconds(5);
                 }
-                if (!line.StartsWith("data: ", StringComparison.Ordinal) || Json.ParseObject(line[6..]) is not { } e || e.Str("type") != "chat")
+                // This end's own answer as it comes ("draft") changes nothing it lacks.
+                if (!line.StartsWith("data: ", StringComparison.Ordinal) || Json.ParseObject(line[6..]) is not { } e || e.Str("type") != "chat" || e.Str("what") == "draft")
                 {
                     continue;
                 }
@@ -1399,6 +1453,7 @@ internal sealed class ChatSync : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _store.Added -= Added;
+        _store.Drafted -= Drafted;
         _store.SummaryWaiting -= Wake;
         EndTurn();
         await FlushAsync(TimeSpan.FromSeconds(5));

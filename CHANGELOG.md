@@ -120,6 +120,13 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 - Code Arena's tasks pane is resizable however narrow the chat (it was only
   once the chat was wide), and closing a task opened from its list goes back
   to the list.
+- Code Arena loses nothing of a session when it closes, is killed, crashes
+  or the machine goes off: each message is on the disk before it goes on,
+  the answer being written is kept every few seconds and comes back as the
+  answer it got to, and a line cut short by a power-off never takes the next
+  with it. The web chat shows that answer as it comes, and what Arena
+  missed while out of reach is tried again within 10 seconds (it was up to a
+  minute).
 - A live thinking step (and a command's output) follows its newest words
   only while it is left at the bottom: scrolled up to read, it stays there;
   scrolled back to the end, it follows again. In the web chat too.

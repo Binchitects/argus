@@ -554,6 +554,11 @@ internal sealed partial class Agent
         finally
         {
             _turning = false;
+            // The turn is over, however it ended: an answer it kept is in the session; a draft left is of none (a failed request).
+            if (Depth == 0)
+            {
+                Session?.DropDraft();
+            }
             if (!done)
             {
                 await KeepUncommittedAsync(before);
@@ -685,7 +690,8 @@ internal sealed partial class Agent
             await MaybeCompactAsync(ct);
             ReportJobs();
             _askedAt = Estimate();
-            var printer = new Printer(Ui, Stream && Depth == 0, Events);
+            // The main conversation's answer is kept as it comes (a draft every few seconds): a stop mid-answer keeps it.
+            var printer = new Printer(Ui, Stream && Depth == 0, Events, Depth == 0 && Session is { } store ? store.Draft : null);
             Completion answer;
             Events?.Step();
             Ui.StartSpinner(step == 0 ? "Thinking" : "Working");
@@ -2412,16 +2418,40 @@ internal sealed partial class Agent
     }
 
     /// <summary>Streams the answer to the terminal: reasoning dimmed, then the text; and to the web interface when it listens.</summary>
-    private sealed class Printer(Ui ui, bool show, IAgentEvents? events) : IStreamSink
+    private sealed class Printer(Ui ui, bool show, IAgentEvents? events, Action<string, string>? draft = null) : IStreamSink
     {
+        /// <summary>How often the answer as it stands is kept while it streams.</summary>
+        public static readonly TimeSpan DraftEvery = TimeSpan.FromSeconds(3);
+
         private bool _reasoning;
         private bool _any;
         private readonly StringBuilder _said = new();
+        private readonly StringBuilder _thought = new();
+        private long _drafted = Environment.TickCount64;
 
         public string Said => _said.ToString();
 
+        private void Keep()
+        {
+            if (draft is null || Environment.TickCount64 - _drafted < DraftEvery.TotalMilliseconds)
+            {
+                return;
+            }
+            _drafted = Environment.TickCount64;
+            try
+            {
+                draft(_said.ToString(), _thought.ToString());
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The disk refused: the answer still streams, and is written whole at its end.
+            }
+        }
+
         public void Reasoning(string text)
         {
+            _thought.Append(text);
+            Keep();
             events?.Reasoning(text);
             if (!show)
             {
@@ -2439,6 +2469,7 @@ internal sealed partial class Agent
         public void Text(string text)
         {
             _said.Append(text);
+            Keep();
             events?.Text(text);
             if (!show)
             {

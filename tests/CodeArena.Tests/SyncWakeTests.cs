@@ -127,4 +127,33 @@ public sealed class SyncWakeTests : IDisposable
         await Until(() => chat.Messages.Count == 4, "Arena has the next message", Soon);
         Assert.Equal(["q1", "a1", "q2", "a2"], chat.Messages.Select(Content));
     }
+
+    [Fact]
+    public async Task The_answer_being_written_reaches_the_web_chat_as_it_comes_while_the_turn_holds_it_and_never_after_its_answer()
+    {
+        var config = new Config { Url = _mcp.BaseUrl, ApiKey = FakeGateway.Key, SyncChats = true };
+        var store = SessionStore.Create(_dir, "/work/shop", "model-a");
+        await using var sync = ChatSync.Start(config, new HttpClient(), store, "/work/shop", () => "model-a", (_, _) => { })!;
+        store.Message(Said("user", "q1"));
+        await Until(() => sync.InStep, "Arena has the question");
+        var chat = _mcp.Chats.All.Single();
+        // No turn holds the chat: nothing is sent of a draft.
+        store.Draft("not yet", "");
+        await Task.Delay(300);
+        Assert.Empty(chat.Drafts);
+
+        await sync.BeginTurnAsync(CancellationToken.None);
+        store.Draft("The parser", "thinking");
+        await Until(() => chat.Draft == "The parser", "Arena has the draft", Soon);
+        store.Draft("The parser reads", "thinking");
+        await Until(() => chat.Draft == "The parser reads", "Arena has the newer draft", Soon);
+        // A draft and its answer at once: the answer is in, and no draft after it.
+        store.Draft("The parser reads tokens", "");
+        store.Message(Said("assistant", "The parser reads tokens."), "model-a");
+        await Until(() => chat.Messages.Count == 2, "Arena has the answer", Soon);
+        await Task.Delay(500);
+        Assert.Null(chat.Draft);
+        sync.EndTurn();
+        await Until(() => chat.Turn is null, "the chat is let go", Soon);
+    }
 }
