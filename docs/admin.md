@@ -2058,7 +2058,10 @@ the stack's network only: Traefik routes no `/metrics` to the app, and the app
 refuses one that came through it. NVIDIA's DCGM detail (SM activity, tensor
 cores, XID errors, ECC, NVLink) needs the **dcgm** profile
 (`COMPOSE_PROFILES=dcgm`; the offline bundle carries its image): the Hardware dashboard
-says so, and GPU Hardware's DCGM panels are empty without it.
+says so, and GPU Hardware's DCGM panels are empty without it. The exporter reads
+`deploy/config/dcgm-counters.csv`, which lists every field those panels and the alert
+rules use. A GeForce card has no profiling and no NVLink, so SM activity, tensor
+cores, PCIe and NVLink throughput stay empty there; XID shows once an error happens.
 
 **Tokens a second** mean two things, and the dashboards name which:
 
