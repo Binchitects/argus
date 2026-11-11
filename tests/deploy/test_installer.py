@@ -652,6 +652,14 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.env_values()["LEAN_SLOTS"], "3")
         self.assertEqual(cli("check", "nonsense").returncode, 2)
         self.assertEqual(cli("upgrade").returncode, 2)
+        # The admin's password is root's to reset: anyone else is refused, and nothing reaches the app.
+        if os.geteuid() != 0:
+            calls = len(self.r.calls())
+            refused = cli("reset-admin-password", "--generate")
+            self.assertEqual(refused.returncode, 1, self.output(refused))
+            self.assertIn("needs root: sudo arenactl reset-admin-password", refused.stderr)
+            self.assertFalse(any("reset-admin-password" in " ".join(c) for c in self.r.calls()[calls:]))
+        self.assertIn("reset-admin-password", cli("help").stdout)
         # Purged: taken off the PATH with it.
         r = cli("remove", "--purge", "--confirm", "PURGE", "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))

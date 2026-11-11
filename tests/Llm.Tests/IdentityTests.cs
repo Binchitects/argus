@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -23,6 +24,43 @@ public sealed class IdentityTests(AppFixture app)
 
     private static async Task<string> NameOf(TestBrowser admin, Guid id) =>
         (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("userName").GetString()!;
+
+    [Fact]
+    public async Task Root_resets_a_forgotten_admin_password_from_the_host_the_lockout_cleared_and_the_second_factor_off_when_asked()
+    {
+        var admin = await Admin();
+        var (id, password, _, _) = await CreatePersonAsync(admin, isAdmin: true);
+        var name = await NameOf(admin, id);
+        var users = app.Factory.Services.CreateScope().ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>();
+        var user = (await users.FindByNameAsync(name))!;
+        // Locked out by wrong tries, with a second factor whose phone is lost.
+        await users.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddHours(1));
+        await users.SetTwoFactorEnabledAsync(user, true);
+        static async Task<(int Code, string Out, string Err)> Reset(IServiceProvider services, string input, params string[] args)
+        {
+            var (o, e) = (new StringWriter(), new StringWriter());
+            var code = await Llm.Api.Identity.AdminReset.RunAsync(services, args, new StringReader(input), o, e);
+            return (code, o.ToString(), e.ToString());
+        }
+        // A password the policy refuses leaves the old one; nobody of that name, nothing.
+        Assert.Equal(4, (await Reset(app.Factory.Services, "short\n", "--user", name)).Code);
+        Assert.Equal(3, (await Reset(app.Factory.Services, "a long enough one\n", "--user", "nobody-" + name)).Code);
+        Assert.Equal(2, (await Reset(app.Factory.Services, "\n", "--user", name)).Code);
+
+        var (done, said, _) = await Reset(app.Factory.Services, "the new one for root\n", "--user", name, "--two-factor-off");
+        Assert.Equal(0, done);
+        Assert.Contains($"The password of {name} is reset, and their second factor is off", said, StringComparison.Ordinal);
+        await using var scope = app.Factory.Services.CreateAsyncScope();
+        var after = (await scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>().FindByNameAsync(name))!;
+        Assert.False(after.TwoFactorEnabled);
+        Assert.Null(after.LockoutEnd);
+        // The new one signs in, the old one does not.
+        await Browser().SignedInAsync(name, "the new one for root");
+        var old = await Browser().Http.PostAsJsonAsync(new Uri("/api/auth/login", UriKind.Relative), new { userName = name, password });
+        Assert.False(old.IsSuccessStatusCode);
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        Assert.True(await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(db.AuditEvents, a => a.Action == "admin.password_reset" && a.Target == name));
+    }
 
     [Fact]
     public async Task The_first_admin_comes_from_configuration()

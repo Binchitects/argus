@@ -127,6 +127,10 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   with it. The web chat shows that answer as it comes, and what Arena
   missed while out of reach is tried again within 10 seconds (it was up to a
   minute).
+- `sudo arenactl reset-admin-password` sets a forgotten admin password anew,
+  root only (asked twice and never echoed, or `--generate`): the lockout
+  cleared, the sessions signed out, `--two-factor-off` for a lost phone;
+  in the audit log.
 - Code Arena's VM tool no longer hangs on VMware: a command goes into the
   guest as a script file (nothing for vmrun or cmd to unescape: quotes,
   pipes, `&`, `%`, `$`; a Windows `for` loop's variables as a batch file

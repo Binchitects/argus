@@ -63,6 +63,11 @@ builder.Services.AddSingleton(savedSettings.Provider);
 
 var app = builder.Build();
 ((IConfigurationBuilder)app.Configuration).Add(savedSettings);
+// arenactl reset-admin-password (root on the host): the password from stdin, then out; the app itself does not start.
+if (args is ["reset-admin-password", .. var resetArgs])
+{
+    return await Llm.Api.Identity.AdminReset.RunAsync(app.Services, resetArgs, Console.In, Console.Out, Console.Error);
+}
 
 app.UseForwardedHeaders();
 app.UseExceptionHandler();

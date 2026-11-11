@@ -20,6 +20,11 @@
 #   arenactl hosts                      the stack's names in /etc/hosts (scripts/setup-hosts.sh)
 #   arenactl check NAME [options]       a live check: sandboxes, blender, sandbox, lean, functional,
 #                                       dashboards, gpu, compliance, recovery, clients
+#   arenactl reset-admin-password [--user NAME] [--generate] [--two-factor-off]
+#                                       root only: the admin's password set anew (asked twice, never
+#                                       echoed; --generate makes one and shows it once), their lockout
+#                                       cleared and sessions signed out; --two-factor-off takes their
+#                                       second factor away too (its phone lost). In the audit log.
 #   arenactl help
 set -euo pipefail
 
@@ -98,5 +103,39 @@ case "$cmd" in
       exec env COMPOSE_PROJECT_NAME="$project" python3 "scripts/$s" "$@"
     fi
     exec env ENGINE="$engine" bash "scripts/$s" "$@" ;;
+  reset-admin-password)
+    # Root only: whoever is root on the host owns the installation anyway; anyone else is refused.
+    if [[ "$(id -u)" -ne 0 ]]; then
+      echo "arenactl: reset-admin-password needs root: sudo arenactl reset-admin-password" >&2; exit 1
+    fi
+    pass=() generate=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --user) [[ $# -gt 1 ]] || { echo "arenactl: --user needs a name" >&2; exit 2; }; pass+=(--user "$2"); shift ;;
+        --two-factor-off) pass+=(--two-factor-off) ;;
+        --generate) generate=1 ;;
+        *) echo "arenactl: reset-admin-password takes --user NAME, --generate and --two-factor-off" >&2; exit 2 ;;
+      esac
+      shift
+    done
+    if [[ $generate -eq 1 ]]; then
+      # 24 letters and digits, with the classes the password policy asks for.
+      pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 21)Aa7"
+    elif [[ -t 0 ]]; then
+      read -rsp "New password: " pw; echo
+      read -rsp "Again: " again; echo
+      [[ "$pw" == "$again" ]] || { echo "arenactl: the two were not the same: nothing changed" >&2; exit 2; }
+    else
+      # From a pipe: its first line.
+      IFS= read -r pw || true
+    fi
+    [[ -n "$pw" ]] || { echo "arenactl: no password given: nothing changed" >&2; exit 2; }
+    # Into the app's container on stdin: never an argument, so in no process list.
+    if ! printf '%s\n' "$pw" | dc exec -T app dotnet Llm.Api.dll reset-admin-password ${pass[@]+"${pass[@]}"}; then
+      echo "arenactl: the password was not reset (is the app running? arenactl ps)" >&2; exit 1
+    fi
+    if [[ $generate -eq 1 ]]; then
+      echo "The new password, shown this once: $pw"
+    fi ;;
   *) echo "arenactl: no command $cmd (arenactl help)" >&2; exit 2 ;;
 esac

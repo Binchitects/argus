@@ -172,6 +172,7 @@ installation; without it, `/srv/arena` or `~/arena`, else this checkout's
 | `./arenactl hosts` | `setup-hosts.sh` | the stack's names in `/etc/hosts`, for tools that do not resolve `*.localhost` (root) |
 | `./arenactl kube COMMAND` | `kube-install.sh` | install, upgrade, status and remove on Kubernetes with Helm ([deployment.md](deployment.md#helm)) |
 | `./arenactl airgap pack OUT.tar` | `airgap.sh` | a running stack carried to a host with no network, its data's models and speech models with it |
+| `sudo arenactl reset-admin-password` | the app's `reset-admin-password` | **root only**: a forgotten admin password set anew (asked twice, never echoed, or one line on stdin; `--generate` makes one and shows it once); their lockout cleared, the admin turned on again if off, every session of theirs signed out; `--user NAME` another admin, `--two-factor-off` takes their second factor away (its phone lost). The password goes to the app's container on stdin, never as an argument; the reset is in the audit log (`admin.password_reset`). A person who signs in only through the directory or SSO has no password here |
 
 ## Checking a running stack
 
