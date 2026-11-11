@@ -127,8 +127,19 @@ public static class ReportPdf
                 var x = Left + j * (w + Gap);
                 c.Fill(Tile, x, c.Y - H, w, H);
                 c.Fill(Palette[(i + j) % Palette.Length], x, c.Y - H, 2.5, H);
-                c.Text(Fit(f.Label.ToUpperInvariant(), 7, true, w - 18), x + 10, c.Y - 15, 7, bold: true, Muted);
-                c.Text(Fit(f.Value, 16, true, w - 18), x + 10, c.Y - 36, 16, bold: true);
+                // A long label takes a second line; a long value a smaller size before it is cut.
+                var label = Wrap(f.Label.ToUpperInvariant(), 7, true, w - 18);
+                c.Text(Fit(label[0], 7, true, w - 18), x + 10, c.Y - 13, 7, bold: true, Muted);
+                if (label.Count > 1)
+                {
+                    c.Text(Fit(string.Join(' ', label.Skip(1)), 7, true, w - 18), x + 10, c.Y - 21.5, 7, bold: true, Muted);
+                }
+                var size = 16.0;
+                while (size > 9 && Measure(f.Value, size, true) > w - 18)
+                {
+                    size -= 1;
+                }
+                c.Text(Fit(f.Value, size, true, w - 18), x + 10, c.Y - (label.Count > 1 ? 39 : 36), size, bold: true);
                 if (f.Hint is { Length: > 0 } hint)
                 {
                     c.Text(Fit(hint, 7, false, w - 18), x + 10, c.Y - 51, 7, colour: Muted);
@@ -266,25 +277,33 @@ public static class ReportPdf
 
     private static void Table(Canvas c, ReportTable t)
     {
-        const double RowH = 16, HeadH = 19, Pad = 5;
+        const double RowH = 16, Pad = 5;
         var total = t.Columns.Sum(col => col.Width);
         var widths = t.Columns.Select(col => Width * col.Width / total).ToArray();
+        // A header too long for its column takes up to three lines (and is cut only past them).
+        var heads = t.Columns.Select((col, i) => Wrap(col.Header, 7.5, true, widths[i] - 2 * Pad) is var lines && lines.Count > 3
+            ? [lines[0], lines[1], Fit(string.Join(' ', lines.Skip(2)), 7.5, true, widths[i] - 2 * Pad)] : Wrap(col.Header, 7.5, true, widths[i] - 2 * Pad)).ToList();
+        var HeadH = 10.0 + 9 * Math.Max(1, heads.Max(h => h.Count));
         void Head(bool continued)
         {
-            c.Text(t.Title + (continued ? " (continued)" : ""), Left, c.Y - 12, 11, bold: true);
+            c.Text(Fit(t.Title + (continued ? " (continued)" : ""), 11, true, Width), Left, c.Y - 12, 11, bold: true);
             c.Y -= 22;
             c.Fill(HeaderFill, Left, c.Y - HeadH, Width, HeadH);
             var x = Left;
             for (var i = 0; i < t.Columns.Count; i++)
             {
-                var label = Fit(t.Columns[i].Header, 7.5, true, widths[i] - 2 * Pad);
-                if (t.Columns[i].Kind == ReportKind.Text)
+                for (var l = 0; l < heads[i].Count; l++)
                 {
-                    c.Text(label, x + Pad, c.Y - 12.5, 7.5, bold: true, Muted);
-                }
-                else
-                {
-                    c.TextRight(label, x + widths[i] - Pad, c.Y - 12.5, 7.5, bold: true, Muted);
+                    var label = Fit(heads[i][l], 7.5, true, widths[i] - 2 * Pad);
+                    var y = c.Y - 12.5 - l * 9;
+                    if (t.Columns[i].Kind == ReportKind.Text)
+                    {
+                        c.Text(label, x + Pad, y, 7.5, bold: true, Muted);
+                    }
+                    else
+                    {
+                        c.TextRight(label, x + widths[i] - Pad, y, 7.5, bold: true, Muted);
+                    }
                 }
                 x += widths[i];
             }

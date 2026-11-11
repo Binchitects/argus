@@ -52,9 +52,10 @@ public static class DashboardReport
             }
             var title = panel.Title is { Length: > 0 } t ? t : "Panel";
             List<TargetResult> results;
+            TimeSpan bucket;
             try
             {
-                (_, results) = await DashboardEndpoints.RunAsync(d, panel, q, src, ct);
+                (bucket, results) = await DashboardEndpoints.RunAsync(d, panel, q, src, ct);
             }
             catch (Exception ex) when (ex is DatasourceException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
             {
@@ -76,6 +77,13 @@ public static class DashboardReport
                     var byName = panel.Definition["options"]?["textMode"]?.GetValue<string>() == "name";
                     var values = Reduce(ok, calc);
                     var hint = panel.Live ? "Now" : section;
+                    if (values.Count == 0 || values.All(v => v.Value is null))
+                    {
+                        // Nothing measured: what the page says ("idle", "No data").
+                        var none = panel.Definition["fieldConfig"]?["defaults"]?["noValue"]?.GetValue<string>() ?? "No data";
+                        figures.Add(new ReportFigure(Named(title), none, hint));
+                        break;
+                    }
                     if (values.Count > MaxFigures)
                     {
                         tables.Add(new ReportTable(Named(title), [new("Name", ReportKind.Text, 2), new("Value", ReportKind.Text)],
@@ -83,8 +91,9 @@ public static class DashboardReport
                     }
                     else
                     {
-                        figures.AddRange(values.Select(v => new ReportFigure(Named(values.Count > 1 ? $"{title}: {v.Name}" : title),
-                            byName ? v.Name : Units.Format(v.Value, unit, decimals), hint)));
+                        // Several values: each named by its series, the panel's title under it.
+                        figures.AddRange(values.Select(v => new ReportFigure(Named(values.Count > 1 && !byName ? v.Name : title),
+                            byName ? v.Name : Units.Format(v.Value, unit, decimals), values.Count > 1 && !byName ? title + (panel.Live ? " (now)" : "") : hint)));
                     }
                     break;
                 }
@@ -98,16 +107,19 @@ public static class DashboardReport
                     }
                     var (scale, kind) = Units.Scale(unit);
                     var shown = series.Take(MaxSeries).ToList();
-                    var at = shown.SelectMany(s => s.Points).Select(p => p[0]).OfType<double>().Distinct().Order().ToList();
-                    var index = at.Select((x, i) => (x, i)).ToDictionary(p => p.x, p => p.i);
+                    // The whole window, bucket by bucket, so every chart has the same time along it (a gap where nothing was measured).
+                    var ms = Math.Max(1000, bucket.TotalMilliseconds);
+                    var start = Math.Floor(q.From.ToUnixTimeMilliseconds() / ms) * ms;
+                    var count = (int)Math.Min(5000, Math.Floor((q.To.ToUnixTimeMilliseconds() - start) / ms) + 1);
+                    var at = Enumerable.Range(0, count).Select(i => start + i * ms).ToList();
                     var rows = at.Select(_ => Enumerable.Repeat(double.NaN, shown.Count).ToArray()).ToList();
                     for (var s = 0; s < shown.Count; s++)
                     {
                         foreach (var p in shown[s].Points)
                         {
-                            if (p[0] is { } x && p[1] is { } v && double.IsFinite(v))
+                            if (p[0] is { } x && p[1] is { } v && double.IsFinite(v) && (int)Math.Round((x - start) / ms) is var i && i >= 0 && i < count)
                             {
-                                rows[index[x]][s] = v * scale;
+                                rows[i][s] = v * scale;
                             }
                         }
                     }
@@ -144,7 +156,8 @@ public static class DashboardReport
 
     private static int X(Panel p) => p.Definition["gridPos"]?["x"]?.GetValue<int>() ?? 0;
 
-    private static string Titled(string title, string? unit) => Units.Label(unit) is { } label ? $"{title} ({label})" : title;
+    private static string Titled(string title, string? unit) =>
+        Units.Label(unit) is { } label && !title.Contains($"({label})", StringComparison.Ordinal) ? $"{title} ({label})" : title;
 
     /// <summary>A panel's table: numbers as numbers, times as times, the rest as text; at most <see cref="MaxRows"/> rows.</summary>
     private static ReportTable Table(string title, TableResult t, string? section)
@@ -152,7 +165,7 @@ public static class DashboardReport
         var kinds = t.Columns.Select(c => c.Type switch { "number" => ReportKind.Fraction, "time" => ReportKind.Time, _ => ReportKind.Text }).ToList();
         var rows = t.Rows.Take(MaxRows).Select(row => (object?[])[.. row.Select((v, i) => Cell(v, kinds[i]))]).ToList();
         var note = t.Rows.Count > MaxRows || t.Capped ? $"The first {Math.Min(MaxRows, t.Rows.Count)} rows." : section;
-        return new ReportTable(title, [.. t.Columns.Select((c, i) => new ReportColumn(c.Name, kinds[i], kinds[i] == ReportKind.Text ? 1.6 : 1))], rows, note);
+        return new ReportTable(title, [.. t.Columns.Select((c, i) => new ReportColumn(c.Name, kinds[i], kinds[i] == ReportKind.Text ? 2.2 : 1))], rows, note);
     }
 
     private static object? Cell(object? v, ReportKind kind) => v switch
