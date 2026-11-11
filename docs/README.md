@@ -82,4 +82,5 @@ The numbers behind the claims, kept as evidence:
 [lab mathematics](measurements/lab-math.md),
 [lab quantum computing](measurements/lab-quantum.md),
 [security review](measurements/security-review.md),
-[verification report](measurements/verification-report.md).
+[verification report](measurements/verification-report.md),
+[the own gateway against LiteLLM](measurements/gateway.md).

@@ -76,8 +76,12 @@ program, and Edge or Chrome 109.
    symbol edges, tests and owners, `mr_impact`, contracts, the Code map page, and the
    measured gates.
 2. **The app's own gateway**, commits 10 to 21 of
-   [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
-   measured gates and a day's soak.
+   [own-gateway.md](design/own-gateway.md). Commit 17 measured on the offline
+   host (2026-11-11, [gateway.md](measurements/gateway.md)): every gate passes,
+   6 ms overhead at p95 against LiteLLM's 17 ms. Still to measure: two app
+   replicas, pool balance over two copies, vLLM fallback, media and
+   clients-check.py (H200 host), then commit 18 and a day's soak; LiteLLM goes
+   only after them.
 3. **Evals.** Test sets for assistants, prompts and models, run on every
    change, scored by rules or a judge model, what got worse shown first.
 4. **Code Arena's extensions.** An extension host for VS Code extensions that
