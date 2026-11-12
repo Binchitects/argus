@@ -567,6 +567,19 @@ carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their ne
     [[ -n "$SNAP" ]] && echo "-$old" >> "$SNAP/env-carried"
     did ".env: $old is $new now"
   done
+  # 8.0 has no LiteLLM and no ha.yml: a COMPOSE_FILE that names it would stop compose. Recorded as a value the upgrade
+  # set, so a rollback (whose deploy/ has ha.yml again) puts FROM's back.
+  local cf; cf="$(env_get COMPOSE_FILE)"
+  if [[ ":$cf:" == *":ha.yml:"* ]]; then
+    new="$(tr ':' '\n' <<<"$cf" | grep -vx 'ha.yml' | paste -sd: -)"
+    if [[ $1 == plan ]]; then would ".env: COMPOSE_FILE without ha.yml (LiteLLM's replicas; 8.0 has none)${new:+: $new}"
+    else
+      if [[ -n "$new" ]]; then env_edit "$env" COMPOSE_FILE "COMPOSE_FILE=$new" || die "writing $env failed"
+      else env_edit "$env" COMPOSE_FILE || die "writing $env failed"; fi
+      [[ -n "$SNAP" ]] && printf 'COMPOSE_FILE\t%s\n' "$new" >> "$SNAP/env-changed"
+      did ".env: COMPOSE_FILE without ha.yml (LiteLLM's replicas; 8.0 has none)${new:+: $new}"
+    fi
+  fi
   if [[ -z "$(env_line "$env" CODE_INTEL_HOST)" ]]; then
     if [[ $1 == plan ]]; then would ".env: CODE_INTEL_HOST=argus (the code-intelligence service's address stays argus.$DOMAIN)"
     else
