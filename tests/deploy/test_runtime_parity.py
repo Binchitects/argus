@@ -38,8 +38,6 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Stack__Acme"): "Traefik's Let's Encrypt (compose); the Ingress takes a TLS Secret",
     ("env", "app", "Engine__Enabled"): "Helm can leave the engine out (llamacpp.enabled); compose always runs it",
     ("env", "app", "Engine__MediaOwnGpus"): "Kubernetes: the picture and video pods get GPUs of their own; on compose they share the engine's",
-    ("env", "litellm", "REDIS_HOST"): "the gateway's shared counts: ha.yml on compose, valkey.enabled on Helm",
-    ("env", "litellm", "REDIS_PORT"): "as REDIS_HOST",
     ("env", "app", "Engine__LlamaCpp"): "Helm can run vLLM without llama.cpp (llamacpp.enabled false); compose always runs llama.cpp",
     ("env", "app", "Modules__imagegen"): "Helm says outright which modules run; compose's app looks the names up",
     ("env", "app", "Modules__videogen"): "as Modules__imagegen",
@@ -47,7 +45,6 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Modules__laya"): "as Modules__imagegen",
     ("env", "app", "Modules__studio"): "as Modules__imagegen",
     ("env", "app", "Database__RootCertificate"): "externalDatabase.caSecret; compose sets it in the override",
-    ("env", "litellm", "DB_PASSWORD"): "Kubernetes builds DATABASE_URL from it ($(DB_PASSWORD)); compose interpolates",
     ("env", "postgres", "PGDATA"): "a volume's root is not empty on some storage (lost+found)",
     # Mounts.
     ("mount", "app", "/backups"): "backup.sh's backups, for Admin -> Storage: compose only",
@@ -103,7 +100,6 @@ def compose_config(*files: str) -> dict:
         raise unittest.SkipTest("no docker compose or podman compose here")
     example = (DEPLOY / ".env.example").read_text()
     example = re.sub(r"^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY)=$", r"\1=parity", example, flags=re.M)
-    example = re.sub(r"^GATEWAY_KEY=$", "GATEWAY_KEY=sk-parity", example, flags=re.M)
     example = re.sub(r"^DATA_DIR=$", "DATA_DIR=/srv/arena/data", example, flags=re.M)
     with tempfile.TemporaryDirectory(prefix="parity-") as tmp:
         env_file = Path(tmp) / "parity.env"
@@ -352,7 +348,6 @@ class SecretsAndRoutesTests(unittest.TestCase):
         # The gateway's host goes to the app alone in both, never straight to the model gateway.
         gateway = re.search(r"^\s+gateway:\n\s+rule: (.*)\n\s+service: (\S+)$", routes, re.M)
         self.assertEqual(("Host(`gateway.{{ $domain }}`)", "app"), gateway.groups())
-        self.assertNotIn("litellm", routes)
         host = ingress.split('printf "gateway.%s"', 2)[2].split("- host:", 1)[0]
         self.assertEqual(["app"], re.findall(r"service: \{ name: (\w+)", host))
         self.assertEqual(1, len(lists))
@@ -365,7 +360,7 @@ class StaticReaderTests(unittest.TestCase):
         helm = helm_static()
         self.assertIn("CODE_INTEL_KEY_CHECK_URL", helm["code-intel"]["env"])
         self.assertIn("Auth__AdminPassword", helm["app"]["env"])
-        self.assertIn("DATABASE_URL", helm["litellm"]["env"])
+        self.assertNotIn("litellm", helm)
         self.assertEqual(helm["audio"]["env"], {"HF_HUB_DISABLE_XET", "STT_MODEL_TTL", "TTS_MODEL_TTL"})
         self.assertIn("/sd-serve.sh", helm["videogen"]["mounts"])
         self.assertIn("/app/exporter.py", helm["cpu-temp-exporter"]["mounts"])

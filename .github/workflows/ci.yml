@@ -14,8 +14,8 @@ permissions:
 
 jobs:
   api:
-    # The API and its core, against real Postgres, OpenLDAP and LiteLLM's
-    # schema (Testcontainers).
+    # The API and its core, against real Postgres and OpenLDAP (Testcontainers), and
+    # LiteLLM's schema from before 8.0, which the upgrade's import reads.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -98,14 +98,14 @@ jobs:
 
   web-browser:
     # The API and web images behind Traefik, as deployed, driven by Playwright
-    # on desktop and phone (no model behind the gateway, E2E_NO_GATEWAY, and no
+    # on desktop and phone (no model behind the gateway, E2E_NO_ENGINE, and no
     # Prometheus, Loki or Alertmanager, E2E_NO_OBSERVE: the deployed run covers those).
     needs: [api, web]
     runs-on: ubuntu-24.04
     env:
       E2E_PASSWORD: ci admin password for tests
       E2E_BASE_URL: https://llm.localhost:8443
-      E2E_NO_GATEWAY: "1"
+      E2E_NO_ENGINE: "1"
       E2E_NO_OBSERVE: "1"
     steps:
       - uses: actions/checkout@v4
@@ -124,12 +124,10 @@ jobs:
           docker run -d --name postgres --network e2e -e POSTGRES_USER=app -e POSTGRES_PASSWORD=ci \
             --health-cmd "pg_isready -U app" --health-interval 2s pgvector/pgvector:0.8.0-pg16
           until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 1; done
-          docker exec postgres psql -U app -d postgres -qc "create database litellm"
-          docker exec -i postgres psql -U app -d litellm -q < tests/Llm.Tests/Resources/litellm-schema.sql
           docker run -d --name app --network e2e --read-only --tmpfs /tmp --tmpfs /audit:uid=1000,gid=1000 \
             -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
             -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
-            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 -e Gateway__ConnectWaitSeconds=0 -e Gateway__KeyWaitSeconds=0 llm-app:ci
+            -e Auth__DataKey=ci-data-key llm-app:ci
           docker run -d --name web --network e2e --read-only --tmpfs /tmp --cap-drop ALL \
             --security-opt no-new-privileges:true llm-web:ci
           docker run -d --name traefik --network e2e -p 8443:8443 -v "$PWD/certs:/certs:ro" \
@@ -271,7 +269,7 @@ jobs:
         run: |
           # The pods' logs kept as they run: a failed install is uninstalled (--atomic), its logs with it.
           ( while sleep 10; do
-              for d in app litellm web; do
+              for d in app web; do
                 kubectl -n arena logs deploy/$d --tail=200 > $d.tmp 2>/dev/null && mv $d.tmp $d.log
                 kubectl -n arena logs deploy/$d --previous --tail=200 > $d.tmp 2>/dev/null && mv $d.tmp $d-previous.log
               done
@@ -289,7 +287,7 @@ jobs:
         run: |
           kubectl -n arena get pods -o wide
           kubectl -n arena get events --sort-by=.lastTimestamp | tail -40
-          for f in app-previous.log app.log litellm-previous.log litellm.log web.log; do [ -f $f ] && { echo "== $f"; tail -n 120 $f; }; done; true
+          for f in app-previous.log app.log web.log; do [ -f $f ] && { echo "== $f"; tail -n 120 $f; }; done; true
 
   deploy:
     # The compose files resolving (the platform from .env.example, with Docker and
@@ -301,7 +299,7 @@ jobs:
       - name: docker compose config
         run: |
           # DATA_DIR as the installer sets it (compose only reads it here: nothing is made there).
-          sed -e 's/^\(ADMIN_PASSWORD\|DB_PASSWORD\|APP_KEY\|ENGINE_KEY\|CODE_INTEL_KEY\)=$/\1=ci/' -e 's/^GATEWAY_KEY=$/GATEWAY_KEY=sk-ci/' \
+          sed -e 's/^\(ADMIN_PASSWORD\|DB_PASSWORD\|APP_KEY\|ENGINE_KEY\|CODE_INTEL_KEY\)=$/\1=ci/' \
             -e 's|^DATA_DIR=$|DATA_DIR=/srv/arena/data|' deploy/.env.example > deploy/.env
           # Each check a line of its own: one that fails fails the step (inside "check && echo" it never did).
           (cd deploy && docker compose config --quiet)

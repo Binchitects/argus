@@ -1,0 +1,36 @@
+{{- /* Valkey: LMCache's shared store for the vLLM models' token cache (LMCACHE_REMOTE), when valkey.enabled. */}}
+{{- if .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: valkey
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.valkey) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: [valkey-server, --appendonly, "yes", --save, ""]
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe: { tcpSocket: { port: redis }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.valkey.resources | nindent 12 }}
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 4 }}
+  ports: [{ name: redis, port: 6379, targetPort: redis }]
+{{- end }}

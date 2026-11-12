@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SQL_UIDS = {"litellm-db", "gateway-db"}
+SQL_UIDS = {"gateway-db"}
 
 
 def env(key, default=""):

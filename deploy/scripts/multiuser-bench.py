@@ -7,7 +7,7 @@ throughput. That answers "how much can the box push", not the question a team
 asks: when my colleague is also using it, how much slower is MY answer, does a
 long paste from them stall my chat, and does anything leak between us?
 
-So this goes through the path people use -- Traefik, TLS, LiteLLM, each person's
+So this goes through the path people use -- Traefik, TLS, the app's model gateway, each person's
 own key -- and runs scenarios rather than a sweep:
 
   single      one person, the baseline everything else is compared to

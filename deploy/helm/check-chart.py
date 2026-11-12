@@ -20,9 +20,6 @@ CHART = HERE / "arena"
 DEPLOY = HERE.parent
 
 COPIES = {
-    "files/litellm.yaml": "config/litellm.yaml",
-    "files/litellm-ha.yaml": "config/litellm-ha.yaml",
-    "files/arena_limits.py": "config/arena_limits.py",
     "files/code-intel.yaml": "config/code-intel.yaml",
     "files/searxng.yml": "config/searxng.yml",
     "files/alertmanager.yml": "config/alertmanager.yml",

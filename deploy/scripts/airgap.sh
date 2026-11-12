@@ -176,7 +176,7 @@ if [[ $ACTION == pack ]]; then
     {
       [[ -f .env ]] && { cat .env; echo; }
       local k
-      for k in APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY CODE_INTEL_KEY DATA_DIR; do
+      for k in APP_KEY DB_PASSWORD ENGINE_KEY CODE_INTEL_KEY DATA_DIR; do
         [[ -f .env ]] && grep -Eq "^[[:space:]]*$k=." .env && continue
         if [[ $k == DATA_DIR ]]; then echo DATA_DIR=/placeholder; else echo "$k=placeholder"; fi
       done

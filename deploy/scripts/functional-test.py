@@ -169,33 +169,15 @@ def app_chat(browser, text="Reply with the single word: pong"):
     return ("answered" if last["type"] == "done" else last["message"]), conv["id"]
 
 
-# LiteLLM's own management (spend logs, its users), asked inside its container: gateway.DOMAIN passes on only the
-# model API, never the gateway's management. The master key goes in on stdin, never on a command line.
-LITELLM_ASK = """
-import json, sys, urllib.error, urllib.request
-key, path, method, payload = json.loads(sys.stdin.read())
-req = urllib.request.Request("http://localhost:4000" + path, method=method, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-                             data=None if payload is None else json.dumps(payload).encode())
-try:
-    with urllib.request.urlopen(req, timeout=60) as r:
-        print(r.status); print(r.read().decode())
-except urllib.error.HTTPError as e:
-    print(e.code); print(e.read().decode())
-"""
+def ledger(sql):
+    """Rows of the app's ledger of model requests (gateway.requests), asked of the stack's Postgres in its container."""
+    out = subprocess.run(["docker", "exec", "postgres", "psql", "-U", "arena", "-d", "llmapp", "-At", "-F", "\t", "-c", sql],
+                         capture_output=True, text=True, timeout=60)
+    return [line.split("\t") for line in out.stdout.splitlines() if line.strip()]
 
 
-def litellm(path, payload=None, method=None):
-    container = subprocess.run(["docker", "ps", "--filter", "label=com.docker.compose.service=litellm", "--format", "{{.Names}}"],
-                               capture_output=True, text=True).stdout.split()
-    if not container:
-        return 0, "no litellm container"
-    out = subprocess.run(["docker", "exec", "-i", container[0], "python3", "-c", LITELLM_ASK], capture_output=True, text=True,
-                         input=json.dumps([env("GATEWAY_KEY"), path, method or ("POST" if payload is not None else "GET"), payload]))
-    code, _, body = out.stdout.partition("\n")
-    try:
-        return int(code), json.loads(body)
-    except ValueError:
-        return int(code) if code.isdigit() else 0, body
+def quoted(text):
+    return "'" + text.replace("'", "''") + "'"
 
 
 def sso(browser, start_url, done_host):
@@ -391,57 +373,42 @@ def main():
 
     # ------------------------------------------------------------ attribution
     print("\n5. Usage is attributed to the person")
-    seen = {}
-    for _ in range(24):                      # LiteLLM writes spend logs in batches
-        code, logs = litellm(f"/spend/logs?user_id={urllib.parse.quote(email)}")
-        rows = logs if isinstance(logs, list) else []
-        seen = {"key": any(r.get("api_key") and r.get("user") in ("", None, email) for r in rows),
-                "chat": any(r.get("end_user") == email for r in rows)}
-        if rows and seen["chat"]:
+    # The app books every request in its ledger as it ends (Gateway:LogFlush): a few seconds at most.
+    rows = []
+    for _ in range(12):
+        rows = [dict(zip(("surface", "key", "prompt", "cached", "out", "cost"), r)) for r in ledger(
+            "select surface, coalesce(key_hash, ''), prompt_tokens, cached_tokens, completion_tokens, cost from gateway.requests "
+            f"where person = {quoted(email)} and status = 'done'")]
+        if any(r["surface"] == "chat" for r in rows) and any(r["key"] for r in rows):
             break
         time.sleep(5)
-    rec("usage", "API-key requests are logged under the person", bool(rows), f"{len(rows)} spend rows")
-    # Every logged request must be priced exactly as .env says: cache-miss input,
+    keyed = [r for r in rows if r["key"]]
+    rec("usage", "API-key requests are booked under the person", bool(keyed), f"{len(keyed)} rows by key")
+    # Every booked request must be priced exactly as .env says: cache-miss input,
     # cache-hit input and output at their own per-1M-token prices.
     price = {k: float(env(k) or d) / 1e6 for k, d in (("PRICE_INPUT_PER_MTOK", "0.20"),
              ("PRICE_CACHED_INPUT_PER_MTOK", "0.02"), ("PRICE_OUTPUT_PER_MTOK", "0.80"))}
     wrong = []
     for r in rows:
-        usage = ((r.get("metadata") or {}).get("usage_object") or {})
-        cached = int(((usage.get("prompt_tokens_details") or {}).get("cached_tokens")) or 0)
-        prompt, out = int(r.get("prompt_tokens") or 0), int(r.get("completion_tokens") or 0)
+        prompt, cached, out, cost = int(r["prompt"]), int(r["cached"]), int(r["out"]), float(r["cost"])
         expected = (prompt - cached) * price["PRICE_INPUT_PER_MTOK"] + cached * price["PRICE_CACHED_INPUT_PER_MTOK"] \
             + out * price["PRICE_OUTPUT_PER_MTOK"]
-        if prompt and abs(float(r.get("spend") or 0) - expected) > 1e-9:
-            wrong.append((prompt, cached, out, r.get("spend"), expected))
+        if prompt and abs(cost - expected) > 1e-9:
+            wrong.append((prompt, cached, out, cost, expected))
     rec("usage", "each request is priced from .env: cache miss, cache hit, output", bool(rows) and not wrong,
         f"{len(rows)} checked" if not wrong else f"mismatch {wrong[:1]}")
     start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     end = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-    logged_cost = sum(float(r.get("spend") or 0) for r in rows)
-    # Requests the gateway refused (a limit, no credit) are logged at no cost and are not the person's prompts.
-    priced = [r for r in rows if float(r.get("spend") or 0) > 0]
-    # The usage page reads the app's ledger, which brings LiteLLM's log over every five seconds (LedgerImport): the rows
-    # just listed above may not be there yet. Wait until it holds them (a minute at most), then compare.
-    for _ in range(30):
-        code, mine = person.app("GET", "/api/usage/me?" + urllib.parse.urlencode({"from": start, "to": end}))
-        t = mine.get("totals", {}) if code == 200 else {}
-        mine_cost = float(t.get("cost") or 0)
-        if code == 200 and (t.get("requests") or 0) >= len(priced) and mine_cost >= logged_cost - 1e-9:
-            break
-        time.sleep(2)
+    logged_cost = sum(float(r["cost"]) for r in rows)
+    priced = [r for r in rows if float(r["cost"]) > 0]
+    code, mine = person.app("GET", "/api/usage/me?" + urllib.parse.urlencode({"from": start, "to": end}))
+    t = mine.get("totals", {}) if code == 200 else {}
+    mine_cost = float(t.get("cost") or 0)
     rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(priced) > 0
-        and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (logged ${logged_cost:.6f})")
-    rows_chat = []
-    for _ in range(24):
-        code, logs = litellm("/spend/logs?summarize=false")
-        rows_chat = [r for r in (logs if isinstance(logs, list) else [])
-                     if r.get("end_user") == email and (r.get("metadata") or {}).get("user_api_key_alias") == "chat"]
-        if rows_chat:
-            break
-        time.sleep(5)
-    rec("usage", "the app's chat is billed to the person, under its own key (not the master key)", bool(rows_chat),
-        f"{len(rows_chat)} rows with key alias 'chat' and end_user={email}")
+        and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (booked ${logged_cost:.6f})")
+    chats = [r for r in rows if r["surface"] == "chat"]
+    rec("usage", "the app's chat is booked to the person, not to an API key of theirs", bool(chats) and not any(r["key"] for r in chats),
+        f"{len(chats)} chat rows for {email}")
 
     # ----------------------------------------------------------------- credits
     print("\n6. Credit limits bind, kind by kind, and API access")
@@ -523,12 +490,9 @@ def main():
 def finish(admin, pid, email, keep):
     if not keep:
         print("\ncleanup")
-        # Through the app: the person, their gateway user and their keys go together.
+        # Through the app: the person and their keys go together.
         app_code = admin.app("DELETE", f"/api/admin/people/{pid}")[0] if pid else None
-        # Belt and braces for a run that stopped before the person existed in the app.
-        codes = [litellm("/user/delete", {"user_ids": [email]})[0], litellm("/end_user/delete", {"user_ids": [email]})[0]]
-        # leave one behind, which piled up as fake people in the chat admin.
-        print(f"  removed {email}: app {app_code}, litellm {codes}")
+        print(f"  removed {email}: app {app_code}")
     failed = [r for r in RESULTS if not r[2]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
     for area, name, _, detail in failed:

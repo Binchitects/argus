@@ -34,8 +34,8 @@
 #   --shared-storage-class NAME   the model library and the jobs' volumes the pods share: ReadWriteMany (NFS, CephFS,
 #                             EFS, Azure Files, Filestore...); needed on more than one node
 #   --gpu yes|no|auto         the GPU servers (chat engine, pictures, video); auto: when a node has GPUs
-#   --replicas N              the app's and the web's (default 2); the gateway's too with --valkey
-#   --valkey                  the gateway's replicas share their counts (rate limits)
+#   --replicas N              the app's and the web's (default 2)
+#   --valkey                  Valkey, LMCache's shared store for the vLLM models' token cache
 #   --autoscale               HorizontalPodAutoscalers for the app, the web and the gateway (the metrics server)
 #   --strict-spread           never two replicas on one node
 #   --registry HOST/PATH      air-gapped: the bundle's images loaded and pushed there, and pulled from it
@@ -258,7 +258,7 @@ print("%d %d" % (sum(cpu(x.get("cpu", "0")) for x in a), sum(mem(x.get("memory",
 FEATURES_FILE="$HERE/../features"
 declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [sglang]=sglang [lmdeploy]=lmdeploy [strata]=strata [knowledge]=embed [code-intel]=code-intel [pictures]=imagegen [video]=videogen
   [speech]=audio [sandbox]=sandbox [web-search]=searxng [3d]=blender [lean]=lean [studio]=studio [workspaces]=workspaces
-  [laya]=laya [scanners]=scanners [monitoring]=monitoring [ha]=valkey)
+  [laya]=laya [scanners]=scanners [monitoring]=monitoring [valkey]=valkey)
 FEAT_IDS=() FEATURES_ON=()
 declare -A FEAT_DEF=() FEAT_SVC=() FEAT_NEEDS=() FEAT_REQ=()
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
@@ -317,15 +317,15 @@ features_values() {   # features_values [replicas]: with the app's replicas too
 # The secrets as a manifest on stdin: never in a command line, a file or the log.
 make_secrets() {
   if KN get secret "$SECRET" >/dev/null 2>&1; then ok "secrets kept: $SECRET (APP_KEY never changes)"; return; fi
-  if [[ $DRY -eq 1 ]]; then note "would make the Secret $SECRET: ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, CODE_INTEL_KEY, WORKSPACES_KEY, GATEWAY_KEY"; return; fi
+  if [[ $DRY -eq 1 ]]; then note "would make the Secret $SECRET: ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, CODE_INTEL_KEY, WORKSPACES_KEY"; return; fi
   local db gitlab=""
   db="$(gen_secret)"
   [[ $DATABASE == external ]] && db="$(head -n1 "$DB_PASSWORD_FILE")"
   [[ -n "$GITLAB_TOKEN_FILE" ]] && gitlab="$(head -n1 "$GITLAB_TOKEN_FILE")"
   {
     printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  labels: { app.kubernetes.io/part-of: arena }\ntype: Opaque\nstringData:\n' "$SECRET"
-    printf '  ADMIN_PASSWORD: "%s"\n  DB_PASSWORD: "%s"\n  APP_KEY: "%s"\n  ENGINE_KEY: "%s"\n  CODE_INTEL_KEY: "%s"\n  WORKSPACES_KEY: "%s"\n  GATEWAY_KEY: "sk-%s"\n' \
-      "$(gen_secret | cut -c1-24)" "$db" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)"
+    printf '  ADMIN_PASSWORD: "%s"\n  DB_PASSWORD: "%s"\n  APP_KEY: "%s"\n  ENGINE_KEY: "%s"\n  CODE_INTEL_KEY: "%s"\n  WORKSPACES_KEY: "%s"\n' \
+      "$(gen_secret | cut -c1-24)" "$db" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)" "$(gen_secret)"
     [[ -z "$gitlab" ]] || printf '  GITLAB_TOKEN: "%s"\n' "$gitlab"
   } | KN apply -f - >/dev/null || die "could not make the Secret $SECRET"
   ok "secrets made in the cluster: $SECRET"
@@ -363,7 +363,6 @@ write_values() {
     printf 'web: { replicas: %s }\n' "$REPLICAS"
     # The features: each service's enabled, and the app's own (app.features).
     features_values replicas
-    if [[ " ${FEATURES_ON[*]} " == *" ha "* ]]; then printf 'litellm: { replicas: %s }\n' "$REPLICAS"; fi
     printf 'availability: { strictSpread: %s, autoscale: { enabled: %s } }\n' "$( ((STRICT)) && echo true || echo false)" "$( ((AUTOSCALE)) && echo true || echo false)"
     if [[ $DATABASE == external ]]; then
       printf 'postgresql: { enabled: false }\nexternalDatabase: { host: "%s", port: %s, username: "%s", caSecret: "%s" }\n' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_CA"
@@ -432,7 +431,7 @@ cmd_install() {
   # set): the domain, the TLS, the storage and the database stay as installed.
   [[ $CMD == upgrade ]] && DOMAIN="$(H get values "$RELEASE" -n "$NS" -o json 2>/dev/null | json 'print(d.get("domain", ""))')"
   check_requirements
-  # The features: a new release's defaults (those that need a GPU off without one; ha with --valkey), or the
+  # The features: a new release's defaults (those that need a GPU off without one; valkey with --valkey), or the
   # release's as they are; then --with and --without.
   read_features
   local -a base=()
@@ -443,7 +442,7 @@ cmd_install() {
     [[ $GPU == yes ]] && gpu=1
     [[ $GPU == no ]] && gpu=0
     for id in "${FEAT_IDS[@]}"; do
-      [[ ${FEAT_DEF[$id]} == on || ( $id == ha && $VALKEY -eq 1 ) ]] || continue
+      [[ ${FEAT_DEF[$id]} == on || ( $id == valkey && $VALKEY -eq 1 ) ]] || continue
       [[ $gpu -eq 0 && ${FEAT_NEEDS[$id]} == gpu ]] && continue
       base+=("$id")
     done

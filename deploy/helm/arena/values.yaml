@@ -1,6 +1,6 @@
 # Arena on Kubernetes: the services of deploy/docker-compose.yml.
 # One release per namespace: the services keep the names the app reaches them by
-# (litellm, llamacpp, code-intel, ...). docs/deployment.md, "Helm", says how to install.
+# (app, llamacpp, code-intel, ...). docs/deployment.md, "Helm", says how to install.
 
 # The address people open: https://DOMAIN, gateway.DOMAIN (the API) and codeIntel.host.DOMAIN (the code-intelligence MCP).
 domain: arena.example.com
@@ -33,7 +33,7 @@ codeHosts:
 
 # Secrets: left empty, each is made once (randAlphaNum) and kept across upgrades (looked up in the
 # release's Secret). For GitOps tools that cannot look up, set them here or name an existingSecret
-# with the keys ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, CODE_INTEL_KEY, GATEWAY_KEY (sk-...),
+# with the keys ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, CODE_INTEL_KEY, WORKSPACES_KEY,
 # and optionally HF_TOKEN, GITLAB_TOKEN, GITLAB_USERNAME, GITLAB_PASSWORD.
 # APP_KEY never changes after the first start: the app's key ring depends on it.
 secrets:
@@ -44,7 +44,6 @@ secrets:
   engineKey: ""
   codeIntelKey: ""
   workspacesKey: ""
-  gatewayKey: ""
   hfToken: ""
   gitlabToken: ""
   gitlabUsername: ""
@@ -64,7 +63,6 @@ images:
   studio: { repository: arena-studio, tag: "" }
   workspaces: { repository: arena-workspaces, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
-  litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
   llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
   # A build that is known to work: master-cuda moves under its flags.
   sdcpp: { repository: ghcr.io/leejet/stable-diffusion.cpp, digest: "sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede" }
@@ -91,7 +89,7 @@ images:
   pullPolicy: IfNotPresent
   pullSecrets: []
 
-# Availability of what serves people (the app, the web, the gateway): their replicas spread over nodes
+# Availability of what serves people (the app with its model gateway, and the web): their replicas spread over nodes
 # (strictSpread: never two on one node, which needs as many nodes as replicas), rolled one at a time, a
 # PodDisruptionBudget each when it has more than one; autoscale grows them with their CPU up to maxReplicas
 # (the cluster's metrics server). The app's replicas share the model library: its volume must be
@@ -101,7 +99,7 @@ availability:
   autoscale:
     enabled: false
     cpuPercent: 70
-    maxReplicas: { app: 6, web: 4, litellm: 4 }
+    maxReplicas: { app: 6, web: 4 }
 
 app:
   # Several replicas share the database: one leads (the once-only background work), and the
@@ -112,7 +110,7 @@ app:
   env: {}
   # The app's own features that are on (deploy/features: those with no service of their own). The others
   # follow their services' enabled below: llamacpp is chat-models, embed knowledge, imagegen pictures,
-  # videogen video, audio speech, searxng web-search, blender 3d, valkey ha.
+  # videogen video, audio speech, searxng web-search, blender 3d, valkey valkey.
   features: [meetings, lab, apps, data, decks, media, agents, code-studio]
 
 web:
@@ -127,21 +125,14 @@ postgresql:
 externalDatabase:
   host: ""
   port: 5432
-  # The role needs to create the app's database (llmapp) and the gateway's (litellm), or have both made for it.
+  # The role needs to create the app's database (llmapp), or have it made for it.
   user: arena
-  # disable, prefer, require, verify-ca or verify-full (the gateway knows disable, prefer and require).
+  # disable, prefer, require, verify-ca or verify-full.
   sslMode: require
   # A Secret with the server's CA as ca.crt, for verify-ca and verify-full.
   caSecret: ""
 
-litellm:
-  # The gateway counts API keys' rate limits in its own memory: with several
-  # replicas each counts on its own (docs/admin.md, Rate limits for API keys),
-  # unless valkey.enabled: then they share their counts there.
-  replicas: 1
-  resources: { requests: { cpu: 250m, memory: 1Gi } }
-
-# Valkey: the gateway replicas' shared counts (and LMCache's shared store, engines.lmcacheRemote).
+# Valkey: LMCache's shared store for the vLLM models' token cache (engines.lmcacheRemote).
 # Its image is Valkey's own registry on ECR; a cache, so one replica and no persistence is enough.
 valkey:
   enabled: false
@@ -273,7 +264,7 @@ sandbox:
   resources: { limits: { cpu: "2", memory: 7Gi } }
 
 # Code Studio's workspaces: Code Arena's own engine per workspace, each as its own user (services/workspaces). Off
-# unless turned on. Its pod reaches the app, the gateway and the internet (the code host, package registries), not
+# unless turned on. Its pod reaches the app (its model gateway too) and the internet (the code host, package registries), not
 # the cluster's other services.
 workspaces:
   enabled: false

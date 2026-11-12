@@ -93,7 +93,7 @@ class ChartRender(unittest.TestCase):
         for script, more, rolled in (("router.sh", (), {"llamacpp"}), ("vllm-supervisor.sh", (), {"vllm", "sglang"}), ("sglang-serve.py", (), {"sglang"}),
                                      ("vllm-serve.py", (), {"vllm"}), ("vllm-gguf-config.py", (), {"vllm", "sglang"}),
                                      ("sd-serve.sh", (), {"imagegen", "videogen"}), ("fake_vllm.py", (), set()), ("fake_vllm.py", fake, {"vllm", "sglang"}),
-                                     ("fake-sglang-launch.py", fake, {"sglang"}), ("litellm.yaml", (), set())):
+                                     ("fake-sglang-launch.py", fake, {"sglang"}), ("searxng.yml", (), set())):
             with self.subTest(script=script, more=more), tempfile.TemporaryDirectory() as tmp:
                 chart = Path(tmp) / CHART.name
                 shutil.copytree(CHART, chart)

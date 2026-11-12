@@ -203,9 +203,9 @@ class KubeInstall(unittest.TestCase):
         self.assertIn("arena", cluster["namespaces"])
         manifest = cluster["secrets"]["arena/arena-secrets"]["manifest"]
         secrets = [l.split(":", 1)[1].strip().strip('"') for l in manifest.splitlines() if l.startswith("  ") and l.strip().split(":")[0].isupper()]
-        self.assertEqual(7, len(secrets))
+        self.assertEqual(6, len(secrets))
         self.assertTrue(all(len(v) >= 24 for v in secrets))
-        self.assertTrue(manifest.count("GATEWAY_KEY: \"sk-") == 1)
+        self.assertNotIn("GATEWAY_KEY", manifest)
         # Never on a command line, in the output, or in the values file.
         values = (self.keep / "arena-values.yaml").read_text()
         everything = self.log.read_text() + r.stdout + r.stderr + values
@@ -299,7 +299,7 @@ class KubeInstall(unittest.TestCase):
         shutil.copytree(CHART, bundle / "deploy" / "helm" / "arena")
         shutil.copy(REPO / "deploy" / "features", bundle / "deploy" / "features")
         rows = [("arena-app:7.3.0", "app.tar.gz"), ("arena-web:7.3.0", "web.tar.gz"), ("pgvector/pgvector:0.8.0-pg16", "pg.tar.gz"),
-                ("ghcr.io/berriai/litellm:main-stable", "litellm.tar.gz")]
+                ("public.ecr.aws/valkey/valkey:8.1-alpine", "valkey.tar.gz")]
         for _, f in rows:
             (bundle / "images" / f).write_bytes(gzip.compress(b"image"))
         (bundle / "images" / "IMAGES").write_text("".join(f"{ref}\t{f}\tsha256:x\t1\t1\n" for ref, f in rows))
@@ -308,11 +308,11 @@ class KubeInstall(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         pushed = [c[2] for c in self.calls("docker") if c[1] == "push"]
         self.assertEqual(["registry.example.test/arena/arena-app:7.3.0", "registry.example.test/arena/arena-web:7.3.0",
-                          "registry.example.test/arena/pgvector:0.8.0-pg16", "registry.example.test/arena/litellm:main-stable"], pushed)
+                          "registry.example.test/arena/pgvector:0.8.0-pg16", "registry.example.test/arena/valkey:8.1-alpine"], pushed)
         values = (self.keep / "arena-values.yaml").read_text()
         self.assertIn('  app: { repository: "registry.example.test/arena/arena-app", tag: "7.3.0" }', values)
         self.assertIn('  postgres: { repository: "registry.example.test/arena/pgvector", tag: "0.8.0-pg16" }', values)
-        self.assertIn('  litellm: { repository: "registry.example.test/arena/litellm", tag: "main-stable" }', values)
+        self.assertIn('  valkey: { repository: "registry.example.test/arena/valkey", tag: "8.1-alpine" }', values)
         self.assertIn('pullSecrets: ["regcred"]', values)
 
     def test_A_dry_run_shows_the_plan_and_changes_nothing(self):

@@ -31,9 +31,9 @@ services:
   postgres:
     image: pgvector/pgvector:0.8.0-pg16
     container_name: postgres
-  litellm:
-    image: ghcr.io/berriai/litellm:main-stable
-    container_name: litellm
+  valkey:
+    image: public.ecr.aws/valkey/valkey:8.1-alpine
+    container_name: valkey
   # A comment at two spaces.
   code-intel:
     build: { context: .., dockerfile: src/CodeIntel/Dockerfile, target: server }
@@ -45,7 +45,7 @@ volumes:
   postgres:
   engine:
 """
-SERVICES = "traefik\nweb\napp\npostgres\nlitellm\ncode-intel\ncpu-temp-exporter\n"
+SERVICES = "traefik\nweb\napp\npostgres\nvalkey\ncode-intel\ncpu-temp-exporter\n"
 # deploy/features for that compose file: its optional services, and a part of the app.
 FEATURES = """# The features (deploy/features): id | default | services | needs | requires | title
 code-intel      | on  | code-intel | gitlab | - | code-intel

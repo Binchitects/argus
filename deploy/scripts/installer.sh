@@ -552,7 +552,7 @@ move_volumes() {   # move_volumes plan|do
 OLD_NAMES_BEFORE=8.0.0
 from_old_names() { [[ -n "${FROM:-}" && "$(vercmp "$FROM" "$OLD_NAMES_BEFORE")" == -1 ]]; }
 # A feature id as this release names it.
-feature_now_named() { case "$1" in argus) echo code-intel ;; *) echo "$1" ;; esac; }
+feature_now_named() { case "$1" in argus) echo code-intel ;; ha) echo valkey ;; *) echo "$1" ;; esac; }
 carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their new names (before merge_env adds them anew)
   local env="$DEPLOY/.env" old new val
   from_old_names || return 0
@@ -630,6 +630,24 @@ carried_done() {
   [[ "$(cat "$SNAP/carried-data" 2>/dev/null)" == copied ]] || return 0
   E volume rm "${PROJECT}_argus" >/dev/null 2>&1 && did "the ${PROJECT}_argus volume removed (its data is in $DATA_DIR/code-intel)"
   rm -f "$SNAP/carried-data"
+}
+
+# From before 8.0 (LiteLLM the gateway): LiteLLM's database, dropped by the app (drop-litellm-database) once its people's
+# keys and its log are in the app's ledger, never before. Run after an upgrade from such a release is healthy (its backup,
+# taken before, holds the database: a rollback brings it back), and by a repair after one. Not done yet (the app still
+# importing a long log), it is kept, and said so: a repair later drops it. Never fails the upgrade.
+before_own_gateway() { [[ -n "$1" ]] && valid_version "$1" && [[ "$(vercmp "$1" 8.0.0)" == -1 ]]; }
+drop_litellm_db() {   # drop_litellm_db plan|do FROM_VERSION
+  before_own_gateway "$2" || return 0
+  if [[ $1 == plan ]]; then would "drop LiteLLM's database once the app has its people's keys and its log (the backup before the upgrade holds it)"; return 0; fi
+  local out rc=0
+  out="$(dc exec -T app dotnet Llm.Api.dll drop-litellm-database --wait "${LITELLM_DROP_WAIT:-600}" 2>&1)" || rc=$?
+  case $rc in
+    0) [[ "$out" == *"is dropped"* ]] && did "LiteLLM's database dropped: its people's keys and its log are in the app's ledger (the backup $(marker_get backup 2>/dev/null)${BACKUP:-} holds it)" ;;
+    3) note "LiteLLM's database is kept for now: the app is still bringing its keys and log over. repair drops it once they are in" ;;
+    *) note "LiteLLM's database is kept: ${out:-the app did not answer}" ;;
+  esac
+  return 0
 }
 
 # What the app and code-intel say of themselves: through Traefik on this host with curl (never through
@@ -1762,7 +1780,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
     for key in "${add[@]}"; do
       def="${key#*$'\t'}"; key="${key%%$'\t'*}"
       if [[ $key == DATA_DIR ]]; then val="$DATA_DIR"; def="$DATA_DIR"
-      elif [[ "$def" == @secret ]]; then val="$(gen_secret)"; [[ $key == GATEWAY_KEY ]] && val="sk-$val"; else val="$def"; fi
+      elif [[ "$def" == @secret ]]; then val="$(gen_secret)"; else val="$def"; fi
       [[ $1 == do ]] && printf '%s=%s\n' "$key" "$val" >> "$tmp"
       ENV_ADDED+=("$key")
       [[ $1 == do && -n "$ENV_ADDED_FILE" ]] && echo "$key" >> "$ENV_ADDED_FILE"
@@ -1796,9 +1814,8 @@ make_env() {   # make_env [DIR]: DIR/.env (default the installation's); another 
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"; V[DATA_DIR]="$DATA_DIR"
   V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
   V[COMPOSE_PROFILES]="$(features_csv)"
-  # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
+  # Every key compose cannot start without gets a secret of its own.
   for key in $GEN_SECRETS $(required_keys "$dir"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
-  V[GATEWAY_KEY]="sk-$(gen_secret)"
   ADMIN_PASSWORD_NEW="$(gen_secret | cut -c1-24)"; V[ADMIN_PASSWORD]="$ADMIN_PASSWORD_NEW"
   tmp="$env.installer-new"
   (
@@ -2769,7 +2786,7 @@ same() { [[ -f "$1" && -f "$2" && "$(sha_of "$1")" == "$(sha_of "$2")" ]]; }
 declare -A RB_SHIPPED=()
 RB_KEPT=() RB_BACK=() RB_OUT=() RB_STAY=() RB_ENV="" RB_ENV_DEL=() RB_ENV_PUT=() RB_ENV_STAY=() RB_PLANNED=0 RB_OLD=""
 # The secrets the data opens with: the data goes back to the backup, which was taken with FROM's.
-DATA_KEYS="DB_PASSWORD APP_KEY GATEWAY_KEY"
+DATA_KEYS="DB_PASSWORD APP_KEY"
 choose() {   # choose QUESTION y|n: yes or no; unattended (--yes) and in a dry run, the default
   local answer="" d=$2
   if [[ $YES -eq 1 || $DRY -eq 1 ]]; then [[ $d == y ]]; return; fi
@@ -3344,6 +3361,7 @@ cmd_upgrade() {
     fill_audio plan
     ensure_cert plan
     would "start $BVERSION (the app and code-intel migrate their data as they start), wait until every service is healthy, check every service's version"
+    drop_litellm_db plan "$FROM"
     would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup, the data as it is kept first)"
     return 0
   fi
@@ -3441,6 +3459,8 @@ cmd_upgrade() {
     remove_off_containers do
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
+    step "LiteLLM's database"
+    drop_litellm_db do "$FROM"
     ensure_cert do
     sign_builds
     link_cli
@@ -3710,6 +3730,8 @@ cmd_repair() {
     return 0
   fi
   if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
+    # The last upgrade came from before 8.0 and its backup holds LiteLLM's database: dropped once the app has its data.
+    LITELLM_DROP_WAIT=0 drop_litellm_db do "$(state_get previous)"
     ensure_cert do
     sign_builds
     link_cli

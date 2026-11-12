@@ -39,9 +39,9 @@ run "$ENGINE" run --rm -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACK
 run "$ENGINE" run -d --name "$NAME" -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACKUP_DIR/pgbackrest:/pgbackrest:ro" \
   -v "$ROOT/config/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" "$IMAGE" postgres -c archive_mode=off || exit 1
 if [[ $DRY == 1 ]]; then exit 0; fi
-for _ in $(seq 1 60); do "$ENGINE" exec "$NAME" pg_isready -U arena -d litellm > /dev/null 2>&1 && break; sleep 2; done
+for _ in $(seq 1 60); do "$ENGINE" exec "$NAME" pg_isready -U arena -d postgres > /dev/null 2>&1 && break; sleep 2; done
 ok=1
-for db in litellm llmapp; do
+for db in llmapp; do
   "$ENGINE" exec "$NAME" psql -U arena -d "$db" -Atc 'select 1' > /dev/null 2>&1 || { printf 'restore-drill: database %s missing\n' "$db"; ok=0; }
 done
 people=$("$ENGINE" exec "$NAME" psql -U arena -d llmapp -Atc 'select count(*) from "AspNetUsers"' 2>/dev/null || echo 0)

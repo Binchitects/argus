@@ -157,7 +157,7 @@ cleanup() {
 trap cleanup EXIT
 # Compose, for the release as it ships: docker-compose.yml alone, every profile but off, and
 # placeholder secrets (an image never depends on them).
-{ printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY CODE_INTEL_KEY; echo DATA_DIR=/placeholder; } > "$WORK/placeholder.env"
+{ printf '%s=placeholder\n' APP_KEY DB_PASSWORD ENGINE_KEY CODE_INTEL_KEY; echo DATA_DIR=/placeholder; } > "$WORK/placeholder.env"
 PROFILES=""
 rc() { (cd "$ROOT" && env -u COMPOSE_FILE COMPOSE_PROFILES="$PROFILES" COMPOSE_PROJECT_NAME="$PROJECT" "$ENGINE" compose --env-file "$WORK/placeholder.env" -f docker-compose.yml "$@"); }
 PROFILES="$(rc config --profiles 2>/dev/null | grep -vx off | paste -sd, -)"

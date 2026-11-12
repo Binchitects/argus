@@ -16,7 +16,7 @@
 #
 # It runs beside the live stack and never touches it or its volumes: the
 # project's name may not be the live one's, and every volume it removes must
-# carry its name (test-project.sh). Only postgres, app, web, traefik and litellm
+# carry its name (test-project.sh). Only postgres, app, web and traefik
 # run, from images already here, with no fixed container names, on a network with
 # no way out. The restore is the real one, scripts/backup.sh --restore, aimed at
 # the throwaway project's volumes; never --with-config, which writes this
@@ -25,7 +25,7 @@
 # Checked: the backup verifies; it restores; the app comes up on it; the person
 # signs in; every person in the backup is there; their chats are there and the
 # newest opens with its messages; every setting saved in the backup reads back
-# saved, with its value; spend and credit read from the restored gateway.
+# saved, with its value; spend and credit read from the restored ledger.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TP_ROOT="$ROOT" TP_NAME=restore-test
@@ -76,7 +76,7 @@ if [[ $ENCRYPTED -eq 0 ]]; then
   [[ -f "$FROM/postgres.sql.gz" ]] || die "$FROM has no postgres.sql.gz: nothing to check people and chats against"
 fi
 APP_IMAGE="$IMAGES_FROM-app" WEB_IMAGE="$IMAGES_FROM-web"
-IMAGES="$APP_IMAGE $WEB_IMAGE $(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$ROOT/docker-compose.yml" | grep -E '^(traefik|pgvector|ghcr.io/berriai/litellm)' | tr '\n' ' ')python:3.13-slim"
+IMAGES="$APP_IMAGE $WEB_IMAGE $(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$ROOT/docker-compose.yml" | grep -E '^(traefik|pgvector)' | tr '\n' ' ')python:3.13-slim"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/$PROJECT.XXXXXX")" || die "cannot make a work folder"
 tp_init "$PROJECT" "$PORT" "$WORK"

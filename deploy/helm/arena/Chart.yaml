@@ -6,4 +6,4 @@ type: application
 version: 0.1.0
 appVersion: "8.0.0"
 home: https://github.com/Binchitects/argus
-keywords: [llm, chat, litellm, llama.cpp, gitlab]
+keywords: [llm, chat, model-gateway, llama.cpp, gitlab]

@@ -408,7 +408,7 @@ if [[ -n "$MODEL" ]]; then
     || fail "the chat model $stem is not offered 10 minutes after the install (Admin -> Models says why)"
   say "  the chat model $stem is offered"
   # The functional test, on the test host (no python there: in the stack's own python image, with the host's
-  # docker for its LiteLLM questions and the names --hosts wrote).
+  # docker for its questions of the ledger and the names --hosts wrote).
   say "==> the functional test (deploy/scripts/functional-test.py, on the test host)"
   H docker image inspect python:3.13-slim >/dev/null 2>&1 || fail "python:3.13-slim is not on the test host"
   t0=$SECONDS

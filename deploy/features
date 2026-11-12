@@ -3,8 +3,8 @@
 # COMPOSE_PROFILES in .env is the list of the features that are on. Each optional service runs
 # under its feature's profile, so a feature that is off runs nothing and needs no image. The app
 # reads the same list (Features__On): a feature that is off is gone from its menus, its pages say
-# it is not installed, and its API answers 404. The core (the web, the app, Postgres, the
-# gateway, Traefik) always runs. installer.sh chooses them: --with and --without on install,
+# it is not installed, and its API answers 404. The core (the web, the app with its model
+# gateway, Postgres, Traefik) always runs. installer.sh chooses them: --with and --without on install,
 # upgrade and repair, and installer.sh features lists them.
 #
 # One feature a line, its fields separated by "|":
@@ -38,7 +38,7 @@ monitoring     | on  | prometheus alertmanager loki promtail node-exporter cpu-t
 gpu-monitoring | on  | gpu-exporter | gpu | monitoring | The GPUs' metrics on the dashboards
 dcgm           | off | dcgm-exporter | gpu | monitoring | Data-centre GPU detail (NVIDIA DCGM, bare metal only)
 power-limits   | on  | power-limits | gpu | - | GPU and CPU power limits, and a temperature policy that throttles them
-ha             | off | valkey | - | - | Shared counts for several gateway replicas (Valkey)
+valkey         | off | valkey | - | - | Valkey, LMCache's shared store for the vLLM models' token cache (LMCACHE_REMOTE)
 meetings       | on  | - | - | speech | Meetings: recorded, written out and summed up
 lab            | on  | - | - | sandbox | The science lab
 apps           | on  | - | - | - | Apps the chat builds

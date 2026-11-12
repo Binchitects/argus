@@ -16,7 +16,7 @@
 # (a build fetches what any build fetches). The project starts from zero with
 # secrets of its own, beside the live stack and never touching it or its volumes
 # (test-project.sh: its own name, volumes, network and port; only postgres, app,
-# web, traefik and litellm, on a network with no way out). Then:
+# web and traefik, on a network with no way out). Then:
 #   1. TO_TAG from zero migrates an empty database; a person, a group, a chat and
 #      a setting go in; the backup taken before the upgrade (the database with
 #      pg_dumpall and the app's volumes, as backup.sh takes them).
@@ -178,7 +178,7 @@ for tag in "$TO_TAG" "$FROM_TAG"; do
   tp_run docker compose -f "$wt/deploy/docker-compose.yml" -f "$TP_IMAGES" build app web >"$WORK/build-$(slug "$tag").log" 2>&1 \
     || { tail -n 30 "$WORK/build-$(slug "$tag").log"; die "building $tag failed"; }
   say "  $tag: $(app_image "$tag"), $(web_image "$tag") (its last migration: $(tp_last_migration "$wt"))"
-  for image in $(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$wt/deploy/docker-compose.yml" | grep -E '^(traefik|pgvector|ghcr.io/berriai/litellm)') python:3.13-slim; do
+  for image in $(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$wt/deploy/docker-compose.yml" | grep -E '^(traefik|pgvector)') python:3.13-slim; do
     docker image inspect "$image" >/dev/null 2>&1 || die "the image $image ($tag) is not on this host (this test pulls nothing)"
   done
 done

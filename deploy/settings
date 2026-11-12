@@ -73,8 +73,7 @@ LEAN_CPUS            | Sandboxes     | number  | 4             | The proof check
 WORKSPACES_MEMORY    | Sandboxes     | size    | 16g           | Code Studio's workspaces' memory
 WORKSPACES_CPUS      | Sandboxes     | number  | 4             | Code Studio's workspaces' CPUs
 APP_REPLICAS         | Scale         | number  | -             | Several app replicas behind Traefik (with scale.yml)
-LITELLM_REPLICAS     | Scale         | number  | -             | The gateway's replicas (with ha.yml)
-LMCACHE_REMOTE       | Scale         | text    | -             | LMCache's shared store (redis://valkey:6379 with the ha feature)
+LMCACHE_REMOTE       | Scale         | text    | -             | LMCache's shared store (redis://valkey:6379 with the valkey feature)
 DB_HOST              | Database      | text    | -             | An external Postgres (16 or newer) instead of the stack's
 DB_PORT              | Database      | port    | 5432          | Its port
 DB_USER              | Database      | text    | arena         | Its user

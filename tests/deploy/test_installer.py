@@ -20,9 +20,9 @@ from pathlib import Path
 
 from support import COMPOSE, REPO, Sandbox
 
-SERVICES = "traefik\nweb\napp\npostgres\nlitellm\ncode-intel\ncpu-temp-exporter\nembed\n"
+SERVICES = "traefik\nweb\napp\npostgres\nvalkey\ncode-intel\ncpu-temp-exporter\nembed\n"
 EMBED = "embed/nomic-embed-text-v1.5.f16.gguf"
-THIRD_PARTY = ["traefik:v3.6.7", "pgvector/pgvector:0.8.0-pg16", "ghcr.io/berriai/litellm:main-stable", "python:3.13-slim",
+THIRD_PARTY = ["traefik:v3.6.7", "pgvector/pgvector:0.8.0-pg16", "public.ecr.aws/valkey/valkey:8.1-alpine", "python:3.13-slim",
                "ghcr.io/ggml-org/llama.cpp:server-cuda"]
 # What compose names with make-installer's release.yml on top: the release's own by version.
 IMAGES_NEW = "\n".join(THIRD_PARTY + ["arena-web:9.9.9", "arena-app:9.9.9", "arena-code-intel:9.9.9"])
@@ -33,8 +33,8 @@ COMPOSE = COMPOSE.replace("volumes:\n", "  llamacpp:\n    image: ghcr.io/ggml-or
 COMPOSE = COMPOSE.replace("volumes:\n", "  laya:\n    build: ./services/laya\n    profiles: [laya]\nvolumes:\n", 1)
 # The embedding server, on the CPU: it waits for its model file (FAKE_WAITS_FOR).
 COMPOSE = COMPOSE.replace("volumes:\n", "  embed:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\n    container_name: embed\nvolumes:\n", 1)
-# LiteLLM reads a file of deploy/ as it starts.
-COMPOSE = COMPOSE.replace("    container_name: litellm\n", "    container_name: litellm\n    volumes: [\"./config/litellm.yaml:/app/config.yaml:ro\"]\n", 1)
+# Valkey reads a file of deploy/ as it starts.
+COMPOSE = COMPOSE.replace("    container_name: valkey\n", "    container_name: valkey\n    volumes: [\"./config/valkey.conf:/etc/valkey.conf:ro\"]\n", 1)
 # 5.2.0 named the code-intelligence service after a brand: argus, its service, container, image and volume.
 COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n").replace("code-intel", "argus")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
@@ -56,7 +56,7 @@ DEFAULT_FEATURES = "chat-models,knowledge,code-intel,monitoring,meetings"
 COMPOSE_NEW = COMPOSE_NEW.replace("volumes:\n  postgres:\n  engine:\n", "volumes:\n" + "".join(
     f'  {v}:\n    driver_opts: {{ type: none, o: bind, device: "${{DATA_DIR:?set DATA_DIR}}/{v}" }}\n' for v in ("postgres", "engine")), 1)
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
-ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD.replace("ARGUS_KEY=", "CODE_INTEL_KEY=\nCODE_INTEL_HOST=code-intel") + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
+ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD.replace("GATEWAY_KEY=\n", "").replace("ARGUS_KEY=", "CODE_INTEL_KEY=\nCODE_INTEL_HOST=code-intel") + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
 OLD_ENV = ("DOMAIN=old.example\nADMIN_EMAIL=me@old.example\nMODELS_DIR=./models\nMODEL=lib/model.gguf\nADMIN_PASSWORD=old-admin-pass\n"
            "APP_KEY=old-app-key\nDB_PASSWORD=old-db\nGATEWAY_KEY=sk-old\nENGINE_KEY=old-engine\nARGUS_KEY=old-argus\nOLD_THING=1\n")
 
@@ -75,7 +75,7 @@ class Release:
         # 5.2.0 had no list of features.
         (s.deploy / "features").unlink()
         s.write(".env.example", ENV_EXAMPLE_OLD)
-        s.write("config/litellm.yaml", "model_list: []\n")
+        s.write("config/valkey.conf", "model_list: []\n")
         s.write("config/traefik/routes.yml", "http: {}\n")
         s.write("config/dropped.yml", "old: 1\n")
         s.write("config/edited.yml", "shipped: 1\n")
@@ -419,7 +419,7 @@ class InstallerTests(unittest.TestCase):
         (deploy / ".env").chmod(0o600)
         (deploy / "config" / "edited.yml").write_text("shipped: 1\nmine: yes\n")
         # Changed here, as an admin changes budgets; 9.9.9 ships it as 5.2.0 did.
-        (deploy / "config" / "litellm.yaml").write_text("model_list: []\nbudget: mine\n")
+        (deploy / "config" / "valkey.conf").write_text("model_list: []\nbudget: mine\n")
         (deploy / "config" / "mine.yml").write_text("my own\n")
         (deploy / "certs" / "tls.key").write_text("KEY\n")
         if version_file:
@@ -496,14 +496,14 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("from 5.2.0 (" + str(self.dir / "VERSION") + ") to 9.9.9", out)
         self.assertIn("would  update docker-compose.yml", out)
         self.assertIn("would  keep config/edited.yml as it was changed here, and write 9.9.9's beside it as config/edited.yml.new-9.9.9 (it changes it too), to merge", out)
-        self.assertIn("note   kept config/litellm.yaml as it was changed here: 9.9.9 ships it as it was", out)
-        self.assertNotIn("update config/litellm.yaml", out)
+        self.assertIn("note   kept config/valkey.conf as it was changed here: 9.9.9 ships it as it was", out)
+        self.assertNotIn("update config/valkey.conf", out)
         self.assertIn("would  add config/added.yml", out)
         self.assertIn("would  remove config/dropped.yml: not in 9.9.9 (it is 5.2.0's, unchanged)", out)
         self.assertIn("kept config/mine.yml: not in 9.9.9; yours", out)
         self.assertIn("would  add to .env: NEW_SETTING=on (the default)", out)
         self.assertIn("would  add to .env: NEW_KEY (a new secret, generated)", out)
-        self.assertIn(".env: not read by 9.9.9, kept: OLD_THING", out)
+        self.assertIn(".env: not read by 9.9.9, kept: GATEWAY_KEY OLD_THING", out)
         self.assertEqual(self.r.store(), before)
         self.assertFalse((self.dir / ".arena-install").exists())
         self.assertNotIn("NEW_KEY", (self.dir / "deploy" / ".env").read_text())
@@ -688,7 +688,7 @@ class InstallerTests(unittest.TestCase):
         for key in ("ADMIN_PASSWORD", "APP_KEY", "DB_PASSWORD", "ENGINE_KEY", "CODE_INTEL_KEY", "NEW_KEY"):
             self.assertGreaterEqual(len(values[key]), 24, key)
             self.assertNotIn(values[key], self.output(r) + self.logs(), key)
-        self.assertTrue(values["GATEWAY_KEY"].startswith("sk-"))
+        self.assertNotIn("GATEWAY_KEY", values)
         # The data in folders of DATA_DIR on the host (its default: beside deploy/), made before it starts.
         self.assertEqual(values["DATA_DIR"], f"{self.dir}/data")
         for v in ("postgres", "engine"):
@@ -824,6 +824,24 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("code-intel", profiles[0].split("=", 1)[1].split(","))
         self.assertNotIn("argus", profiles[0].split("=", 1)[1].split(","))
 
+    def test_An_upgrade_from_before_8_0_drops_LiteLLMs_database_only_after_its_backup_and_once_the_app_has_its_data(self):
+        self.old_install()
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("done   LiteLLM's database dropped", r.stdout)
+        calls = [" ".join(c) for c in self.r.calls()]
+        dropped = next(i for i, c in enumerate(calls) if "drop-litellm-database" in c)
+        self.assertLess(next(i for i, c in enumerate(calls) if "pg_dumpall" in c), dropped)
+        self.assertIn("--wait 600", calls[dropped])
+        # The app still importing: kept, said so, and the upgrade is done all the same.
+        shutil.rmtree(self.dir)
+        self.r.state.write_text(json.dumps(self.pristine))
+        self.old_install()
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"FAKE_DROP_RC": "3"})
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("LiteLLM's database is kept for now", r.stdout)
+        self.assertIn("Upgraded from", r.stdout)
+
     def test_Upgrade_from_5_2_0_backs_up_updates_merges_and_runs_the_new_release(self):
         deploy = self.old_install()
         # The compose file changed here too (its changes belong in the override).
@@ -849,13 +867,13 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
         self.assertEqual((deploy / "docker-compose.yml.before-9.9.9").read_text(), COMPOSE_OLD + "# mine\n")
         # Changed here and not by the release: the host's stays in effect, and each is named at the end.
-        self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\nbudget: mine\n")
-        self.assertFalse((deploy / "config" / "litellm.yaml.before-9.9.9").exists())
-        self.assertFalse((deploy / "config" / "litellm.yaml.new-9.9.9").exists())
+        self.assertEqual((deploy / "config" / "valkey.conf").read_text(), "model_list: []\nbudget: mine\n")
+        self.assertFalse((deploy / "config" / "valkey.conf.before-9.9.9").exists())
+        self.assertFalse((deploy / "config" / "valkey.conf.new-9.9.9").exists())
         self.assertIn("  TO MERGE: yours stay in effect, and 9.9.9 changed these files too; its copies are beside them:\n"
                       "    config/edited.yml  <-  config/edited.yml.new-9.9.9\n", out)
         self.assertIn("    docker-compose.yml  ->  docker-compose.yml.before-9.9.9\n", out)
-        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", out)
+        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/valkey.conf\n", out)
         # The embedding model is not here: healthy, waiting for models.
         self.assertIn("Upgraded from 5.2.0 to 9.9.9: healthy, waiting for models (embed; below)", out)
         # 5.2.0's data, in the engine's own volumes, moved into DATA_DIR's folders (copied, then the volumes removed).
@@ -896,19 +914,19 @@ class InstallerTests(unittest.TestCase):
         # What the upgrade kept as the admin's is not damage: repair and verify leave it.
         r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("kept as you changed them (the install or upgrade left them so): config/edited.yml config/litellm.yaml", r.stdout)
-        self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\nbudget: mine\n")
+        self.assertIn("kept as you changed them (the install or upgrade left them so): config/edited.yml config/valkey.conf", r.stdout)
+        self.assertEqual((deploy / "config" / "valkey.conf").read_text(), "model_list: []\nbudget: mine\n")
         self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 1\nmine: yes\n")
         self.assertFalse(list((deploy / "config").glob("*.changed-*")))
         r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "verify", "--dir", str(self.dir)], env=self.r.env(),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, self.output(r))
         # Changed again since: that is a finding.
-        (deploy / "config" / "litellm.yaml").write_text("budget: changed again\n")
+        (deploy / "config" / "valkey.conf").write_text("budget: changed again\n")
         r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "verify", "--dir", str(self.dir)], env=self.r.env(),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 6, self.output(r))
-        self.assertIn("config/litellm.yaml", r.stdout)
+        self.assertIn("config/valkey.conf", r.stdout)
 
     def test_An_upgrade_needs_disk_only_for_the_images_it_loads(self):
         # The images here already as the bundle has them are not loaded again: 7.7.0 asked for room for every one
@@ -1067,7 +1085,7 @@ class InstallerTests(unittest.TestCase):
         kept = snap / "files-before-rollback" / "config"
         self.assertEqual((kept / "added.yml").read_text(), "new: 1\nlater: yes\n")
         self.assertFalse((kept / "edited.yml").exists())
-        self.assertFalse((kept / "litellm.yaml").exists())
+        self.assertFalse((kept / "valkey.conf").exists())
         self.assertIn("changed here since the upgrade, kept in", r.stdout)
         self.assertFalse((self.dir / "VERSION").exists())
         self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
@@ -1090,7 +1108,7 @@ class InstallerTests(unittest.TestCase):
         (state / "MANIFEST").write_text("format: arena-offline 1\nversion: 5.2.0\n")
         (state / "state").write_text("version=5.2.0\nengine=docker\nproject=arena\nstatus=installed\n")
         (state / "kept").write_text(f"config/edited.yml\t{self.sha(deploy / 'config' / 'edited.yml')}\n"
-                                    f"config/litellm.yaml\t{self.sha(deploy / 'config' / 'litellm.yaml')}\n")
+                                    f"config/valkey.conf\t{self.sha(deploy / 'config' / 'valkey.conf')}\n")
         before = {f: (state / f).read_text() for f in ("deploy.sha256", "MANIFEST", "kept")}
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
@@ -1529,25 +1547,25 @@ class InstallerTests(unittest.TestCase):
         self.install()
         deploy = self.dir / "deploy"
         (deploy / "config" / "added.yml").unlink()
-        (deploy / "config" / "litellm.yaml").write_text("changed by hand\n")
+        (deploy / "config" / "valkey.conf").write_text("changed by hand\n")
         store = self.r.store()
         del store["images"]["arena-web:9.9.9"]
         next(c for c in store["containers"] if c["service"] == "code-intel")["state"] = "exited"
         self.r.state.write_text(json.dumps(store))
-        litellm = next(c for c in store["containers"] if c["service"] == "litellm")["id"]
+        valkey = next(c for c in store["containers"] if c["service"] == "valkey")["id"]
         r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
         self.assertIn("done   restored config/added.yml (it was missing)", out)
-        self.assertIn("done   put back config/litellm.yaml", out)
-        self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\n")
-        self.assertEqual([p.read_text() for p in (deploy / "config").glob("litellm.yaml.changed-*")], ["changed by hand\n"])
+        self.assertIn("done   put back config/valkey.conf", out)
+        self.assertEqual((deploy / "config" / "valkey.conf").read_text(), "model_list: []\n")
+        self.assertEqual([p.read_text() for p in (deploy / "config").glob("valkey.conf.changed-*")], ["changed by hand\n"])
         self.assertIn("missing or not the release's: arena-web:9.9.9", out)
         self.assertIn("loaded arena-web:9.9.9", out)
         self.assertIn("code-intel (code-intel): exited", out)
-        # LiteLLM reads the file put back: it starts again, on the shipped copy.
-        self.assertIn("they read a file put back, so they start again: litellm", out)
-        self.assertNotEqual(next(c for c in self.containers() if c["service"] == "litellm")["id"], litellm)
+        # Valkey reads the file put back: it starts again, on the shipped copy.
+        self.assertIn("they read a file put back, so they start again: valkey", out)
+        self.assertNotEqual(next(c for c in self.containers() if c["service"] == "valkey")["id"], valkey)
         self.assertIn("Repaired:", out)
         self.assertEqual({c["state"] for c in self.containers()}, {"running"})
         # Again: nothing to do.
@@ -1632,12 +1650,12 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         # And back: install over it brings it up on the same data, and a file changed meanwhile
         # stays as it was changed (the release ships it as it was installed).
-        (self.dir / "deploy" / "config" / "litellm.yaml").write_text("changed while it was removed\n")
+        (self.dir / "deploy" / "config" / "valkey.conf").write_text("changed while it was removed\n")
         r = self.install()
-        self.assertIn("kept config/litellm.yaml as it was changed here", r.stdout)
-        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml").read_text(), "changed while it was removed\n")
-        self.assertFalse((self.dir / "deploy" / "config" / "litellm.yaml.before-9.9.9").exists())
-        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", r.stdout)
+        self.assertIn("kept config/valkey.conf as it was changed here", r.stdout)
+        self.assertEqual((self.dir / "deploy" / "config" / "valkey.conf").read_text(), "changed while it was removed\n")
+        self.assertFalse((self.dir / "deploy" / "config" / "valkey.conf.before-9.9.9").exists())
+        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/valkey.conf\n", r.stdout)
 
     def test_Purge_asks_for_the_word_and_offers_a_last_backup(self):
         self.install()

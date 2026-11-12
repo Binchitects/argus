@@ -1,7 +1,7 @@
-{{- /* Availability: the app, the web and the gateway kept serving while nodes are drained (a PodDisruptionBudget
+{{- /* Availability: the app (and its model gateway) and the web kept serving while nodes are drained (a PodDisruptionBudget
 each, when it has more than one replica), and grown with their load between their replicas and maxReplicas
 (availability.autoscale: a HorizontalPodAutoscaler each, on CPU; the cluster needs its metrics server). */}}
-{{- range $name := list "app" "web" "litellm" }}
+{{- range $name := list "app" "web" }}
 {{- $v := index $.Values $name }}
 {{- if gt (int $v.replicas) 1 }}
 apiVersion: policy/v1

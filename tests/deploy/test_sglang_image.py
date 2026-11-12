@@ -54,7 +54,7 @@ class SglangImageTests(unittest.TestCase):
         if docker is None:
             self.skipTest("no docker here")
         env = (DEPLOY / ".env.example").read_text()
-        env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY|GATEWAY_KEY)=$", r"\1=x", env)
+        env = re.sub(r"(?m)^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|CODE_INTEL_KEY)=$", r"\1=x", env)
         env = re.sub(r"(?m)^DATA_DIR=$", "DATA_DIR=/srv/arena/data", env)
         with tempfile.NamedTemporaryFile("w", suffix=".env") as f:
             f.write(env)

@@ -15,7 +15,7 @@ arena-app
 pgvector/pgvector:0.8.0-pg16
 ghcr.io/ggml-org/llama.cpp:server-cuda
 ghcr.io/ggml-org/llama.cpp:server-cuda
-ghcr.io/berriai/litellm:main-stable
+public.ecr.aws/valkey/valkey:8.1-alpine
 """
 INI = """# Written by the app (Admin -> Models). The engine restarts when this changes.
 
@@ -44,7 +44,7 @@ class AirgapTests(unittest.TestCase):
         s.write("signing/code-signing.key", "PRIVATE KEY\n")
         s.write("config/traefik/routes.yml", "http: {}\n")
         s.write("config/traefik/certificate.yml", "tls: {}\n")
-        s.write("config/litellm.yaml", "model_list: []\n")
+        s.write("config/code-intel.yaml", "code-intel: {}\n")
         s.write("code-intel-standalone/.env", "CODE_INTEL_KEY=secret\n")
         s.write("code-intel-standalone/env-samples/gpu.env", "MODEL=x\n")
         s.write("scripts/__pycache__/x.pyc", "bytecode")
@@ -114,7 +114,7 @@ class AirgapTests(unittest.TestCase):
         self.pack()
         deploy = {n[len("arena-airgap/deploy/"):] for n in self.members() if n.startswith("arena-airgap/deploy/")}
         for kept in ("docker-compose.yml", "podman.yml", ".env.example", "certs/README.md", "models/.gitkeep", "backups/.gitkeep",
-                     "config/traefik/routes.yml", "config/litellm.yaml", "code-intel-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
+                     "config/traefik/routes.yml", "config/code-intel.yaml", "code-intel-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
             self.assertIn(kept, deploy)
         for left in (".env", ".env.old", "backups/2026-01-01_000000/postgres.sql.gz", "certs/tls.key", "signing/code-signing.key",
                      "config/traefik/certificate.yml", "code-intel-standalone/.env", "scripts/__pycache__/x.pyc", "old-bundle.tar", "models/big/Big-00001-of-00002.gguf"):
@@ -185,10 +185,10 @@ class AirgapTests(unittest.TestCase):
         self.assertTrue(self.s.called("run", "--rm", "--pull", "never", "--network", "none", "--label", "arena.helper=1", "-v", "arena_audio:/src:ro"))
 
     def test_Packing_never_pulls_and_stops_on_an_image_that_is_not_here(self):
-        self.s.env["FAKE_MISSING"] = "ghcr.io/berriai/litellm:main-stable"
+        self.s.env["FAKE_MISSING"] = "public.ecr.aws/valkey/valkey:8.1-alpine"
         r = self.s.run("airgap.sh", "pack", str(self.out))
         self.assertEqual(r.returncode, 1)
-        self.assertIn("ghcr.io/berriai/litellm:main-stable is not on this host", r.stderr)
+        self.assertIn("public.ecr.aws/valkey/valkey:8.1-alpine is not on this host", r.stderr)
         self.assertFalse(self.out.exists())
         self.assertFalse(self.s.called("pull"))
         self.assertEqual(list(self.out.parent.iterdir()), [])
@@ -203,7 +203,7 @@ class AirgapTests(unittest.TestCase):
         r = self.s.run("airgap.sh", "pack", "--dry-run", "--models", str(self.out))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Would pack", r.stdout)
-        self.assertIn("ghcr.io/berriai/litellm:main-stable", r.stdout)
+        self.assertIn("public.ecr.aws/valkey/valkey:8.1-alpine", r.stdout)
         self.assertIn("copied into the bundle (--models)", r.stdout)
         self.assertFalse(self.out.exists())
         self.assertFalse(self.s.called("save") or self.s.called("run"))
@@ -326,7 +326,7 @@ class AirgapTests(unittest.TestCase):
         self.pack()
         r = self.load("--dry-run")
         self.assertIn("Would load", r.stdout)
-        self.assertIn("ghcr.io/berriai/litellm:main-stable", r.stdout)
+        self.assertIn("public.ecr.aws/valkey/valkey:8.1-alpine", r.stdout)
         self.assertIn("MODEL=big/Big-00001-of-00002.gguf", r.stdout)
         self.assertFalse((self.s.dir / "target").exists())
         self.assertEqual(self.s.calls(), [])

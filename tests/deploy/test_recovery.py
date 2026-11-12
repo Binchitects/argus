@@ -111,9 +111,9 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(out.count("container_name: !reset null"), len(SERVICES.split()))
         self.assertIn("default: { internal: true }", out)
         self.assertIn('ports: !override ["127.0.0.1:18443:443"]', out)
-        self.assertEqual(out.count("profiles: [off]"), 2)  # code-intel, cpu-temp-exporter
+        self.assertEqual(out.count("profiles: [off]"), 3)  # valkey, code-intel, cpu-temp-exporter
         self.assertEqual(out.count("build: !reset null"), 2)  # app, web: never built
-        self.assertEqual(out.count("pull_policy: never"), 5)
+        self.assertEqual(out.count("pull_policy: never"), 4)  # the core: traefik, web, app, postgres
         self.assertIn('app: { image: "arena-app" }', out)
         # Without compose (no services listed), the file's own services are read.
         r = self.s.bash(f'tp_init arena-restore-test 18443 "{self.s.dir}/w2"; tp_use "{self.s.deploy}/docker-compose.yml" a w; cat "$TP_ISOLATE"')
@@ -150,7 +150,7 @@ class RestoreTestScript(unittest.TestCase):
         self.assertIn("live project left alone: arena", r.stdout)
         self.assertIn("backup.sh --restore --from", r.stdout)
         self.assertIn(f"at https://llm.example:{self.port} (127.0.0.1)", r.stdout)
-        self.assertIn("arena-app arena-web traefik:v3.6.7 pgvector/pgvector:0.8.0-pg16 ghcr.io/berriai/litellm:main-stable python:3.13-slim", r.stdout)
+        self.assertIn("arena-app arena-web traefik:v3.6.7 pgvector/pgvector:0.8.0-pg16 python:3.13-slim", r.stdout)
         self.assertIn("internal: true", r.stdout)
         # Nothing but reading the compose file's services.
         self.assertTrue(all(c[1:2] == ["compose"] and "config" in c for c in self.s.calls()), self.s.calls())

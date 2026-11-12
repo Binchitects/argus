@@ -5,7 +5,7 @@
 #
 # A throwaway project has a name of its own that says "test", its own volumes,
 # network and port, no fixed container names, and only the core services:
-# postgres, app, web, traefik and litellm. Every other service is left out. Its
+# postgres, app, web and traefik. Every other service is left out. Its
 # network has no way out (a restored copy sends no mail, calls no webhook,
 # reaches no directory), and Traefik answers on 127.0.0.1 only. Nothing is
 # pulled or built when it starts: the images must be on this host.
@@ -17,7 +17,7 @@
 #   tp_compose ARGS / tp_run CMD                compose, or any command, aimed at it only
 #   tp_down                                     its containers, networks and volumes, gone
 
-TP_CORE="postgres app web traefik litellm"
+TP_CORE="postgres app web traefik"
 
 tp_say() { printf '%s\n' "$*"; }
 tp_die() { printf '%s: ERROR: %s\n' "${TP_NAME:-test-project}" "$*" >&2; exit 1; }

@@ -3,7 +3,7 @@
 #   cp .env.example .env     # then fill it in
 #   docker compose up -d     # https://$DOMAIN
 #
-# The core (Traefik, the web, the app, Postgres, the gateway) always runs. Every
+# The core (Traefik, the web, the app with its model gateway, Postgres) always runs. Every
 # other service runs under its feature's profile, and COMPOSE_PROFILES in .env
 # names the features that are on (features beside this file lists them, with
 # what each runs and needs; installer.sh --with and --without change them).
@@ -87,7 +87,6 @@ services:
       Database__Username: ${DB_USER:-arena}
       Database__SslMode: ${DB_SSL_MODE:-prefer}
       Database__Password: ${DB_PASSWORD:?set DB_PASSWORD in .env}
-      Gateway__MasterKey: ${GATEWAY_KEY:?set GATEWAY_KEY in .env}
       Engine__ApiKey: ${ENGINE_KEY:?set ENGINE_KEY in .env}
       Engine__FirstModel: ${MODEL:-}
       Engine__DefaultModels: ${DEFAULT_MODELS:-}
@@ -155,39 +154,23 @@ services:
     environment:
       POSTGRES_USER: arena
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-      # The gateway's; the app makes its own.
-      POSTGRES_DB: litellm
+      # The app's (a database the app makes itself otherwise).
+      POSTGRES_DB: llmapp
     volumes: [postgres:/var/lib/postgresql/data]
     # Room for parallel queries' shared memory: Docker's 64 MB fails a large sort or hash join with "could not resize
     # shared memory segment ... No space left on device".
     shm_size: 1g
-    healthcheck: { test: [CMD, pg_isready, -U, arena, -d, litellm], interval: 10s }
+    healthcheck: { test: [CMD, pg_isready, -U, arena, -d, postgres], interval: 10s }
 
-  litellm:
-    <<: *service
-    image: ghcr.io/berriai/litellm:main-stable
-    container_name: litellm
-    command: [--config, /app/arena.yaml, --port, "4000"]
-    environment:
-      LITELLM_MASTER_KEY: ${GATEWAY_KEY}
-      DATABASE_URL: postgresql://${DB_USER:-arena}:${DB_PASSWORD}@${DB_HOST:-postgres}:${DB_PORT:-5432}/litellm${DB_SSL_MODE:+?sslmode=}${DB_SSL_MODE:-}
-      ENGINE_API_BASE: http://llamacpp:8080/v1
-      ENGINE_API_KEY: ${ENGINE_KEY}
-      STORE_MODEL_IN_DB: "True"
-      LITELLM_LOCAL_MODEL_COST_MAP: "True"
-    # Its config, and the hold on each request's longest answer that the config names (arena_limits.py).
-    volumes: [./config/litellm.yaml:/app/arena.yaml:ro, ./config/arena_limits.py:/app/arena_limits.py:ro]
-    depends_on: { postgres: { condition: service_healthy, required: false } }
-
-  # Valkey: the gateway's shared counts when it runs as several replicas (ha.yml), and LMCache's
-  # shared store (LMCACHE_REMOTE). Off until asked for: COMPOSE_PROFILES=ha (its image comes from
-  # Valkey's own registry on ECR, not pulled while the profile is off). On the stack's network
-  # only, never published; append-only, so a restart keeps the counts.
+  # Valkey: LMCache's shared store for the vLLM models' token cache (LMCACHE_REMOTE). Off until
+  # asked for: COMPOSE_PROFILES=valkey (its image comes from Valkey's own registry on ECR, not
+  # pulled while the profile is off). On the stack's network only, never published; append-only,
+  # so a restart keeps what it holds.
   valkey:
     <<: *service
     image: ${VALKEY_IMAGE:-public.ecr.aws/valkey/valkey:8.1-alpine}
     container_name: valkey
-    profiles: [ha]
+    profiles: [valkey]
     command: [valkey-server, --appendonly, "yes", --save, ""]
     volumes: [valkey:/data]
 
@@ -581,7 +564,7 @@ services:
   # browser's IDE), each as its own user with limits (services/workspaces/supervisor.py). Off unless COMPOSE_PROFILES
   # names workspaces. No Docker socket; only the capabilities to switch users and clean up after them. Its network
   # reaches the app (the IDE's requests come through it, and its agents' model calls), code-intel (with the person's own key)
-  # and the internet (the code host, package registries), not the stack's databases, gateway, engines or browser.
+  # and the internet (the code host, package registries), not the stack's databases, engines or browser.
   workspaces:
     <<: *service
     build: { context: .., dockerfile: deploy/services/workspaces/Dockerfile, args: { PRODUCT_NAME: "${PRODUCT_NAME:-}", CODE_INTEL_NAME: "${CODE_INTEL_NAME:-}" } }
@@ -775,7 +758,7 @@ networks:
   studio: { internal: true }
   # Between code-intel and the security scanners only: internal, so no way out of the stack.
   scanning: { internal: true }
-  # Between the app, the gateway and Code Studio's workspaces: not internal (a workspace clones, pushes and installs
+  # Between the app (its model gateway too) and Code Studio's workspaces: not internal (a workspace clones, pushes and installs
   # packages), and nothing else of the stack is on it.
   workspaces: {}
 

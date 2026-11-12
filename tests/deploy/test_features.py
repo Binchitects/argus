@@ -12,7 +12,7 @@ import yaml
 
 DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
 # What always runs: no profile, no feature.
-CORE = {"traefik", "web", "app", "postgres", "litellm"}
+CORE = {"traefik", "web", "app", "postgres"}
 
 
 def features() -> list[dict]:

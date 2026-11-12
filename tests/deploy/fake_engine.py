@@ -409,6 +409,12 @@ def service_image(model: dict[str, dict], svc: str, project: str) -> str:
 
 def compose(st: Store, args: list[str], project: str) -> int:
     s = st.s
+    if "exec" in args and "drop-litellm-database" in args:
+        # The app's command after an upgrade from before 8.0 (FAKE_DROP_RC 3: the import not done yet).
+        rc = int(os.environ.get("FAKE_DROP_RC", "0"))
+        print("LiteLLM's database litellm is dropped: its keys and log are in the app's ledger." if rc == 0
+              else "drop-litellm-database: LiteLLM's keys and log are not brought over yet", file=sys.stdout if rc == 0 else sys.stderr)
+        return rc
     model = compose_model(args, project)
     if "config" in args:
         if os.environ.get("FAKE_CONFIG_FAIL"):

@@ -2,7 +2,9 @@
 """
 The app's own model gateway against LiteLLM, on this stack, back to back (docs/design/own-gateway.md §7):
 the same model, the same person and key, each workload in Gateway:Mode=litellm and then in Gateway:Mode=own
-(switched in the settings, live), a few runs each.
+(switched in the settings, live), a few runs each. That is how commit 17 measured it (docs/measurements/gateway.md);
+from 8.0 LiteLLM is gone and so is the switch: --modes own (the default now) measures the app's own gateway alone.
+gateway-soak.py and gateway-scale-check.py use its helpers.
 
     W1  overhead: short streamed answers one at a time (64 tokens, temperature 0): time to the first token and
         to the end, p50/p95/p99; and the same sent straight to the engine, to see what each gateway adds
@@ -314,6 +316,9 @@ while time.time() < end:
 
 
 def set_mode(admin, mode):
+    if mode == "own":
+        # 8.0 and later: the app's own gateway is the only one, with no switch.
+        return
     status, body = admin.call("PUT", "/api/admin/config", {"changes": [{"key": "Gateway:Mode", "value": mode}]})
     if status != 200:
         sys.exit(f"could not set Gateway:Mode={mode}: {status} {body}")
@@ -436,7 +441,7 @@ def main():
     p.add_argument("--w4", default="single,parallel,staggered,longpaste,overflow,isolation,prefix",
                    help="multiuser-bench.py's scenarios (empty: no W4)")
     p.add_argument("--engine-down", action="store_true", help="W8: stop llama.cpp for a moment in each run")
-    p.add_argument("--modes", default="litellm,own")
+    p.add_argument("--modes", default="own")
     p.add_argument("--out", default=str(ROOT / "gateway-compare.json"))
     args = p.parse_args()
     admin = Session()

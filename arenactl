@@ -53,7 +53,7 @@ RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm6
 DOTNET_SDK_IMAGE = "mcr.microsoft.com/dotnet/sdk:10.0"
 NODE_IMAGE = "node:22-alpine"
 # The secrets compose insists on, as placeholders: an image never depends on them (make-installer.sh does the same).
-PLACEHOLDERS = ["APP_KEY", "DB_PASSWORD", "GATEWAY_KEY", "ENGINE_KEY", "CODE_INTEL_KEY"]
+PLACEHOLDERS = ["APP_KEY", "DB_PASSWORD", "ENGINE_KEY", "CODE_INTEL_KEY"]
 
 
 # ----------------------------------------------------------------------------- output

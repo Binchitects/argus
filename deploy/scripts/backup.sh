@@ -31,8 +31,8 @@
 #                         and keep a copy where the backups are not: without it, they cannot be opened   default none
 #
 # One backup is one directory, BACKUP_DIR/<date>_<time>/:
-#   postgres.sql.gz        pg_dumpall of the gateway database: people, API keys, budgets,
-#                          spend. Taken from the running server, so it is consistent.
+#   postgres.sql.gz        pg_dumpall of every database (the app's: people, chats, API keys,
+#                          credit, the ledger of model requests). Taken from the running server, so it is consistent.
 #   volumes/<name>.tar.gz  every other named volume. SQLite databases inside them (chats,
 #                          the code-intel index and audit) are copied
 #                          with SQLite's online backup, so a write in progress cannot tear them.
@@ -390,16 +390,16 @@ if [[ $ACTION == restore ]]; then
   done
 
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
-    say "==> gateway database"
+    say "==> the databases"
     "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
-    for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1 && break; sleep 2; done
+    for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d postgres >/dev/null 2>&1 && break; sleep 2; done
     sleep 3
     zcat "$FROM/postgres.sql.gz" | "$ENGINE" compose exec -T postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
       || say "  psql reported errors; see $FROM/.restore-psql.log"
     "$ENGINE" compose stop postgres >/dev/null 2>&1
-    say "  restored  postgres (people, keys, budgets, spend)"
+    say "  restored  postgres (people, chats, keys, credit, the ledger)"
   fi
   say ""; say "Done. Start the stack: $ENGINE compose up -d"
   exit 0
@@ -451,9 +451,9 @@ cp -rL "$CFG" "$OUT/config/stack-config" 2>/dev/null || fail "config/ (a link th
 git -C "$ROOT" diff > "$OUT/config/git-local-changes.patch" 2>/dev/null || true
 say "  $(find "$OUT/config" -type f | wc -l) files (.env, $(ls "$OUT/config/compose" | wc -l) compose file(s), config/ with links followed)"
 
-# ---- 2. gateway database -------------------------------------------------------
+# ---- 2. the databases -----------------------------------------------------------
 say "==> postgres"
-if "$ENGINE" exec postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1; then
+if "$ENGINE" exec postgres pg_isready -U "$PG_USER" -d postgres >/dev/null 2>&1; then
   if "$ENGINE" exec postgres pg_dumpall -U "$PG_USER" --clean --if-exists | gzip -6 > "$OUT/postgres.sql.gz" \
      && zcat "$OUT/postgres.sql.gz" | tail -n 5 | grep -q "PostgreSQL database cluster dump complete"; then
     say "  postgres.sql.gz $(du -h "$OUT/postgres.sql.gz" | cut -f1) (pg_dumpall)"

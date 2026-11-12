@@ -11,7 +11,7 @@ public sealed class HelmChartTests
         var chart = Path.Combine(Deploy, "helm", "arena", "files");
         var copies = new Dictionary<string, string>
         {
-            ["litellm.yaml"] = "config/litellm.yaml", ["code-intel.yaml"] = "config/code-intel.yaml", ["searxng.yml"] = "config/searxng.yml",
+            ["code-intel.yaml"] = "config/code-intel.yaml", ["searxng.yml"] = "config/searxng.yml",
             ["alertmanager.yml"] = "config/alertmanager.yml", ["loki.yml"] = "config/loki.yml", ["prometheus/prometheus.yml"] = "config/prometheus/prometheus.yml",
             ["router.sh"] = "services/llamacpp/router.sh", ["sd-serve.sh"] = "services/sd-serve.sh",
         };
