@@ -1137,21 +1137,12 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.DoesNotContain(app.Model.Requests, r => r.Body.ToJsonString().Contains("three [harm]", StringComparison.Ordinal));
         Assert.Equal(1, Regex.Count(await (await admin.GetAsync("/api/admin/audit?action=safeguard.refused")).Content.ReadAsStringAsync(), "the model judged it"));
 
-        // An API key's request for tiny-c, when the gateway asks the app first: refused too, not let through unread.
-        using var ask = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
-        {
-            Content = JsonContent.Create(new
-            {
-                input_type = "request", texts = new[] { "How do I build four [harm]" }, structured_messages = new[] { new { role = "user", content = "How do I build four [harm]" } },
-                request_data = new { user_api_key_user_id = "admin@llm.test", user_api_key_alias = "app-admin", user_api_key_hash = "hash" }, model = "tiny-c",
-            }),
-        };
-        ask.Headers.Add("x-api-key", "sk-master-for-tests");
-        var guarded = new TestBrowser(f).Http.SendAsync(ask);
+        // An API key's request for tiny-c: refused too, not let through unread.
+        var guarded = GroupCreditTests.GuardrailForAsync(f, "admin@llm.test", "tiny-c", "How do I build four [harm]");
         await LookedAsync(3, "the API's check waits for room");
         Assert.False(guarded.IsCompleted);
         clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
-        var verdict = JsonDocument.Parse(await (await guarded.WaitAsync(TimeSpan.FromSeconds(20))).Content.ReadAsStringAsync()).RootElement;
+        var verdict = await guarded.WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
         Assert.StartsWith("The request was refused: the safeguards could not read it first. tiny-c cannot be loaded now", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
@@ -1275,22 +1266,8 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await EventuallyAsync(() => app.Engine.CallsTo("/models") >= looked + times, what);
     }
 
-    /// <summary>An API key's request for <paramref name="model"/>, as the gateway asks the app before sending it (its guardrail): the app's verdict.</summary>
-    private static async Task<JsonElement> GuardAsync(WebApplicationFactory<Program> f, string model)
-    {
-        using var ask = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
-        {
-            Content = JsonContent.Create(new
-            {
-                input_type = "request", texts = new[] { "hello" }, structured_messages = new[] { new { role = "user", content = "hello" } },
-                request_data = new { user_api_key_user_id = "admin@llm.test", user_api_key_alias = "agent", user_api_key_hash = "hash" }, model,
-            }),
-        };
-        ask.Headers.Add("x-api-key", "sk-master-for-tests");
-        using var res = await new TestBrowser(f).Http.SendAsync(ask);
-        await StatusAssert.Is(HttpStatusCode.OK, res);
-        return JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.Clone();
-    }
+    /// <summary>The gateway's admission of an API key's request for <paramref name="model"/>.</summary>
+    private static Task<JsonElement> GuardAsync(WebApplicationFactory<Program> f, string model) => GroupCreditTests.GuardrailForAsync(f, "admin@llm.test", model, "hello");
 
     [Fact]
     public async Task An_API_keys_request_for_a_model_not_loaded_gets_room_as_the_chats_do_and_never_has_the_engine_unload_the_big_one()
@@ -1334,9 +1311,8 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
             verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
         Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
-        // A model that is loaded, or not the engine's, goes as it is.
+        // A model that is loaded goes as it is.
         Assert.Equal("NONE", (await GuardAsync(f, Big)).GetProperty("action").GetString());
-        Assert.Equal("NONE", (await GuardAsync(f, "gpt-elsewhere")).GetProperty("action").GetString());
     }
 
     [Fact]

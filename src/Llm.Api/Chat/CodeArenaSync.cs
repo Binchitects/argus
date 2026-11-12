@@ -445,23 +445,16 @@ public static partial class CodeArenaSync
 
     internal static async Task<(AppUser? Me, IResult? Refusal)> CallerAsync(HttpContext http, McpPeople people)
     {
-        try
+        var caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, http.RequestAborted);
+        if (caller.User is not { } me)
         {
-            var caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, http.RequestAborted);
-            if (caller.User is not { } me)
-            {
-                return (null, AuthEndpoints.Problem(401, "key", caller.Refusal ?? McpPeople.NoKey));
-            }
-            // Code Arena is a feature of its own (Admin → Access).
-            var access = http.RequestServices.GetRequiredService<Access.AccessService>();
-            return (await access.MayAsync(me, Core.Access.Permissions.CodeArena, http.RequestAborted))
-                ? (me, null)
-                : (null, AuthEndpoints.Problem(403, "feature", "Code Arena is not among what you may use: ask an admin."));
+            return (null, AuthEndpoints.Problem(401, "key", caller.Refusal ?? McpPeople.NoKey));
         }
-        catch (GatewayException)
-        {
-            return (null, AuthEndpoints.Problem(503, "gateway", "The gateway cannot say whose that key is now: try again in a moment."));
-        }
+        // Code Arena is a feature of its own (Admin → Access).
+        var access = http.RequestServices.GetRequiredService<Access.AccessService>();
+        return (await access.MayAsync(me, Core.Access.Permissions.CodeArena, http.RequestAborted))
+            ? (me, null)
+            : (null, AuthEndpoints.Problem(403, "feature", "Code Arena is not among what you may use: ask an admin."));
     }
 
     private static IResult Gone() => AuthEndpoints.Problem(404, "gone", "That chat is not there any more: it was deleted.");

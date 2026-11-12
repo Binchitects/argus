@@ -8,8 +8,6 @@ public sealed class DashboardOptions
     /// <summary>The dashboard files, in Grafana's JSON format, mounted read-only.</summary>
     public string Path { get; set; } = "/dashboards";
 
-    /// <summary>The database behind the `litellm-db` datasource.</summary>
-    public string SqlDatabase { get; set; } = "litellm";
 
     public TimeSpan StatementTimeout { get; set; } = TimeSpan.FromSeconds(15);
     public int MaxRows { get; set; } = 5000;

@@ -211,15 +211,7 @@ public static class RemoteServerEndpoints
     {
         health.Forget(id);
         keys.Wake();
-        try
-        {
-            await catalog.SyncGatewayAsync(ct);
-            return new { id, warning = (string?)null };
-        }
-        catch (GatewayException ex)
-        {
-            chatModels.Forget();
-            return new { id, warning = (string?)$"Saved, but the gateway could not be updated yet ({ex.Message}); it is tried again within a minute." };
-        }
+        await catalog.SyncGatewayAsync(ct);
+        return new { id, warning = (string?)null };
     }
 }

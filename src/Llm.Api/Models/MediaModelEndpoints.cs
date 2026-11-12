@@ -288,14 +288,7 @@ public static partial class MediaModelEndpoints
     private static async Task AfterAsync(MediaControl media, ModelCatalog catalog, CancellationToken ct)
     {
         await media.ChangedAsync(ct);
-        try
-        {
-            await catalog.SyncGatewayAsync(ct);
-        }
-        catch (GatewayException)
-        {
-            // In step within a minute (the engine watcher).
-        }
+        await catalog.SyncGatewayAsync(ct);
     }
 
     /// <summary>Its files not in the library yet: it waits for them (a download, a copy), and says so.</summary>

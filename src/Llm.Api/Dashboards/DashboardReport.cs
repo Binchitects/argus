@@ -340,7 +340,7 @@ public static class Units
 }
 
 /// <summary>Every dashboard a person may see, added to another report (Accounting's), each part titled with its dashboard.</summary>
-public sealed class DashboardBook(DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
+public sealed class DashboardBook(DashboardStore store, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
     Microsoft.Extensions.Options.IOptions<DashboardOptions> options, TimeProvider clock, Access.AccessService access, Operations.Features features)
 {
     public async Task<ReportDocument> AppendAsync(ReportDocument doc, Core.Identity.AppUser me, CancellationToken ct)
@@ -349,7 +349,7 @@ public sealed class DashboardBook(DashboardStore store, SqlDatasource sql, Gatew
         {
             return doc;
         }
-        var src = new PanelSources(sql, ledger, prom, loki, options.Value, clock);
+        var src = new PanelSources(ledger, prom, loki, options.Value, clock);
         var charts = doc.Charts.ToList();
         var tables = doc.Tables.ToList();
         var q = new PanelQuery(doc.From, doc.To);

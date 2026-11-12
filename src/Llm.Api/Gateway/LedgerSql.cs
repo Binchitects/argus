@@ -30,14 +30,14 @@ public sealed class LedgerSql(IConfiguration config, IOptions<DashboardOptions> 
             cmd.Parameters.AddWithValue(name, value);
         }
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var columns = Enumerable.Range(0, reader.FieldCount).Select(i => new Column(reader.GetName(i), SqlDatasource.TypeOf(reader.GetFieldType(i)))).ToList();
+        var columns = Enumerable.Range(0, reader.FieldCount).Select(i => new Column(reader.GetName(i), SqlRows.TypeOf(reader.GetFieldType(i)))).ToList();
         var rows = new List<object?[]>();
         while (await reader.ReadAsync(ct))
         {
             var row = new object?[reader.FieldCount];
             for (var i = 0; i < row.Length; i++)
             {
-                row[i] = reader.IsDBNull(i) ? null : SqlDatasource.Normalise(reader.GetValue(i));
+                row[i] = reader.IsDBNull(i) ? null : SqlRows.Normalise(reader.GetValue(i));
             }
             rows.Add(row);
         }

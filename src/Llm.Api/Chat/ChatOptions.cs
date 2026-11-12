@@ -3,8 +3,6 @@ namespace Llm.Api.Chat;
 /// <summary>Configuration section "Chat" (most of it defaults from the Stack and code-intel sections).</summary>
 public sealed class ChatOptions
 {
-    /// <summary>LiteLLM, reached inside the network. The master key comes from Gateway:MasterKey.</summary>
-    public string GatewayUrl { get; set; } = "http://litellm:4000";
 
     public int MaxToolRounds { get; set; } = 8;
 
@@ -47,7 +45,6 @@ public sealed class ChatOptions
 
     /// <summary>The most people a room holds, its owner and its groups' members included; 0: no limit.</summary>
     public int RoomMostPeople { get; set; } = 50;
-    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Sub-agents of one answer that run at once (the Sub-agents tool); the others wait their turn.</summary>
     public int AgentsAtOnce { get; set; } = 3;
@@ -134,9 +131,9 @@ public static class ThinkingPresets
     }
 
     /// <summary>
-    /// What reaches the model's chat template. A top-level reasoning_effort is dropped
-    /// by LiteLLM for this backend (measured); chat_template_kwargs arrives. "off" is
-    /// the switch that really turns thinking off.
+    /// What reaches the model's chat template: chat_template_kwargs, which every engine
+    /// passes to it (a top-level reasoning_effort was dropped on the way before 8.0).
+    /// "off" is the switch that really turns thinking off.
     /// </summary>
     public static System.Text.Json.Nodes.JsonObject? TemplateKwargs(string? level) => level switch
     {

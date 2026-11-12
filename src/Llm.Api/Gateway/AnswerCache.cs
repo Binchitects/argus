@@ -363,11 +363,10 @@ public sealed class AnswerCache(AppDbContext db, KeyBook book, AnswerCacheState 
 }
 
 /// <summary>
-/// The completions of API keys, by way of the app: Traefik sends gateway.DOMAIN's /v1/chat/completions
-/// (and the other ways agents ask) here whenever the app is up (/healthz), and straight to LiteLLM
-/// when it is down. The key's line, the fair line, the prompt log and the answer cache (when on) are
-/// here; everything the cache does not answer goes on to LiteLLM as it came, with the caller's own
-/// key, and streams back.
+/// The completions of API keys: Traefik sends gateway.DOMAIN's /v1/chat/completions (and the other
+/// ways agents ask) to the app. The key's line, the fair line, the prompt log and the answer cache
+/// (when on) are here; everything the cache does not answer goes on to the app's own gateway, and
+/// streams back.
 /// </summary>
 public static class AnswerCacheEndpoints
 {
@@ -405,12 +404,6 @@ public static class AnswerCacheEndpoints
         services.AddScoped<Tags.TagSummaries>();
         services.AddScoped<OwnKeys>();
         services.AddScoped<ApiKeys>();
-        services.AddHttpClient(AnswerCache.Client, (sp, c) =>
-        {
-            c.BaseAddress = new Uri(sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.Url);
-            // An answer streams for as long as the gateway allows (its own timeout).
-            c.Timeout = Timeout.InfiniteTimeSpan;
-        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false });
         return services;
     }
 
@@ -423,7 +416,7 @@ public static class AnswerCacheEndpoints
         // key's line too, not cached.
         foreach (var path in new[] { "/v1/messages", "/messages", "/v1/responses", "/responses", "/v1/completions", "/completions" })
         {
-            // A browser's preflight (OPTIONS) is passed on as it is.
+            // A browser's preflight (OPTIONS) is answered too.
             app.MapMethods(path, ["POST", "OPTIONS"], ProxyAsync).AllowAnonymous("The OpenAI- and Anthropic-style API: the API key is checked.").DisableAntiforgery();
         }
 
@@ -498,7 +491,7 @@ public static class AnswerCacheEndpoints
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route, Chat.AnswerGate gate, KeyPeople people,
+    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, KeyLine line, Chat.EngineRoute route, Chat.AnswerGate gate, KeyPeople people,
         PromptLogWriter prompts)
     {
         var ct = http.RequestAborted;
@@ -517,28 +510,29 @@ public static class AnswerCacheEndpoints
         byte[]? body = null;
         JsonObject? json = null;
         CacheLookup? lookup = null;
-        // The app's own gateway (Gateway:Mode own): the request read whole and let in here (Admission), then sent to the
-        // engine by ModelGateway instead of LiteLLM, booked in the ledger.
+        // The request read whole and let in here (Admission), then sent to the engine by the app's own gateway
+        // (ModelGateway), booked in the ledger.
         var own = http.RequestServices.GetRequiredService<ModelGateway>();
         if (KeyMedia.Preflight(http))
         {
             return;
         }
         // Anthropic's Messages API, turned into a chat completion here and its answer back into Anthropic's shapes.
-        var anthropic = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/messages" or "/messages";
+        var anthropic = HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/messages" or "/messages";
         // OpenAI's Responses API (Codex) likewise; the legacy completions (Code Arena's editor) passed to the engine as they are.
-        var responses = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/responses" or "/responses";
-        var legacy = own.ForApi && HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/completions" or "/completions";
+        var responses = HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/responses" or "/responses";
+        var legacy = HttpMethods.IsPost(request.Method) && request.Path.Value is "/v1/completions" or "/completions";
         var translated = anthropic || responses;
-        var ownMode = (completions || translated || legacy) && own.ForApi;
-        if (ownMode)
+        if (!(completions || translated || legacy))
         {
-            http.Response.Headers.AccessControlAllowOrigin = "*";
+            http.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+            http.Response.Headers.Allow = "POST, OPTIONS";
+            return;
         }
+        http.Response.Headers.AccessControlAllowOrigin = "*";
         Task FailAsync(int status, string type, string message, int? retryAfter = null, IReadOnlyDictionary<string, string>? headers = null) =>
             anthropic ? AnthropicErrorAsync(http, status, message, retryAfter, headers, ct) : OwnErrorAsync(http, status, type, message, retryAfter, headers, ct);
-        Admitted? admitted = null;
-        if (ownMode)
+        Admitted admitted;
         {
             using var whole = new MemoryStream();
             var chunk = new byte[64 * 1024];
@@ -594,63 +588,12 @@ public static class AnswerCacheEndpoints
                 await FailAsync(refusal.Status, refusal.Type, refusal.Message, refusal.RetryAfter, refusal.Headers);
                 return;
             }
-            admitted = letIn;
+            admitted = letIn!;
             // A text the safeguards masked goes masked.
             body = Encoding.UTF8.GetBytes(json.ToJsonString());
             if (!translated && !legacy && cache.Options.On && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
             {
                 lookup = await cache.LookupAsync(key!, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
-            }
-        }
-        if (completions && body is null && cache.Options.On && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostCachedRequest && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
-        {
-            body = new byte[request.ContentLength.Value];
-            var read = 0;
-            int n;
-            while (read < body.Length && (n = await request.Body.ReadAsync(body.AsMemory(read), ct)) > 0)
-            {
-                read += n;
-            }
-            if (read < body.Length)
-            {
-                http.Response.StatusCode = StatusCodes.Status400BadRequest;
-                return;
-            }
-            try
-            {
-                json = JsonNode.Parse(body) as JsonObject;
-            }
-            catch (JsonException)
-            {
-                // Not JSON: the gateway says what is wrong with it.
-            }
-            if (json is not null)
-            {
-                lookup = await cache.LookupAsync(key, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
-            }
-        }
-        // An agent's chat completions to a model of this engine: read whole (when not already), to pin its session.
-        if (completions && body is null && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostPinnedRequest)
-        {
-            body = new byte[request.ContentLength.Value];
-            var got = 0;
-            int r;
-            while (got < body.Length && (r = await request.Body.ReadAsync(body.AsMemory(got), ct)) > 0)
-            {
-                got += r;
-            }
-            if (got < body.Length)
-            {
-                http.Response.StatusCode = StatusCodes.Status400BadRequest;
-                return;
-            }
-            try
-            {
-                json = JsonNode.Parse(body) as JsonObject;
-            }
-            catch (JsonException)
-            {
-                // Not JSON: the gateway says what is wrong with it.
             }
         }
         var streamed = json?["stream"] is JsonValue s && s.TryGetValue<bool>(out var on) && on;
@@ -795,42 +738,13 @@ public static class AnswerCacheEndpoints
             }
             body = Encoding.UTF8.GetBytes(json.ToJsonString());
         }
-        using var forward = new HttpRequestMessage(new HttpMethod(request.Method), new Uri(request.Path + request.QueryString, UriKind.Relative))
-        {
-            Content = body is not null ? new ByteArrayContent(body) : new StreamContent(request.Body),
-        };
-        foreach (var (name, values) in request.Headers)
-        {
-            if (!Dropped.Contains(name))
-            {
-                forward.Headers.TryAddWithoutValidation(name, (IEnumerable<string?>)values);
-            }
-        }
-        if (request.ContentType is { } type)
-        {
-            forward.Content.Headers.TryAddWithoutValidation("Content-Type", type);
-        }
-        if (body is not null)
-        {
-            forward.Content.Headers.ContentLength = body.Length;
-        }
-        else if (request.ContentLength is { } length)
-        {
-            forward.Content.Headers.ContentLength = length;
-        }
-        forward.Headers.TryAddWithoutValidation("X-Forwarded-For", http.Connection.RemoteIpAddress?.ToString());
-        forward.Headers.TryAddWithoutValidation("X-Forwarded-Proto", request.Scheme);
-        forward.Headers.TryAddWithoutValidation("X-Forwarded-Host", request.Host.Value);
-
         HttpResponseMessage res;
         try
         {
-            res = ownMode && admitted is not null
-                ? await own.ChatAsync(json!, OwnCaller(admitted, json!, http.RequestServices.GetRequiredService<IServiceScopeFactory>()),
-                    route.FallbackOf(json!["model"]?.ToString()) is { } fb ? [fb] : [], work, passErrors: true, endpoint: legacy ? "/completions" : "/chat/completions")
-                : await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, work);
+            res = await own.ChatAsync(json!, OwnCaller(admitted, json!, http.RequestServices.GetRequiredService<IServiceScopeFactory>()),
+                route.FallbackOf(json!["model"]?.ToString()) is { } fb ? [fb] : [], work, passErrors: true, endpoint: legacy ? "/completions" : "/chat/completions");
         }
-        catch (Chat.ChatGatewayException ex) when (ownMode)
+        catch (Chat.ChatGatewayException ex)
         {
             // The engine refused or could not be reached: the caller gets its words, in the OpenAI shape.
             var status = ex.Status ?? StatusCodes.Status502BadGateway;
@@ -841,13 +755,6 @@ public static class AnswerCacheEndpoints
         catch (OperationCanceledException) when (StoppedByAdmin())
         {
             await StopAsync(sse: false);
-            return;
-        }
-        catch (HttpRequestException)
-        {
-            logged?.End(PromptLogEntry.Failed, StatusCodes.Status502BadGateway, error: "The model gateway is not reachable right now.");
-            http.Response.StatusCode = StatusCodes.Status502BadGateway;
-            await http.Response.WriteAsJsonAsync(new { error = new { message = "The model gateway is not reachable right now.", type = "gateway_unreachable", code = "502" } }, ct);
             return;
         }
         using (res)

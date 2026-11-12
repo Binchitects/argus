@@ -27,8 +27,8 @@ public sealed record ErasedPart(string What, long Count);
 /// portability) is their export; a correction is made on their profile; restriction and objection stop everything that learns from
 /// their data; erasure removes everything of theirs, clears them out of what others keep, and certifies what is kept and why.
 /// </summary>
-public sealed partial class DataRequests(AppDbContext db, PeopleService people, Audit audit, Gateway.SpendLog spend, StoragePlaces places,
-    IOptionsMonitor<StorageOptions> storage, Notifications.Notifier notifier, TimeProvider clock, ILogger<DataRequests> logger)
+public sealed partial class DataRequests(AppDbContext db, PeopleService people, Audit audit, StoragePlaces places,
+    IOptionsMonitor<StorageOptions> storage, Notifications.Notifier notifier, TimeProvider clock)
 {
     /// <summary>How long the company has to answer (Article 12(3): one month).</summary>
     public static readonly TimeSpan Month = TimeSpan.FromDays(30);
@@ -240,18 +240,6 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
         {
             cleared.Add(new ErasedPart("their requests in the app's ledger of model requests: kept for the company's totals, no longer theirs", ledger));
         }
-        try
-        {
-            if (person.Email is { } email && await spend.ForgetAsync(email, ct) is > 0 and var rows)
-            {
-                cleared.Add(new ErasedPart("their requests in the gateway's log: kept for the company's totals, with who, their address and what was sent and answered cleared", rows));
-            }
-        }
-        catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
-        {
-            LogGatewayLog(logger, ex.Message);
-            kept.Add($"Their requests in the gateway's log could not be cleared ({ex.Message}): clear them by hand, where \"user\" is {person.Email}.");
-        }
         var audited = await db.AuditEvents.CountAsync(e => e.ActorId == userId || e.Target == person.UserName, ct);
         kept.Add($"{audited} entries of the audit log that name them: the law requires them kept (GDPR 17(3)(b) and (e); HIPAA keeps such records six years), and the audit log's hash chain forbids changing them.");
         kept.Add("This request and its certificate, naming them: the proof that the request was answered.");
@@ -304,6 +292,4 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
     private async Task<int> ExecAsync(string sql, Guid id, CancellationToken ct) =>
         await db.Database.ExecuteSqlRawAsync(sql, [new NpgsqlParameter("id", id)], ct);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "An erasure could not clear the gateway's log: {Reason}")]
-    private static partial void LogGatewayLog(ILogger logger, string reason);
 }

@@ -321,15 +321,7 @@ public static class StudioEndpoints
     {
         var ct = http.RequestAborted;
         ArenaMcp.McpCaller caller;
-        try
-        {
-            caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, ct);
-        }
-        catch (Gateway.GatewayException)
-        {
-            http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            return;
-        }
+        caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, ct);
         if (caller.User is not { } me)
         {
             http.Response.StatusCode = StatusCodes.Status401Unauthorized;

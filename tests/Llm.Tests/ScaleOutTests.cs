@@ -370,18 +370,18 @@ public sealed class ScaleOutTests(AppFixture app)
             new { remote = "big-remote", name = "pooled", parallel = 4 }, new { remote = "small-remote", name = "solo", parallel = 2 },
         ])));
         // One copy: as before, no pool.
-        var alone = Assert.Single(gateway.Managed.Values, m => m.Name == "pooled");
+        var alone = Assert.Single(await app.RoutesOfAsync(f), m => m.Name == "pooled");
         Assert.Null(alone.Params["max_parallel_requests"]);
         Assert.Null(alone.Info["llm_app_pool"]);
 
         var second = await admin.PostAsync("/api/admin/servers", Server("GPU 2", [new { remote = "big-remote", name = "pooled", parallel = 2 }]));
         await StatusAssert.Is(HttpStatusCode.Created, second);
-        var pool = gateway.Managed.Values.Where(m => m.Name == "pooled").ToList();
+        var pool = (await app.RoutesOfAsync(f)).Where(m => m.Name == "pooled").ToList();
         Assert.Equal(2, pool.Count);
         Assert.Equal([2, 4], pool.Select(m => m.Params["max_parallel_requests"]!.GetValue<int>()).Order());
         Assert.Equal([2, 4], pool.Select(m => m.Params["weight"]!.GetValue<int>()).Order());
         Assert.All(pool, m => Assert.Equal(2, m.Info["llm_app_pool"]!.GetValue<int>()));
-        var solo = Assert.Single(gateway.Managed.Values, m => m.Name == "solo");
+        var solo = Assert.Single(await app.RoutesOfAsync(f), m => m.Name == "solo");
         Assert.Null(solo.Params["max_parallel_requests"]);
         // The slots are kept and shown.
         var listed = (await admin.JsonAsync(await admin.GetAsync("/api/admin/servers"))).EnumerateArray().Single(s => s.GetProperty("name").GetString() == "GPU 2");
@@ -389,7 +389,7 @@ public sealed class ScaleOutTests(AppFixture app)
 
         // One server leaves: the other copy is on its own again.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri($"/api/admin/servers/{(await admin.JsonAsync(second)).GetProperty("id").GetGuid()}", UriKind.Relative)));
-        alone = Assert.Single(gateway.Managed.Values, m => m.Name == "pooled");
+        alone = Assert.Single(await app.RoutesOfAsync(f), m => m.Name == "pooled");
         Assert.Null(alone.Params["max_parallel_requests"]);
     }
 }

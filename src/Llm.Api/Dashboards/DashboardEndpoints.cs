@@ -13,14 +13,14 @@ namespace Llm.Api.Dashboards;
 public sealed record PanelQuery(DateTimeOffset From, DateTimeOffset To, long? IntervalMs = null, int? MaxDataPoints = null, Dictionary<string, string[]>? Vars = null);
 
 /// <summary>Where a dashboard's panels are read from.</summary>
-public sealed record PanelSources(SqlDatasource Sql, GatewayDatasource Ledger, PromDatasource Prom, LokiDatasource Loki, DashboardOptions Options, TimeProvider Clock);
+public sealed record PanelSources(GatewayDatasource Ledger, PromDatasource Prom, LokiDatasource Loki, DashboardOptions Options, TimeProvider Clock);
 
 public static partial class DashboardEndpoints
 {
     public static readonly TimeSpan MaxRange = TimeSpan.FromDays(400);
 
-    /// <summary>The datasources the app runs: LiteLLM's database (SQL), Prometheus and Loki.</summary>
-    private static readonly HashSet<string> Served = [SqlDatasource.Uid, GatewayDatasource.Uid, PromDatasource.Uid, LokiDatasource.Uid];
+    /// <summary>The datasources the app runs: its ledger (SQL), Prometheus and Loki.</summary>
+    private static readonly HashSet<string> Served = [GatewayDatasource.Uid, PromDatasource.Uid, LokiDatasource.Uid];
 
     public static void MapDashboards(this IEndpointRouteBuilder app)
     {
@@ -51,13 +51,13 @@ public static partial class DashboardEndpoints
         g.MapGet("/{uid}/variables", async (string uid, DateTimeOffset? from, DateTimeOffset? to, DashboardStore store, PromDatasource prom, LokiDatasource loki,
             ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
             store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await VariablesAsync(uid, from, to, store, prom, loki, ct));
-        g.MapGet("/{uid}/export", (string uid, DateTimeOffset from, DateTimeOffset to, string? format, HttpRequest request, DashboardStore store, SqlDatasource sql,
+        g.MapGet("/{uid}/export", (string uid, DateTimeOffset from, DateTimeOffset to, string? format, HttpRequest request, DashboardStore store,
             GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki, IOptions<DashboardOptions> options, TimeProvider clock, ClaimsPrincipal user,
             UserManager<Core.Identity.AppUser> users, AccessService access, Identity.Audit audit, CancellationToken ct) =>
-            ExportAsync(uid, from, to, format, request, store, new PanelSources(sql, ledger, prom, loki, options.Value, clock), user, users, access, audit, ct));
-        g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
+            ExportAsync(uid, from, to, format, request, store, new PanelSources(ledger, prom, loki, options.Value, clock), user, users, access, audit, ct));
+        g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
             IOptions<DashboardOptions> options, TimeProvider clock, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
-            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, ledger, prom, loki, options, clock, ct));
+            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, ledger, prom, loki, options, clock, ct));
     }
 
     /// <summary>The variables a link or an export names, Grafana's way: var-NAME=value, as many as chosen.</summary>
@@ -210,7 +210,7 @@ public static partial class DashboardEndpoints
     [GeneratedRegex(@"^\s*label_values\(\s*(?:(?<match>.+?)\s*,\s*)?(?<label>[a-zA-Z_]\w*)\s*\)\s*$")]
     private static partial Regex LabelValues();
 
-    private static async Task<IResult> QueryAsync(string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
+    private static async Task<IResult> QueryAsync(string uid, int key, PanelQuery q, DashboardStore store, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
         IOptions<DashboardOptions> options, TimeProvider clock, CancellationToken ct)
     {
         if (store.Find(uid) is not { } d || key < 0 || key >= d.Panels.Count)
@@ -226,7 +226,7 @@ public static partial class DashboardEndpoints
         {
             return AuthEndpoints.Problem(400, "unsupported", "This panel's datasource is not served by the app.");
         }
-        var (interval, results) = await RunAsync(d, panel, q, new PanelSources(sql, ledger, prom, loki, options.Value, clock), ct);
+        var (interval, results) = await RunAsync(d, panel, q, new PanelSources(ledger, prom, loki, options.Value, clock), ct);
         return Results.Ok(new { intervalMs = (long)interval.TotalMilliseconds, results });
     }
 
@@ -236,7 +236,7 @@ public static partial class DashboardEndpoints
     /// </summary>
     public static async Task<(TimeSpan Interval, List<TargetResult> Results)> RunAsync(Dashboard d, Panel panel, PanelQuery q, PanelSources src, CancellationToken ct)
     {
-        var (sql, ledger, prom, loki, o, clock) = src;
+        var (ledger, prom, loki, o, clock) = src;
         if (panel.Live)
         {
             // The value now: the window the page shows does not change it.
@@ -282,8 +282,7 @@ public static partial class DashboardEndpoints
                 {
                     PromDatasource.Uid => await PromTargetAsync(t, panel, q, interval, vars, prom, o, ct),
                     LokiDatasource.Uid => await LokiTargetAsync(t, panel, q, interval, vars, loki, o, ct),
-                    GatewayDatasource.Uid => SqlTarget(t, await ledger.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct)),
-                    _ => SqlTarget(t, await sql.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct)),
+                    _ => SqlTarget(t, await ledger.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct)),
                 });
             }
             catch (Exception ex) when (ex is Npgsql.NpgsqlException or FormatException or InvalidOperationException or DatasourceException or HttpRequestException)

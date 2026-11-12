@@ -53,7 +53,7 @@ public sealed class StudioException(int status, string message) : Exception(mess
 /// user, its agent with a key of its own at the gateway), put to sleep, and deleted with their files and their key.
 /// </summary>
 public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, IOptionsMonitor<WorkspacesOptions> options, IOptions<AuthOptions> auth,
-    GitLabAsPerson gitlab, Gateway.ApiKeys keys, Models.KeyAccess keyAccess, Gateway.RateLimits rateLimits, Operations.Modules modules, Operations.CompanyCa companyCa,
+    GitLabAsPerson gitlab, Gateway.ApiKeys keys, Operations.Modules modules, Operations.CompanyCa companyCa,
     TimeProvider clock)
 {
     public const string Client = "workspaces";
@@ -130,8 +130,7 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
         if (workspace.KeyCipher is null)
         {
             var alias = $"studio:{workspace.Id:N}";
-            var (made, _) = await keys.MakeAsync(me, Core.Gateway.ApiKey.Studio, alias, await keyAccess.ListForAsync(me, ct), keyAccess.MaxParallel, (await rateLimits.ForAsync(me, ct)).Key,
-                workspace: workspace.Id, ct: ct);
+            var (made, _) = await keys.MakeAsync(me, Core.Gateway.ApiKey.Studio, alias, workspace: workspace.Id, ct: ct);
             (workspace.KeyCipher, workspace.KeyAlias) = (SettingsCrypto.Encrypt(made, DataKey), alias);
             await db.SaveChangesAsync(ct);
         }

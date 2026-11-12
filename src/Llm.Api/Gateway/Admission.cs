@@ -99,7 +99,7 @@ public sealed class Admission(KeyBook keys, AppDbContext db, Microsoft.AspNetCor
             return (null, new(400, "credit", short_, "credit"));
         }
 
-        // The safeguards: every text of the messages, as LiteLLM's guardrail gave them; a masked text goes masked.
+        // The safeguards: every text of the messages; a masked text goes masked.
         var (texts, places) = Texts(body);
         var verdict = await safeguards.CheckApiAsync(user, [.. texts.Select(t => t.Text)], texts.LastOrDefault(t => t.Question)?.Text, model, ct, places);
         if (verdict.Action == "BLOCKED")
@@ -123,7 +123,7 @@ public sealed class Admission(KeyBook keys, AppDbContext db, Microsoft.AspNetCor
     /// <summary>The tighter of two limits (null: none).</summary>
     public static int? Tighter(int? a, int? b) => a is null ? b : b is null ? a : Math.Min(a.Value, b.Value);
 
-    /// <summary>A minute's limit reached: the sentence Code Arena and LiteLLM's clients read, and the headers they read.</summary>
+    /// <summary>A minute's limit reached: the sentence Code Arena and OpenAI's clients read, and the headers they read.</summary>
     public static AdmissionRefusal Limited(string kind, int limit, int remaining, int reset) => new(429, "rate_limit_error",
         $"Rate limit reached for this key: too many {kind} this minute. Limit type: {kind}. Current limit: {limit.ToString(CultureInfo.InvariantCulture)}", "rate_limit",
         Math.Max(1, reset), new Dictionary<string, string>

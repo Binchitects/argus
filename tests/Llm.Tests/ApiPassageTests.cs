@@ -17,38 +17,23 @@ public sealed class ApiPassageTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "NET-01")]
-    public async Task The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key()
+    public async Task A_key_the_gateway_does_not_know_gets_no_model_list_nor_embeddings_and_nothing_is_passed_on()
     {
         using var client = Gateway();
         var key = "sk-passage-" + Guid.NewGuid().ToString("N")[..8];
         using var list = new HttpRequestMessage(HttpMethod.Get, new Uri("/v1/models", UriKind.Relative));
         list.Headers.Authorization = new("Bearer", key);
         var listed = await client.SendAsync(list);
-        if (AppFixture.GatewayMode == Llm.Api.Gateway.GatewayModes.Own)
-        {
-            // The app's own gateway answers them itself, the key checked first: one it does not know gets nothing, and
-            // nothing is passed on (OwnApiTests: what a known key is listed).
-            await StatusAssert.Is(HttpStatusCode.Unauthorized, listed);
-            using var unknown = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/embeddings", UriKind.Relative))
-            {
-                Content = new StringContent("""{"model":"embed","input":"hello"}""", Encoding.UTF8, "application/json"),
-            };
-            unknown.Headers.Authorization = new("Bearer", key);
-            await StatusAssert.Is(HttpStatusCode.Unauthorized, await client.SendAsync(unknown));
-            Assert.DoesNotContain(app.Model.Passed, p => p.Item2 == key);
-            return;
-        }
-        await StatusAssert.Is(HttpStatusCode.OK, listed);
-        Assert.Equal("Qwen3.8-Flash-Next", JsonDocument.Parse(await listed.Content.ReadAsStringAsync()).RootElement.GetProperty("data")[0].GetProperty("id").GetString());
-
-        using var embed = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/embeddings", UriKind.Relative))
+        // The gateway answers them itself, the key checked first: one it does not know gets nothing, and nothing is passed
+        // on (OwnApiTests: what a known key is listed).
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, listed);
+        using var unknown = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/embeddings", UriKind.Relative))
         {
             Content = new StringContent("""{"model":"embed","input":"hello"}""", Encoding.UTF8, "application/json"),
         };
-        embed.Headers.Authorization = new("Bearer", key);
-        await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(embed));
-        Assert.Contains(app.Model.Passed, p => p == ("/v1/models", key));
-        Assert.Contains(app.Model.Passed, p => p == ("/v1/embeddings", key));
+        unknown.Headers.Authorization = new("Bearer", key);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await client.SendAsync(unknown));
+        Assert.DoesNotContain(app.Model.Passed, p => p.Item2 == key);
     }
 
     [Theory]

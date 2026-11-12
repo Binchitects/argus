@@ -117,8 +117,8 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
         Assert.Equal("hana", made.GetProperty("userName").GetString());
         Assert.Equal("Given Family", made.GetProperty("displayName").GetString());
         Assert.True(made.GetProperty("active").GetBoolean());
-        var key = Assert.Single(company.Gateway.KeysOf("hana@example.test"));
-        Assert.False(key.Blocked);
+        async Task<bool> BlockedAsync() => Assert.Single(await AppFixture.GatewayKeysAsync(f, "hana@example.test")).Blocked;
+        Assert.False(await BlockedAsync());
 
         // She signs in with her company account: the person SCIM made, found by email.
         var (session, answer) = await company.SignInAsync(f, new("sub-hana", "hana", "hana@example.test", ["llm-users"]));
@@ -129,7 +129,7 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
         var off = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "Replace", path = "active", value = "False" }));
         Assert.False(off.GetProperty("active").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await session.GetAsync("/api/auth/me"));
-        Assert.True(key.Blocked);
+        Assert.True(await BlockedAsync());
         var (_, refused) = await company.SignInAsync(f, new("sub-hana", "hana", "hana@example.test", ["llm-users"]));
         Assert.StartsWith("/login?error=company_disabled", refused.Headers.Location!.ToString(), StringComparison.Ordinal);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -142,11 +142,11 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
         // Okta's way: no path, an object of attributes.
         var on = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "replace", value = new { active = true } }));
         Assert.True(on.GetProperty("active").GetBoolean());
-        Assert.False(key.Blocked);
+        Assert.False(await BlockedAsync());
 
         // Deleted in the provider: disabled here, not deleted (their chats stay until an admin deletes them).
         await StatusAssert.Is(HttpStatusCode.NoContent, await scim.SendAsync(HttpMethod.Delete, $"/Users/{id}"));
-        Assert.True(key.Blocked);
+        Assert.True(await BlockedAsync());
         Assert.False((await scim.GetAsync($"/Users/{id}")).GetProperty("active").GetBoolean());
     }
 
@@ -184,12 +184,11 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
         Assert.Equal("Ivo P.", put.GetProperty("displayName").GetString());
 
         // A new email: their key is theirs by who they are, so it stays (none is made for the new email).
-        var before = company.Gateway.KeysOf("ivo.petrov@example.test").Select(k => k.Token).ToList();
+        var before = (await AppFixture.GatewayKeysAsync(f, "ivo.petrov@example.test")).Select(k => k.Token).ToList();
         Assert.NotEmpty(before);
         var moved = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "Replace", path = "emails[type eq \"work\"].value", value = "ivo@example.test" }));
         Assert.Equal("ivo@example.test", moved.GetProperty("emails")[0].GetProperty("value").GetString());
-        Assert.Equal(before, company.Gateway.KeysOf("ivo.petrov@example.test").Select(k => k.Token));
-        Assert.Empty(company.Gateway.KeysOf("ivo@example.test"));
+        Assert.Equal(before, (await AppFixture.GatewayKeysAsync(f, "ivo@example.test")).Select(k => k.Token));
 
         // One part of the name keeps the other.
         var renamed = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "replace", path = "name.givenName", value = "Ivan" }));

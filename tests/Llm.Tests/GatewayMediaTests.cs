@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Llm.Tests;
 
 /// <summary>
-/// Pictures, speech and transcriptions through the app's own gateway (Gateway:Mode own): an API key's request let in,
+/// Pictures, speech and transcriptions through the app's own gateway: an API key's request let in,
 /// sent to the server of its model, and booked at its price (per picture, per character, per second heard); a
 /// transcription asked as verbose_json and given back as the caller asked.
 /// </summary>
@@ -22,7 +22,7 @@ public sealed class GatewayMediaTests(AppFixture app)
     private static Deployment Route(string name, string mode, string priceKey, decimal price) => new()
     {
         Name = name, Kind = Deployment.Audio, BaseUrl = "http://engine.test/v1", Model = name + "-there", Mode = mode, Info = new JsonObject { ["mode"] = mode },
-        LiteLlm = new JsonObject { [priceKey] = price }, Fingerprint = "media:" + name,
+        Params = new JsonObject { [priceKey] = price }, Fingerprint = "media:" + name,
     };
 
     private sealed class Given(params Deployment[] given) : IRoutesSource
@@ -45,7 +45,7 @@ public sealed class GatewayMediaTests(AppFixture app)
     public async Task An_API_keys_picture_speech_and_transcription_are_answered_by_their_servers_and_booked_at_their_prices()
     {
         var cs = app.ConnectionStringFor("gwmedia_" + Guid.NewGuid().ToString("N")[..8]);
-        await using var f = app.Create(cs, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own", ["Gateway:KeyCacheSeconds"] = "0" },
+        await using var f = app.Create(cs, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:KeyCacheSeconds"] = "0" },
             s => s.AddSingleton<IRoutesSource>(new Given(
                 Route("test-picture", "image_generation", "input_cost_per_image", 0.04m),
                 Route("test-voice", "audio_speech", "input_cost_per_character", 0.00002m),

@@ -21,7 +21,7 @@ public sealed class GroupCreditTests(AppFixture app)
     private const string Picture = Llm.Api.Models.MediaModels.ImageModel;
 
     private WebApplicationFactory<Program> NewApp(FakeGateway gateway) =>
-        app.Create(app.ConnectionStringFor("credit_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?> { ["Credit:Refresh"] = "00:00:00" },
+        app.Create(app.ConnectionStringFor("credit_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?> { ["Credit:Refresh"] = "00:00:00", ["Modules:imagegen"] = "true" },
             s => s.AddSingleton<TimeProvider>(new MovableClock(Now)));
 
     private static async Task<(TestBrowser Browser, Guid Id, string Email)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin, object? credits = null)
@@ -53,29 +53,33 @@ public sealed class GroupCreditTests(AppFixture app)
         return last.GetProperty("status").GetString() == "failed" ? "refused: " + last.GetProperty("error").GetString() : last.GetProperty("content").GetString()!;
     }
 
-    /// <summary>What the gateway's guardrail is told for an API key's request, as LiteLLM posts it.</summary>
-    public static async Task<JsonElement> GuardrailAsync(WebApplicationFactory<Program> f, string? email, params string[] texts) =>
+    /// <summary>What the gateway's admission says to an API key's request (a new own key of the person's): NONE, BLOCKED with why, or GUARDRAIL_INTERVENED with the texts as sent.</summary>
+    public static async Task<JsonElement> GuardrailAsync(WebApplicationFactory<Program> f, string email, params string[] texts) =>
         await GuardrailForAsync(f, email, "Qwen3.8-Flash-Next", texts);
 
-    /// <summary>The guardrail's verdict on an API key's request to <paramref name="model"/>.</summary>
-    public static async Task<JsonElement> GuardrailForAsync(WebApplicationFactory<Program> f, string? email, string model, params string[] texts)
+    /// <summary>The same, for a request to <paramref name="model"/>.</summary>
+    public static Task<JsonElement> GuardrailForAsync(WebApplicationFactory<Program> f, string email, string model, params string[] texts) =>
+        GuardrailForAsync(f, email, model, null, texts);
+
+    /// <summary>The same, for these messages (each its role) instead of one user message per text.</summary>
+    public static Task<JsonElement> GuardrailForAsync(WebApplicationFactory<Program> f, string email, string model, System.Text.Json.Nodes.JsonArray messages) =>
+        GuardrailForAsync(f, email, model, messages, []);
+
+    private static async Task<JsonElement> GuardrailForAsync(WebApplicationFactory<Program> f, string email, string model, System.Text.Json.Nodes.JsonArray? messages, string[] texts)
     {
-        var b = new TestBrowser(f);
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
-        {
-            Content = JsonContent.Create(new
-            {
-                input_type = "request",
-                texts,
-                structured_messages = texts.Select(t => new { role = "user", content = t }),
-                request_data = new { user_api_key_user_id = email, user_api_key_alias = "app-person", user_api_key_hash = "hash" },
-                model,
-            }),
-        };
-        req.Headers.Add("x-api-key", "sk-master-for-tests");
-        var res = await b.Http.SendAsync(req);
-        await StatusAssert.Is(HttpStatusCode.OK, res);
-        return await b.JsonAsync(res);
+        await using var scope = f.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var user = await services.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>().FindByEmailAsync(email)
+            ?? throw new InvalidOperationException("no person " + email);
+        var (secret, _) = await services.GetRequiredService<ApiKeys>().MakeAsync(user, Llm.Core.Gateway.ApiKey.Own, "test-" + Guid.NewGuid().ToString("N")[..8]);
+        messages ??= new System.Text.Json.Nodes.JsonArray([.. texts.Select(t => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["role"] = "user", ["content"] = t })]);
+        texts = [.. messages.Select(m => m!["content"]!.GetValue<string>())];
+        var body = new System.Text.Json.Nodes.JsonObject { ["model"] = model, ["messages"] = messages };
+        var (_, refusal) = await services.GetRequiredService<Admission>().CheckAsync(secret, body, CancellationToken.None);
+        var sent = messages.Select(m => m!["content"]!.GetValue<string>()).ToList();
+        object verdict = refusal is not null ? new { action = "BLOCKED", blocked_reason = refusal.Message }
+            : sent.SequenceEqual(texts) ? new { action = "NONE" } : new { action = "GUARDRAIL_INTERVENED", texts = sent };
+        return JsonSerializer.SerializeToElement(verdict);
     }
 
     [Fact]
@@ -115,8 +119,6 @@ public sealed class GroupCreditTests(AppFixture app)
         Assert.Equal(5m, detail.GetProperty("policies").GetProperty("credits").GetProperty("chat").GetDecimal());
         Assert.Equal(JsonValueKind.Null, detail.GetProperty("policies").GetProperty("credits").GetProperty("pictures").ValueKind);
         Assert.Equal("CC-42", detail.GetProperty("policies").GetProperty("costCentre").GetString());
-        // The gateway holds no budget: no team for the group.
-        Assert.Empty(gateway.Teams);
     }
 
     [Fact]
@@ -174,29 +176,6 @@ public sealed class GroupCreditTests(AppFixture app)
         Assert.Equal("NONE", (await GuardrailAsync(f, cyEmail, "x")).GetProperty("action").GetString());
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{cyId}/credits", UriKind.Relative), new { video = -1 }));
         Assert.Contains("chat $10.00; API no limit", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task The_teams_an_older_version_made_at_the_gateway_go_once_their_keys_are_out_of_them()
-    {
-        var gateway = new FakeGateway();
-        await using var f = NewApp(gateway);
-        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var (_, annId, annEmail) = await PersonAsync(f, admin);
-        var group = await GroupAsync(admin, new { credits = new { chat = 1 } }, annId);
-        // As v5.4 left it: a team holding the group's credit, Ann's key in it.
-        var team = GroupTeams.TeamId(group);
-        gateway.Teams[team] = (new GatewayTeam(team, "old", 1m, null, [annEmail]), "1mo");
-        await using (var scope = f.Services.CreateAsyncScope())
-        {
-            var key = Assert.Single(await scope.ServiceProvider.GetRequiredService<ILiteLlm>().KeysAsync(annEmail));
-            await scope.ServiceProvider.GetRequiredService<ILiteLlm>().SetKeyTeamAsync(key.Token, team);
-            Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<GroupTeams>().SyncAsync());
-        }
-        // The key survives its team (the gateway deletes a team's keys with it).
-        Assert.Null(gateway.KeysOf(annEmail).Single().TeamId);
-        Assert.Empty(gateway.Teams);
-        Assert.Contains("credit chat $1.00; API no limit; picture no limit; video no limit; speech no limit, shared", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]

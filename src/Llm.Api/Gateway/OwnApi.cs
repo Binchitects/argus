@@ -6,10 +6,10 @@ using Llm.Api.Chat;
 namespace Llm.Api.Gateway;
 
 /// <summary>
-/// The rest of the model API with keys, answered by the app itself (Gateway:Mode own): the models a key may use
-/// (/v1/models, one by its name, /v1/model/info as Code Arena reads it), embeddings by the embeddings server, booked; and a
-/// plain 404 for what no server here serves (rerank, moderations, translations, picture edits). A copy of a model under its
-/// own name (NAME@i) is in no list. Anthropic's count_tokens still goes by LiteLLM until the app answers Anthropic's API.
+/// The rest of the model API with keys, answered by the app itself: the models a key may use (/v1/models, one by its
+/// name, /v1/model/info as Code Arena reads it), embeddings by the embeddings server, booked; Anthropic's count_tokens;
+/// and a plain 404 for what no server here serves (rerank, moderations, translations, picture edits). A copy of a model
+/// under its own name (NAME@i) is in no list.
 /// </summary>
 public static class OwnApi
 {
@@ -21,15 +21,11 @@ public static class OwnApi
         return http.Response.WriteAsJsonAsync(new { error = new { message, type, code = status.ToString(CultureInfo.InvariantCulture) } }, http.RequestAborted);
     }
 
-    /// <summary>True when it answered (own mode); false: by LiteLLM, as ApiPassage passes it on.</summary>
+    /// <summary>Answers the request (true: always, a path it does not serve with a 404 that says so).</summary>
     public static async Task<bool> TryAsync(HttpContext http)
     {
         var own = http.RequestServices.GetRequiredService<ModelGateway>();
         var path = http.Request.Path.Value ?? "";
-        if (!own.ForApi)
-        {
-            return false;
-        }
         if (KeyMedia.Preflight(http))
         {
             return true;
@@ -207,7 +203,7 @@ public static class OwnApi
         }
         foreach (var k in new[] { "input_cost_per_image", "input_cost_per_second", "input_cost_per_character" })
         {
-            if (d.LiteLlm[k] is { } v)
+            if (d.Params[k] is { } v)
             {
                 info[k] = v.DeepClone();
             }

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -308,7 +309,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         // the extra lines' own cache-reuse stands.
         Assert.Contains("fit = on\nthreads = 12\njinja = true\nmetrics = true\nno-cache-idle-slots = true\ncache-ram = 8192\nslot-save-path = /kvcache/tiny-b\nflash-attn = on\ncache-reuse = 256\n", presets, StringComparison.Ordinal);
         Assert.DoesNotContain("a note", presets, StringComparison.Ordinal);
-        var added = Assert.Single(gateway.Managed.Values);
+        var added = Assert.Single(await app.RoutesOfAsync(f));
         Assert.Equal("tiny-b", added.Name);
         Assert.Equal("openai/tiny-b", added.Params["model"]!.GetValue<string>());
         Assert.Equal("os.environ/ENGINE_API_KEY", added.Params["api_key"]!.GetValue<string>());
@@ -322,24 +323,24 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
 
         // A change the gateway must know of (the context per person, the people at once) registers it again; one it need not (the temperature) does not.
-        var first = gateway.Managed.Keys.Single();
+        var first = (await app.RoutesOfAsync(f)).Single().Fingerprint;
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { temperature = 0.7 }));
-        Assert.Equal(first, gateway.Managed.Keys.Single());
+        Assert.Equal(first, (await app.RoutesOfAsync(f)).Single().Fingerprint);
         // 4,096 tokens a person: its longest answer of 4,096 would leave no room for a prompt.
         var crowded = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 4096 });
         await StatusAssert.Is(HttpStatusCode.BadRequest, crowded);
         Assert.Contains("The longest answer is 256 to 3,072 tokens: what a person's conversation holds (4,096) less room for its prompt.",
             await crowded.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 4096, parallel = 4, maxOutput = 2048 }));
-        Assert.NotEqual(first, gateway.Managed.Keys.Single());
-        Assert.Equal((4096, 2048), (gateway.Managed.Values.Single().Info["max_input_tokens"]!.GetValue<int>(), gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>()));
+        Assert.NotEqual(first, (await app.RoutesOfAsync(f)).Single().Fingerprint);
+        Assert.Equal((4096, 2048), ((await app.RoutesOfAsync(f)).Single().Info["max_input_tokens"]!.GetValue<int>(), (await app.RoutesOfAsync(f)).Single().Info["max_output_tokens"]!.GetValue<int>()));
         Assert.Contains("ctx-size = 16384\nparallel = 4\nkv-unified = true\nkv-unified-per-slot = 4096\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
-        var second = gateway.Managed.Keys.Single();
+        var second = (await app.RoutesOfAsync(f)).Single().Fingerprint;
         // Each of the 4 people at once has the whole 16,384: the engine's cache is four times that.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 16384 }));
-        Assert.NotEqual(second, gateway.Managed.Keys.Single());
+        Assert.NotEqual(second, (await app.RoutesOfAsync(f)).Single().Fingerprint);
         Assert.Contains("ctx-size = 65536\nparallel = 4\nkv-unified = true\nkv-unified-per-slot = 16384\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
-        Assert.Equal(16384, gateway.Managed.Values.Single().Info["max_input_tokens"]!.GetValue<int>());
+        Assert.Equal(16384, (await app.RoutesOfAsync(f)).Single().Info["max_input_tokens"]!.GetValue<int>());
         // Cached input is never priced above input: above its own (0.1) is refused.
         var above = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { cachedInputPerMtok = 0.5m });
         await StatusAssert.Is(HttpStatusCode.BadRequest, above);
@@ -356,12 +357,12 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.BadRequest, aboveDefault);
         Assert.Contains("(0.2, the default)", await aboveDefault.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         // Without a longest answer: half of what a person's conversation holds, on the page too.
-        Assert.Equal(8192, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
+        Assert.Equal(8192, (await app.RoutesOfAsync(f)).Single().Info["max_output_tokens"]!.GetValue<int>());
         Assert.Equal(8192, Row(await ModelsAsync(admin), "tiny-b").GetProperty("output").GetInt32());
 
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative)));
         Assert.DoesNotContain("[tiny-b]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
-        Assert.Empty(gateway.Managed);
+        Assert.Empty(await app.RoutesOfAsync(f));
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("model.add", audit);
         Assert.Contains("model.remove", audit);
@@ -523,13 +524,23 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Contains("tiny-b", (await ChatModelsAsync(admin)).Keys);
         await StatusAssert.Is(HttpStatusCode.Forbidden, await member.PostAsync("/api/chat/conversations", new { model = "tiny-b" }));
 
-        // Their API key carries the models they may use: LiteLLM refuses the rest.
-        await EventuallyAsync(() => Task.FromResult(gateway.KeysOf("modelmember@example.test").Single().Models.Order().SequenceEqual(["FLUX.2-klein-4B", "Qwen3.8-Flash-Next"])), "the member's key without tiny-b");
-        Assert.All(gateway.KeysOf("admin@llm.test"), k => Assert.Empty(k.Models));
+        // Their API key may call the models they may use: the gateway refuses the rest.
+        async Task<IReadOnlyList<string>> KeyModelsAsync(string email)
+        {
+            var normalized = email.ToUpperInvariant();
+            await using var scope = f.Services.CreateAsyncScope();
+            var user = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == normalized);
+            // An empty list is every model; "no-default-models", none.
+            var listed = await scope.ServiceProvider.GetRequiredService<Llm.Api.Models.KeyAccess>().ListForAsync(user);
+            return listed.Count > 0 ? [.. listed.Where(m => m != Llm.Api.Models.KeyAccess.NoModels)]
+                : [.. (await scope.ServiceProvider.GetRequiredService<Llm.Api.Chat.ChatModels>().AllAsync()).Select(m => m.Name)];
+        }
+        Assert.DoesNotContain("tiny-b", await KeyModelsAsync("modelmember@example.test"));
+        Assert.Contains("tiny-b", await KeyModelsAsync("admin@llm.test"));
 
         // In the group, the member may choose it; while it is not loaded, the answer says so.
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { made.GetProperty("id").GetGuid() } }));
-        await EventuallyAsync(() => Task.FromResult(gateway.KeysOf("modelmember@example.test").Single().Models.Count == 0), "the member's key back to every model");
+        Assert.Contains("tiny-b", await KeyModelsAsync("modelmember@example.test"));
         var chat = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { model = "tiny-b", useCodeIntel = false }))).GetProperty("id").GetGuid();
         var answer = await (await member.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
         Assert.Contains("tiny-b is not loaded right now", answer, StringComparison.Ordinal);

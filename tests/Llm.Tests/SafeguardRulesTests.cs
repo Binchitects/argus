@@ -212,27 +212,12 @@ public sealed class SafeguardRulesTests(AppFixture app)
         Assert.Contains("Rule: Code names. Found \"Project Falcon\" in your message: Status of project falcon?", word, StringComparison.Ordinal);
 
         // An API key's request: which of its messages, so a password a tool read many turns ago can be found.
-        var email = (await b.JsonAsync(await b.GetAsync("/api/auth/me"))).GetProperty("email").GetString();
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
-        {
-            Content = JsonContent.Create(new
-            {
-                input_type = "request",
-                texts = new[] { "You are a coding agent.", "Read the config", "db:\n  password: k9Lw2pQx-7", "Why does it not connect?" },
-                structured_messages = new object[]
-                {
-                    new { role = "system", content = "You are a coding agent." },
-                    new { role = "user", content = "Read the config" },
-                    new { role = "tool", content = "db:\n  password: k9Lw2pQx-7", tool_call_id = "c1" },
-                    new { role = "user", content = "Why does it not connect?" },
-                },
-                request_data = new { user_api_key_user_id = email, user_api_key_alias = "app-person", user_api_key_hash = "hash" },
-                model = "Qwen3.8-Flash-Next",
-            }),
-        };
-        req.Headers.Add("x-api-key", "sk-master-for-tests");
-        var gateway = new TestBrowser(f);
-        var api = await gateway.JsonAsync(await gateway.Http.SendAsync(req));
+        var email = (await b.JsonAsync(await b.GetAsync("/api/auth/me"))).GetProperty("email").GetString()!;
+        var api = await GroupCreditTests.GuardrailForAsync(f, email, "Qwen3.8-Flash-Next", new System.Text.Json.Nodes.JsonArray(
+            new System.Text.Json.Nodes.JsonObject { ["role"] = "system", ["content"] = "You are a coding agent." },
+            new System.Text.Json.Nodes.JsonObject { ["role"] = "user", ["content"] = "Read the config" },
+            new System.Text.Json.Nodes.JsonObject { ["role"] = "tool", ["content"] = "db:\n  password: k9Lw2pQx-7", ["tool_call_id"] = "c1" },
+            new System.Text.Json.Nodes.JsonObject { ["role"] = "user", ["content"] = "Why does it not connect?" }));
         Assert.Equal("BLOCKED", api.GetProperty("action").GetString());
         var why = api.GetProperty("blocked_reason").GetString()!;
         Assert.StartsWith("Arena's safeguards refused the request: it holds a password.", why, StringComparison.Ordinal);

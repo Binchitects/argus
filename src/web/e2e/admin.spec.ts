@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { expectAccessible, expectTheme, withTheme, noGateway, noObserve, screenshot, watchConsole } from './helpers.ts'
+import { expectAccessible, expectTheme, withTheme, noEngine, noObserve, screenshot, watchConsole } from './helpers.ts'
 
 const pages: [string, string][] = [
   ['/usage', 'Usage & cost'],
@@ -176,7 +176,7 @@ test('a custom range stays open until it is applied, and the report is for those
 })
 
 test('a person, from added to deleted', async ({ page }) => {
-  test.skip(noGateway, 'people get gateway accounts')
+  test.skip(noEngine, 'people get gateway accounts')
   const name = `e2e${Date.now().toString(36)}`
   await page.goto('/admin/people')
   await page.getByRole('button', { name: 'Add person' }).click()
@@ -253,7 +253,7 @@ test("the engine's models each say whether they are loaded, and more come from t
   // Every chat model is one added here (none comes from .env); each loads when asked for unless it is kept loaded.
   // A card is its name, status, a line and its main actions; Added here and the rest are in its Details.
   const models = page.locator('main section').filter({ has: page.getByRole('button', { name: /^Details of / }) })
-  test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
+  test.skip(noEngine, 'no model added here: a stack without a gateway (CI\'s) has none')
   await expect(models.first()).toBeVisible()
   await models.first().getByRole('button', { name: /^Details of / }).click()
   const about = page.getByRole('dialog')
@@ -279,7 +279,7 @@ test("the engine's models each say whether they are loaded, and more come from t
 test("each chat model's Details names its engine, and Change engine… opens Edit at the Engine field with every engine", async ({ page }, info) => {
   await page.goto('/admin/models')
   await settled(page, 'Models')
-  test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
+  test.skip(noEngine, 'no model added here: a stack without a gateway (CI\'s) has none')
   // The engine and Change engine… are in a chat model's Details: the first card that has them.
   const models = page.locator('main section').filter({ has: page.getByRole('button', { name: /^Details of / }) })
   await expect(models.first()).toBeVisible()
@@ -321,7 +321,7 @@ test("each chat model's Details names its engine, and Change engine… opens Edi
 })
 
 test('members cannot open admin pages', async ({ browser, baseURL }) => {
-  test.skip(noGateway, 'makes a person')
+  test.skip(noEngine, 'makes a person')
   const admin = await browser.newContext({ ignoreHTTPSErrors: true, baseURL, storageState: 'e2e/.auth/state.json' })
   const name = `e2em${Date.now().toString(36)}`
   const made = await admin.request.post('/api/admin/people', { data: { userName: name, email: `${name}@example.test` }, headers: { 'X-Requested-With': 'e2e' } })
@@ -352,7 +352,7 @@ test('members cannot open admin pages', async ({ browser, baseURL }) => {
 })
 
 test('working hours are added, shown in words, and removed', async ({ page, isMobile }, info) => {
-  test.skip(noGateway, 'needs the engine')
+  test.skip(noEngine, 'needs the engine')
   await page.goto('/admin/models')
   const card = page.getByRole('region', { name: 'Working hours' })
   await expect(card).toBeVisible()

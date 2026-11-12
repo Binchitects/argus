@@ -213,7 +213,7 @@ public sealed class Risks(AppDbContext db, Identity.Audit audit, TimeProvider cl
     /// <summary>The stack's own stores of information, always there.</summary>
     public static readonly string[] Stores =
     [
-        "Arena's database (Postgres)", "People's files", "The model library", "The backups", "The audit log", $"{Brand.CodeIntel}'s code index", "The gateway (LiteLLM)",
+        "Arena's database (Postgres)", "People's files", "The model library", "The backups", "The audit log", $"{Brand.CodeIntel}'s code index", "The model gateway (in the app)",
         "Company sign-in (OIDC, SAML, LDAP)", "Cloud model providers",
     ];
 

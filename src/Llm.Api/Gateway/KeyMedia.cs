@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Http.Features;
 namespace Llm.Api.Gateway;
 
 /// <summary>
-/// API keys' pictures, speech and transcriptions through the app's own gateway (Gateway:Mode own): let in as a chat
+/// API keys' pictures, speech and transcriptions through the app's own gateway: let in as a chat
 /// completion is (Admission: the key, its person, the model, the minute's limits, credit), with the person's voice and
 /// language as KeySpeech gives them, a picture model loaded first; then sent by ModelGateway to the picture or speech
 /// server and booked at its price. A transcription is always asked as verbose_json (its length prices it) and given back
@@ -36,13 +36,13 @@ public static class KeyMedia
     }
 
     /// <summary>
-    /// A browser's preflight answered by the app (Gateway:Mode own), as LiteLLM answered it: any origin, the headers asked
+    /// A browser's preflight answered by the app as OpenAI-compatible gateways answer it: any origin, the headers asked
     /// for, for a day. True when it was one.
     /// </summary>
     public static bool Preflight(HttpContext http)
     {
         var request = http.Request;
-        if (!HttpMethods.IsOptions(request.Method) || !http.RequestServices.GetRequiredService<ModelGateway>().ForApi)
+        if (!HttpMethods.IsOptions(request.Method))
         {
             return false;
         }
@@ -55,7 +55,7 @@ public static class KeyMedia
         return true;
     }
 
-    /// <summary>True when it answered the request (own mode, a picture, speech or transcription); false: KeySpeech's way, by LiteLLM.</summary>
+    /// <summary>True when it answered the request (a POST of a picture, speech or transcription); false: not one of them.</summary>
     public static async Task<bool> TryAsync(HttpContext http)
     {
         var request = http.Request;
@@ -63,7 +63,7 @@ public static class KeyMedia
         var path = request.Path.Value ?? "";
         var call = path.EndsWith("/images/generations", StringComparison.Ordinal) ? "image" : path.EndsWith("/audio/speech", StringComparison.Ordinal) ? "speech"
             : path.EndsWith("/audio/transcriptions", StringComparison.Ordinal) ? "transcription" : null;
-        if (!own.ForApi || !HttpMethods.IsPost(request.Method) || call is null)
+        if (!HttpMethods.IsPost(request.Method) || call is null)
         {
             return false;
         }

@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Llm.Tests;
 
 /// <summary>
-/// The models API answered by the app's own gateway (Gateway:Mode own): the models a key may use, a copy under its own
+/// The models API answered by the app's own gateway: the models a key may use, a copy under its own
 /// name kept out, /v1/model/info in the shape Code Arena reads, embeddings by the embeddings server, and a plain 404 for
 /// what nothing here serves.
 /// </summary>
@@ -23,39 +23,18 @@ public sealed class OwnApiTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_gateway_is_chosen_in_the_settings_and_the_next_request_goes_the_new_way()
-    {
-        // LiteLLM first (the way back), then the app's own: the default, as installed.
-        await using var f = app.Create(app.ConnectionStringFor("gwmode_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            new Dictionary<string, string?> { ["Gateway:Mode"] = GatewayModes.LiteLlm });
-        var gateway = f.Services.GetRequiredService<ModelGateway>();
-        Assert.False(gateway.ForChat);
-        Assert.Equal(GatewayModes.Own, new Llm.Api.Gateway.LiteLlmOptions().Mode);
-        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var saved = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new object[] { new { key = "Gateway:Mode", value = "own" } } });
-        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync());
-        for (var i = 0; i < 100 && !gateway.ForApi; i++)
-        {
-            await Task.Delay(50);
-        }
-        Assert.True(gateway.ForApi);
-        var refused = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new object[] { new { key = "Gateway:Mode", value = "both" } } });
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-    }
-
-    [Fact]
     public async Task A_key_lists_its_models_and_their_info_and_embeds_and_nothing_else_is_found()
     {
         var copy = new Deployment
         {
-            Name = "Qwen3.8-Flash-Next@1", CopyOf = "Qwen3.8-Flash-Next", Kind = "vllm", BaseUrl = "http://engine.test/v1", Model = "q", Mode = "chat", Info = [], LiteLlm = [], Fingerprint = "copy",
+            Name = "Qwen3.8-Flash-Next@1", CopyOf = "Qwen3.8-Flash-Next", Kind = "vllm", BaseUrl = "http://engine.test/v1", Model = "q", Mode = "chat", Info = [], Params = [], Fingerprint = "copy",
         };
         var embed = new Deployment
         {
             Name = "test-embed", Kind = Deployment.Embed, BaseUrl = "http://engine.test/v1", Model = "nomic", Mode = "embedding", Info = new JsonObject { ["mode"] = "embedding" },
-            LiteLlm = [], Fingerprint = "embed", Price = new TokenPrice(1, 0, 0),
+            Params = [], Fingerprint = "embed", Price = new TokenPrice(1, 0, 0),
         };
-        await using var f = app.Create(app.ConnectionStringFor("ownapi_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own" },
+        await using var f = app.Create(app.ConnectionStringFor("ownapi_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), null,
             s => s.AddSingleton<IRoutesSource>(new Given(copy, embed)));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "oa" + Guid.NewGuid().ToString("N")[..8];

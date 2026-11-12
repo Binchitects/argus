@@ -729,22 +729,6 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.DoesNotContain("delegate", FunctionsSentFor(email));
     }
 
-    [Fact]
-    public async Task On_a_new_deployment_the_first_answer_waits_for_the_gateway_to_make_the_chats_key()
-    {
-        // The gateway answers before it can make keys: the first two tries are refused.
-        var gateway = new FakeGateway { ServiceKeyFailures = 2 };
-        // LiteLLM's way: the app's own gateway needs no key for the chat.
-        await using var f = NewApp(gateway, new Dictionary<string, string?> { ["Gateway:Mode"] = Llm.Api.Gateway.GatewayModes.LiteLlm });
-        var (b, _, _) = await PersonAsync(f);
-        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
-        var events = await SendAsync(b, id, "Hello on day one");
-        Assert.DoesNotContain(events, e => e.GetProperty("type").GetString() == "error");
-        Assert.Equal("done", events.Last().GetProperty("type").GetString());
-        Assert.Equal(0, gateway.ServiceKeyFailures);
-        Assert.Single(gateway.ServiceKeys);
-    }
-
     private static async Task<Guid> UploadAsync(TestBrowser b, string name, string text)
     {
         using var form = new MultipartFormDataContent();

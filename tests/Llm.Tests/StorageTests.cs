@@ -874,7 +874,9 @@ public sealed class StorageTests(AppFixture app)
             Assert.True(mine.GetProperty("bytes").GetInt64() > 1_000_000);
             Assert.Contains(databases.GetProperty("tables").EnumerateArray(), t => t.GetProperty("database").GetString() == appDb && t.GetProperty("name").GetString() == "chat_messages"
                 && t.GetProperty("what").GetString() == "the chats' messages");
-            Assert.Contains(databases.GetProperty("tables").EnumerateArray(), t => t.GetProperty("name").GetString() == "LiteLLM_SpendLogs");
+            Assert.Contains(databases.GetProperty("tables").EnumerateArray(), t => t.GetProperty("database").GetString() == appDb && t.GetProperty("name").GetString() == "gateway.requests");
+            // LiteLLM's database from before 8.0 is named, and none of its tables are listed.
+            Assert.DoesNotContain(databases.GetProperty("tables").EnumerateArray(), t => t.GetProperty("name").GetString()!.StartsWith("LiteLLM_", StringComparison.Ordinal));
 
             var files = page.GetProperty("files");
             Assert.Equal(1, files.GetProperty("total").GetProperty("count").GetInt64());

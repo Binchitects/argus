@@ -128,7 +128,7 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (its video model, Admin -> Models), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed class VideoTool(Llm.Api.Media.SdServer server, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy, GpuShare gpu) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy, GpuShare gpu) : IChatTool
 {
     public string Id => "video";
     public string Title => "Video generation";
@@ -202,7 +202,7 @@ public sealed class VideoTool(Llm.Api.Media.SdServer server, Operations.Modules 
                 return new ToolResult($"The video could not be made: {ex.Message}", IsError: true);
             }
             var cost = (model.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * seconds;
-            await spendLog.BookVideoAsync(context.Email, Gateway.AnswerCache.HashOf(await chatKey.GetAsync(token)), model.Name, seconds, cost, started, DateTimeOffset.UtcNow, token);
+            await spendLog.BookVideoAsync(context.Email, model.Name, seconds, cost, started, DateTimeOffset.UtcNow, token);
             // Marked as made by a model, in its own metadata (AI Act Art. 50(2)).
             video = Llm.Api.Media.AiMark.Mark(video, type);
             var file = new ChatAttachment

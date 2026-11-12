@@ -28,11 +28,11 @@ public sealed class OwnKeyException(int status, string code, string message) : E
 
 /// <summary>
 /// The API keys a person makes for themselves (Account → API keys): as many as <see cref="MaxKeys"/>, each named, each with
-/// limits of its own under those an admin set on them (the tighter of the two is what the gateway holds it to: the sync
-/// keeps it so), each revoked on its own. Making them counts with Rotate's new keys an hour (<see cref="PeopleService.OwnKeysPerHour"/>).
+/// limits of its own under those an admin set on them (the tighter of the two is what the gateway holds it to, at each
+/// request), each revoked on its own. Making them counts with Rotate's new keys an hour (<see cref="PeopleService.OwnKeysPerHour"/>).
 /// </summary>
-public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, RateLimits rateLimits, Models.KeyAccess keyAccess, Access.AccessService access, PeopleService people,
-    Audit audit, TimeProvider clock, OwnKeyPlaces places, KeyWriters writers)
+public sealed class OwnKeys(AppDbContext db, ApiKeys keys, RateLimits rateLimits, Models.KeyAccess keyAccess, Access.AccessService access, PeopleService people,
+    Audit audit, TimeProvider clock, OwnKeyPlaces places)
 {
     /// <summary>The most keys a person may make for themselves.</summary>
     public const int MaxKeys = 20;
@@ -57,7 +57,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
         {
             return [];
         }
-        var held = await gateway.KeysAsync(user.Email!, ct);
+        var held = await keys.KeysAsync(user, ct);
         var rows = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Hash, ct);
         var rate = (await rateLimits.ForAsync(user, ct)).Key;
         return [.. held.OrderBy(k => k.CreatedAt).Select(k => View(user, k, rows.GetValueOrDefault(k.Token), rate))];
@@ -104,19 +104,15 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
                 $"You made {PeopleService.OwnKeysPerHour} new keys in the last hour, the most there may be. Make the next in {minutes} minute{(minutes == 1 ? "" : "s")}.");
         }
         var limits = new OwnLimits(request.RequestsPerMinute, request.TokensPerMinute, request.Parallel, request.MonthlyBudget);
-        // Made and saved in the person's turn: a sync between the two would give the new key their limits, not its own.
-        using var turn = await writers.EnterAsync(user.Id, ct);
-        await gateway.EnsureUserAsync(user.Email!, ct);
         var person = (await rateLimits.ForAsync(user, ct)).Key;
         var rate = new KeyRate(Tighter(person.RequestsPerMinute, limits.RequestsPerMinute), Tighter(person.TokensPerMinute, limits.TokensPerMinute));
         // A unique alias at the gateway: the person's name, the key's, and a few random letters.
         var alias = $"{PeopleService.KeyAlias(user)}-own-{Guid.NewGuid().ToString("N")[..8]}";
-        var (key, own) = await keys.MakeAsync(user, ApiKey.Own, alias, await keyAccess.ListForAsync(user, ct), TighterParallel(keyAccess.MaxParallel, limits.Parallel), rate, name, own: limits, ct: ct);
-        turn.Dispose();
+        var (key, own) = await keys.MakeAsync(user, ApiKey.Own, alias, name, own: limits, ct: ct);
         places.Forget(own.Hash);
         // Counted with Rotate's new keys an hour (PeopleService.OwnKeyWaitAsync).
         await audit.WriteAsync(Made, user.UserName, detail: $"{name}: {Describe(own)}", actor: user);
-        var made = (await gateway.KeysAsync(user.Email!, ct)).FirstOrDefault(k => k.Token == own.Hash)
+        var made = (await keys.KeysAsync(user, ct)).FirstOrDefault(k => k.Token == own.Hash)
             ?? new GatewayKey(own.Hash, alias, own.Preview, 0, false, own.CreatedAt, Rate: rate);
         return (key, View(user, made, own, (await rateLimits.ForAsync(user, ct)).Key));
     }
@@ -125,8 +121,6 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
     public async Task<KeyView> ChangeAsync(AppUser user, string token, KeyRequest request, CancellationToken ct = default)
     {
         Check(request);
-        // Changed, saved and written in the person's turn (KeyWriters).
-        using var turn = await writers.EnterAsync(user.Id, ct);
         var key = await KeyOfAsync(user, token, ct);
         var own = await db.ApiKeys.SingleOrDefaultAsync(k => k.Hash == token && k.UserId == user.Id, ct);
         if (own?.Kind == ApiKey.Studio || key.Alias.StartsWith("studio:", StringComparison.Ordinal))
@@ -157,24 +151,9 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
         }
         (own.RequestsPerMinute, own.TokensPerMinute, own.Parallel, own.MonthlyBudget) = (request.RequestsPerMinute, request.TokensPerMinute, request.Parallel, request.MonthlyBudget);
         await db.SaveChangesAsync(ct);
-        var rate = Tighter((await rateLimits.ForAsync(user, ct)).Key, own);
-        if ((key.Rate ?? KeyRate.None) != rate)
-        {
-            await gateway.SetKeyRateAsync(token, rate, ct);
-        }
-        var parallel = TighterParallel(keyAccess.MaxParallel, own.Parallel);
-        if (key.MaxParallel != parallel)
-        {
-            await gateway.SetKeyAccessAsync(token, await keyAccess.ListForAsync(user, ct), parallel, ct);
-        }
-        if (key.MaxBudget != own.MonthlyBudget)
-        {
-            await gateway.SetKeyBudgetAsync(token, own.MonthlyBudget, ct);
-        }
-        turn.Dispose();
         places.Forget(token);
         await audit.WriteAsync("person.key_changed", user.UserName, detail: $"{own.Name}: {Describe(own)}", actor: user);
-        return View(user, (await gateway.KeysAsync(user.Email!, ct)).First(k => k.Token == token), own, (await rateLimits.ForAsync(user, ct)).Key);
+        return View(user, (await keys.KeysAsync(user, ct)).First(k => k.Token == token), own, (await rateLimits.ForAsync(user, ct)).Key);
     }
 
     /// <summary>A key of theirs revoked: the gateway refuses it from now on. A Code Studio workspace's is the workspace's to revoke.</summary>
@@ -192,7 +171,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
     }
 
     private async Task<GatewayKey> KeyOfAsync(AppUser user, string token, CancellationToken ct) =>
-        (await gateway.KeysAsync(user.Email!, ct)).FirstOrDefault(k => k.Token == token)
+        (await keys.KeysAsync(user, ct)).FirstOrDefault(k => k.Token == token)
         ?? throw new OwnKeyException(404, "not_found", "There is no such key of yours.");
 
     private static string Name(string? name) =>

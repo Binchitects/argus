@@ -17,8 +17,7 @@ public sealed record RecordsSwept(int Audit, int GatewayLog, int ToolCalls, int 
 /// gateway's request log, the record of tool calls, and people's bells. Removed by the hourly sweep, each removal audited with
 /// counts. The audit log's chain starts again from its oldest entry kept; logs and metrics are their own services' (Loki, Prometheus).
 /// </summary>
-public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog spend, Audit audit, IOptionsMonitor<RetentionOptions> options, TimeProvider clock,
-    ILogger<RecordRetention> logger)
+public sealed partial class RecordRetention(AppDbContext db, Audit audit, IOptionsMonitor<RetentionOptions> options, TimeProvider clock)
 {
     public async Task<RecordsSwept> SweepAsync(CancellationToken ct)
     {
@@ -31,17 +30,8 @@ public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog sp
         var gatewayGone = 0;
         if (o.GatewayLogDays > 0)
         {
-            // The app's own ledger keeps them as long as LiteLLM's log did.
             var before = now.AddDays(-o.GatewayLogDays);
-            await db.GatewayRequests.Where(r => r.StartedAt < before).ExecuteDeleteAsync(ct);
-            try
-            {
-                gatewayGone = await spend.DeleteBeforeAsync(before, ct);
-            }
-            catch (NpgsqlException ex)
-            {
-                LogGateway(logger, ex.Message);
-            }
+            gatewayGone = await db.GatewayRequests.Where(r => r.StartedAt < before).ExecuteDeleteAsync(ct);
         }
         var swept = new RecordsSwept(auditGone, gatewayGone, toolsGone, newsGone, promptsGone);
         if (swept.Total > 0)
@@ -64,6 +54,4 @@ public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog sp
             : await db.AuditEvents.ExecuteDeleteAsync(ct);
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Retention: the gateway's request log could not be swept: {Reason}")]
-    private static partial void LogGateway(ILogger logger, string reason);
 }

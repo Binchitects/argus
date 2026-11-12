@@ -124,7 +124,7 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
                 }
             }
         }
-        catch (Exception ex) when (ex is GatewayException or HttpRequestException or TaskCanceledException or DbUpdateException or Npgsql.NpgsqlException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or DbUpdateException or Npgsql.NpgsqlException)
         {
             LogSkipped(logger, "credit", ex.Message);
         }

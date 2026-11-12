@@ -9,6 +9,7 @@ using Llm.Api.Models;
 using Llm.Core.Data;
 using Llm.Core.Media;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -249,20 +250,8 @@ public sealed class MediaStudioTests(AppFixture app)
             Assert.True(film["width"]!.GetValue<int>() > film["height"]!.GetValue<int>());
             await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/media/jobs", new { action = "vary", sourceId = clip.GetProperty("id").GetGuid() }));
 
-            // Booked in the gateway's log as the chat's: four picture requests (two pictures in one), one clip.
-            await using (var conn = new NpgsqlConnection(app.LitellmConnectionString))
-            {
-                await conn.OpenAsync();
-                await using var cmd = new NpgsqlCommand("""select call_type, count(*) from "LiteLLM_SpendLogs" where end_user = @email group by call_type order by call_type""", conn);
-                cmd.Parameters.AddWithValue("email", email);
-                await using var reader = await cmd.ExecuteReaderAsync();
-                var rows = new List<(string, long)>();
-                while (await reader.ReadAsync())
-                {
-                    rows.Add((reader.GetString(0), reader.GetInt64(1)));
-                }
-                Assert.Equal([(SpendLog.PictureCall, 4L), (SpendLog.VideoCall, 1L)], rows);
-            }
+            // Booked in the ledger as the chat's: four picture requests (two pictures in one), one clip.
+            Assert.Equal([("image", 4), ("video", 1)], await BookedAsync(f, email));
 
             // Another person sees none of it; taken out, a made picture's file goes with it.
             var (other, _, _) = await PersonAsync(f);
@@ -408,17 +397,7 @@ public sealed class MediaStudioTests(AppFixture app)
             var music = studio.Asked.Single(a => a.Path == "/v1/music").Body!;
             Assert.Equal(("lo-fi piano, rain, calm", "[verse]\nTea in the morning", 20.0), (music["prompt"]!.GetValue<string>(), music["lyrics"]!.GetValue<string>(), music["seconds"]!.GetValue<double>()));
 
-            await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
-            await conn.OpenAsync();
-            await using var cmd = new NpgsqlCommand("""select call_type, count(*) from "LiteLLM_SpendLogs" where end_user = @email group by call_type order by call_type""", conn);
-            cmd.Parameters.AddWithValue("email", email);
-            await using var reader = await cmd.ExecuteReaderAsync();
-            var rows = new List<(string, long)>();
-            while (await reader.ReadAsync())
-            {
-                rows.Add((reader.GetString(0), reader.GetInt64(1)));
-            }
-            Assert.Equal([(SpendLog.PictureCall, 2L), (SpendLog.MusicCall, 1L), (SpendLog.SpeechCall, 2L)], rows);
+            Assert.Equal([("image", 2), ("music", 1), ("speech", 2)], await BookedAsync(f, email));
         }
         finally
         {
@@ -449,5 +428,14 @@ public sealed class MediaStudioTests(AppFixture app)
         {
             library.Delete(true);
         }
+    }
+
+    /// <summary>What the ledger booked for a person: each kind of call and how many.</summary>
+    private static async Task<List<(string, int)>> BookedAsync(WebApplicationFactory<Program> f, string email)
+    {
+        await using var scope = f.Services.CreateAsyncScope();
+        var rows = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().GatewayRequests.AsNoTracking().Where(r => r.Person == email)
+            .GroupBy(r => r.Call).Select(g => new { g.Key, Count = g.Count() }).OrderBy(g => g.Key).ToListAsync();
+        return [.. rows.Select(r => (r.Key, r.Count))];
     }
 }

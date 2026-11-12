@@ -148,9 +148,9 @@ public sealed class OperationsTests(AppFixture app)
         var services = (await admin.JsonAsync(await admin.GetAsync("/api/admin/services"))).EnumerateArray().ToList();
         // Nothing listens at Prometheus's address here.
         Assert.Contains(services, s => s.GetProperty("name").GetString() == "Prometheus" && !s.GetProperty("ok").GetBoolean());
-        // The model gateway: the app's own (no model servers here, so none to ask), or LiteLLM's, which does not answer here.
+        // The model gateway: the app's own (no model servers here, so none to ask).
         var gateway = services.Single(s => s.GetProperty("name").GetString() == "Model gateway");
-        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own, gateway.GetProperty("ok").GetBoolean());
+        Assert.True(gateway.GetProperty("ok").GetBoolean());
         Assert.Contains(services, s => s.GetProperty("name").GetString() == $"{Brand.CodeIntel}");
     }
 

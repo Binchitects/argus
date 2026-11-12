@@ -61,46 +61,6 @@ public sealed class ChatTests(AppFixture app)
         }
     }
 
-    [Theory]
-    [InlineData("0", 1, 0)]
-    [InlineData("3", 3, 3)]
-    public async Task A_gateway_that_refuses_is_tried_again_as_long_as_the_wait_allows_then_the_answer_says_so(string wait, int tries, int seconds)
-    {
-        var refusing = new Refusing();
-        await using var f = app.Create(app.ConnectionStringFor("refused_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            // LiteLLM's way: the app's own gateway asks the engine itself and says at once when it cannot reach it.
-            new Dictionary<string, string?> { ["Gateway:ConnectWaitSeconds"] = wait, ["Gateway:Mode"] = Llm.Api.Gateway.GatewayModes.LiteLlm },
-            s => s.AddHttpClient<GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => refusing));
-        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var id = await NewChatAsync(b);
-        var took = System.Diagnostics.Stopwatch.StartNew();
-        var events = await SendAsync(b, id, "hello");
-        // Tried again after 1 and 2 seconds while they fit in the wait (0: told at once, CI's stack with no gateway).
-        Assert.Equal(tries, refusing.Tries);
-        Assert.InRange(took.Elapsed.TotalSeconds, seconds, seconds + 10);
-        Assert.Contains(events, e => e.GetProperty("type").GetString() == "error" && e.GetProperty("message").GetString()!.Contains("not reachable", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task A_new_deployments_first_chat_waits_for_the_gateway_to_make_its_key_only_as_long_as_the_wait_allows()
-    {
-        var gateway = new FakeGateway();
-        await using var f = app.Create(app.ConnectionStringFor("nokey_" + Guid.NewGuid().ToString("N")[..8]), gateway,
-            // LiteLLM's way: the app's own gateway needs no key for the chat.
-            new Dictionary<string, string?> { ["Gateway:KeyWaitSeconds"] = "0", ["Gateway:Mode"] = Llm.Api.Gateway.GatewayModes.LiteLlm });
-        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var id = await NewChatAsync(b);
-        // No gateway yet to make the chat's key: told at once (CI's stack, with none), not after a minute and a half.
-        gateway.Down = true;
-        var took = System.Diagnostics.Stopwatch.StartNew();
-        var events = await SendAsync(b, id, "hello");
-        Assert.InRange(took.Elapsed.TotalSeconds, 0, 10);
-        Assert.Contains(events, e => e.GetProperty("type").GetString() == "error" && e.GetProperty("message").GetString()!.Contains("not reachable", StringComparison.Ordinal));
-        // The gateway back: the next answer makes the key and is answered.
-        gateway.Down = false;
-        Assert.Contains(await SendAsync(b, id, "again"), e => e.GetProperty("type").GetString() == "done");
-    }
-
     [Fact]
     public async Task Config_lists_the_model_its_presets_and_code_intel()
     {
@@ -122,19 +82,8 @@ public sealed class ChatTests(AppFixture app)
 
         var (body, headers) = app.Model.Requests.Last();
         Assert.Equal(email, body["user"]!.GetValue<string>());
-        if (AppFixture.GatewayMode == Llm.Api.Gateway.GatewayModes.Own)
-        {
-            // Billed to the person in the app's own ledger; no key of LiteLLM's goes to the engine.
-            Assert.True(await app.CostAsync(email) > 0);
-            Assert.DoesNotContain(headers.GetValueOrDefault("Authorization", ""), app.Gateway.ServiceKeys.Select(k => "Bearer " + k));
-        }
-        else
-        {
-            Assert.Equal(email, headers[Llm.Api.Chat.GatewayChat.UserEmailHeader]);
-            // The chat's own key (alias "chat"), never the master key.
-            Assert.StartsWith("Bearer sk-chat-", headers["Authorization"], StringComparison.Ordinal);
-            Assert.Contains(headers["Authorization"][7..], app.Gateway.ServiceKeys);
-        }
+        // Billed to the person in the app's own ledger.
+        Assert.True(await app.CostAsync(email) > 0);
         Assert.Equal("low", body["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
         Assert.True(body["stream_options"]!["include_usage"]!.GetValue<bool>());
         // code-intel off: the other tools on in new chats, and no code-intel function.
@@ -1015,24 +964,6 @@ public sealed class ChatTests(AppFixture app)
         Assert.Empty((await b.JsonAsync(await b.GetAsync("/api/chat/conversations?q=nothing-like-it"))).EnumerateArray());
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NotFound, await b.GetAsync($"/api/chat/conversations/{id}"));
-    }
-
-    [Fact]
-    public async Task A_chat_key_deleted_at_the_gateway_is_replaced_on_the_fly()
-    {
-        // LiteLLM's way: the app's own gateway needs no key for the chat.
-        await using var f = app.Create(app.ConnectionStringFor("chatkey_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            new Dictionary<string, string?> { ["Gateway:Mode"] = Llm.Api.Gateway.GatewayModes.LiteLlm });
-        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var id = await NewChatAsync(b, new { useCodeIntel = false });
-        await SendAsync(b, id, "first");
-        var oldKey = app.Model.Requests.Last().Headers["Authorization"][7..];
-        app.Model.RevokedKeys[oldKey] = true;
-        var events = await SendAsync(b, id, "second");
-        Assert.Contains("done", Types(events));
-        var newKey = app.Model.Requests.Last().Headers["Authorization"][7..];
-        Assert.NotEqual(oldKey, newKey);
-        Assert.StartsWith("sk-chat-", newKey, StringComparison.Ordinal);
     }
 
     [Theory]

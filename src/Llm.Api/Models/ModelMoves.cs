@@ -283,14 +283,7 @@ public sealed partial class ModelMoves(AppDbContext db, ModelCatalog catalog, En
         }
         await catalog.WritePresetsAsync(ct);
         await catalog.WriteVllmPresetsAsync(ct);
-        try
-        {
-            await catalog.SyncGatewayAsync(ct);
-        }
-        catch (GatewayException)
-        {
-            // In step within a minute (the watcher).
-        }
+        await catalog.SyncGatewayAsync(ct);
         if (move.WasLoaded && move.Old != ModelMove.Serving)
         {
             // Loaded on its old engine again, followed up while that engine has not read it back (llama.cpp starts again).

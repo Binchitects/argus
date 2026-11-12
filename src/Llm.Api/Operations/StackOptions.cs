@@ -1,10 +1,9 @@
 namespace Llm.Api.Operations;
 
-/// <summary>Configuration section "Stack": where the monitoring and the gateway answer, for the Monitoring pages.</summary>
+/// <summary>Configuration section "Stack": where the monitoring answers, for the Monitoring pages.</summary>
 public sealed class StackOptions
 {
     public string PrometheusUrl { get; set; } = "http://prometheus:9090";
-    public string LiteLlmProbeUrl { get; set; } = "http://litellm:4000";
 
     /// <summary>Set ("letsencrypt") when Traefik gets its certificates from Let's Encrypt (ACME_EMAIL): Overview says who issued the one served.</summary>
     public string? Acme { get; set; }

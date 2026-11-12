@@ -365,9 +365,9 @@ public static class OperationsEndpoints
         Features features, Models.MediaControl? media = null, Gateway.ModelGateway? own = null, CancellationToken ct = default)
     {
         var http = factory.CreateClient("probe");
-        // The app's own gateway (Gateway:Mode own): its health is the app's, each model's server asked in the app.
+        // The app's own gateway: its health is the app's, each model's server asked in the app.
         Task<Probe>? gateway = null;
-        if (own is { ForApi: true })
+        if (own is not null)
         {
             gateway = own.HealthAsync(ct).ContinueWith(t => t.IsCompletedSuccessfully
                 ? new Probe("Model gateway", "in the app: API keys, credit, the models' routes", t.Result.Ok, t.Result.Detail)
@@ -375,7 +375,6 @@ public static class OperationsEndpoints
         }
         var services = new (string Service, string Name, string Purpose, string Url)[]
         {
-            ("litellm", "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
             ("prometheus", "Prometheus", "metrics and alert rules", s.PrometheusUrl.TrimEnd('/') + "/-/healthy"),
             ("alertmanager", "Alertmanager", "firing alerts and their notifications", d.AlertmanagerUrl.TrimEnd('/') + "/-/healthy"),
             ("loki", "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"),
@@ -387,7 +386,7 @@ public static class OperationsEndpoints
             ("code-intel", $"{Brand.CodeIntel}", "the code index", a.Url.TrimEnd('/') + "/healthz"),
         };
         var probes = await Task.WhenAll(services
-            .Where(x => features.Runs(x.Service) && (x.Service != "code-intel" || a.Enabled) && (gateway is null || x.Service != "litellm"))
+            .Where(x => features.Runs(x.Service) && (x.Service != "code-intel" || a.Enabled))
             .Select(x => ProbeAsync(http, x.Name, x.Purpose, x.Url)));
         if (gateway is not null)
         {

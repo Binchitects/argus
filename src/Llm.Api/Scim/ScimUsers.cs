@@ -197,14 +197,7 @@ public static class ScimUsers
             {
                 // Only what SCIM disabled: an admin's or a safeguard's decision stands.
                 await people.SetDisabledAsync(PeopleService.DirectorySync, user, disabled: false, reason: "scim");
-                try
-                {
-                    await people.ProvisionGatewayAsync(user);
-                }
-                catch (GatewayException ex)
-                {
-                    await audit.WriteAsync("person.provision_gateway", user.UserName, success: false, detail: ex.Message);
-                }
+                await people.ProvisionGatewayAsync(user);
             }
         }
         catch (CompanyRefusedException ex)

@@ -99,10 +99,6 @@ public sealed class AnswerCacheTests(AppFixture app)
         Assert.Equal(1, Asked(marker));
         // The spend of a miss is the caller's, as without the cache: LiteLLM gets their own key; the app's own gateway
         // books it to them itself.
-        if (AppFixture.GatewayMode != GatewayModes.Own)
-        {
-            Assert.Equal($"Bearer {key}", app.Model.Requests.Last(r => r.Body.ToJsonString().Contains(marker, StringComparison.Ordinal)).Headers["Authorization"]);
-        }
 
         var again = await CallAsync(f, key, Question($"Opening hours? {marker}"));
         await StatusAssert.Is(HttpStatusCode.OK, again);
@@ -208,8 +204,8 @@ public sealed class AnswerCacheTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{person}/api", UriKind.Relative), new { on = false }));
         app.Model.RevokedKeys[key] = true;
         var refused = await CallAsync(f, key, Question(marker));
-        // LiteLLM no longer knows the key; the app's own gateway says the person has no API access.
-        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized, refused.StatusCode);
+        // The gateway says the person has no API access.
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         Assert.Null(Cache(refused));
 
         // A key the gateway does not know at all is not even looked up.

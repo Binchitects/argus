@@ -343,7 +343,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         Assert.True(me.GetProperty("isAdmin").GetBoolean());
         Assert.Equal("alice@example.test", me.GetProperty("email").GetString());
         Assert.Equal("Alice Admin", me.GetProperty("displayName").GetString());
-        Assert.NotEmpty(ldap.Gateway.KeysOf("alice@example.test"));
+        Assert.NotEmpty(await AppFixture.GatewayKeysAsync(ldap.App!, "alice@example.test"));
     }
 
     [Fact]
@@ -443,7 +443,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
             """);
         await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync(sync));
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await frank.GetAsync("/api/auth/me"));
-        Assert.All(ldap.Gateway.KeysOf("frank@example.test"), k => Assert.True(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(ldap.App!, "frank@example.test"), k => Assert.True(k.Blocked));
         var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
         var row = people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "frank");
         Assert.True(row.GetProperty("disabled").GetBoolean());
@@ -457,7 +457,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
 
             """);
         await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync(sync));
-        Assert.All(ldap.Gateway.KeysOf("frank@example.test"), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(ldap.App!, "frank@example.test"), k => Assert.False(k.Blocked));
         await (await Browser()).SignedInAsync("frank", "frank-directory-pw");
     }
 
@@ -484,7 +484,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "hank", email = "Hank@example.test" }));
         var id = made.GetProperty("id").GetGuid();
         var hank = await (await Browser()).SignedInAsync("hank", made.GetProperty("password").GetString()!);
-        var key = Assert.Single(ldap.Gateway.KeysOf("hank@example.test")).Token;
+        var key = Assert.Single(await AppFixture.GatewayKeysAsync(ldap.App!, "hank@example.test")).Token;
         var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
         Guid IdOf(string name) => people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == name).GetProperty("id").GetGuid();
         var erin = IdOf("erin");
@@ -513,7 +513,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         Assert.Equal("ldap", now.GetProperty("source").GetString());
         Assert.Equal("hank@example.test", now.GetProperty("email").GetString());
         Assert.Equal("Hank Directory", now.GetProperty("displayName").GetString());
-        Assert.Equal(key, Assert.Single(ldap.Gateway.KeysOf("hank@example.test")).Token);
+        Assert.Equal(key, Assert.Single(await AppFixture.GatewayKeysAsync(ldap.App!, "hank@example.test")).Token);
         var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"));
         Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "person.to_directory" && e.GetProperty("target").GetString() == "hank");
 
@@ -926,7 +926,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
         Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
-        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.False(k.Blocked));
 
         // Signing in says the directory cannot be used; the test and the try say why.
         await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw"));
@@ -1048,7 +1048,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
         Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
-        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.False(k.Blocked));
 
         // A required group that exists, with bob not in it: he leaves, as before. Here by a name written as
         // v5.2.0 saved it (its comma escaped as the server writes it), which still finds the group.
@@ -1066,7 +1066,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
             await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = @"Ops\2C EU" });
             await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
             await StatusAssert.Is(HttpStatusCode.Unauthorized, await bob.GetAsync("/api/auth/me"));
-            Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.True(k.Blocked));
+            Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.True(k.Blocked));
         }
         finally
         {
@@ -1114,7 +1114,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
                 var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
                 Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
                 await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
-                Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+                Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.False(k.Blocked));
             }
 
             await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "" });
@@ -1187,7 +1187,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
             var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
             Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
             await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
-            Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+            Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.False(k.Blocked));
 
             // A try says the reason, not only "not in the required group".
             var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password = "bob-directory-pw" }));
@@ -1247,7 +1247,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
             (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
         await Task.Delay(TimeSpan.FromSeconds(3));
         await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
-        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(f, "bob@example.test"), k => Assert.False(k.Blocked));
     }
 
     [Fact]

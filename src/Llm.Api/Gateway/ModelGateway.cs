@@ -18,16 +18,6 @@ namespace Llm.Api.Gateway;
 public sealed record GatewayCaller(string Person, string Surface = "chat", string? Tag = null, Guid? Conversation = null, Guid? Project = null, string? KeyHash = null,
     string? KeyAlias = null, Action<GatewayRequest>? Booked = null);
 
-/// <summary>The modes of Gateway:Mode: LiteLLM answers all (litellm); the app answers its own chat (chat); the app answers all it serves (own).</summary>
-public static class GatewayModes
-{
-    public const string LiteLlm = "litellm";
-    public const string Chat = "chat";
-    public const string Own = "own";
-
-    public static readonly string[] All = [LiteLlm, Chat, Own];
-}
-
 /// <summary>
 /// The app's own model gateway: a chat completion sent straight to where its model is answered (llama.cpp's router, a copy
 /// of a vLLM or SGLang model, another GPU server), shaped for it (each engine's own fields only), balanced over a pool's
@@ -35,8 +25,8 @@ public static class GatewayModes
 /// (gateway.requests) as it ends: tokens, cost at the model's prices, the first token's time, how it ended. The body passes
 /// through as it comes; the usage is read beside it.
 /// </summary>
-public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClientFactory clients, IOptions<EngineOptions> engine, IOptionsMonitor<LiteLlmOptions> options,
-    TimeProvider clock, ILogger<ModelGateway> logger, GatewayMetrics metrics) : IDisposable
+public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClientFactory clients, IOptions<EngineOptions> engine,
+    TimeProvider clock, ILogger<ModelGateway> logger, GatewayMetrics metrics, IOptionsMonitor<GatewayTimeoutOptions> timeouts) : IDisposable
 {
     /// <summary>The client that checks certificates; and the one for an https server whose certificate is not checked (VerifyTls off).</summary>
     public const string Upstream = "gateway-upstream";
@@ -123,12 +113,6 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
         _ledger.Writer.TryComplete();
         _building.Dispose();
     }
-
-    /// <summary>Whether the app answers its own chat calls itself (Gateway:Mode chat or own).</summary>
-    public bool ForChat => options.CurrentValue.Mode is GatewayModes.Chat or GatewayModes.Own;
-
-    /// <summary>Whether the app answers the API keys' requests itself too (Gateway:Mode own).</summary>
-    public bool ForApi => options.CurrentValue.Mode == GatewayModes.Own;
 
     /// <summary>A request refused before anything was sent, in the ledger with why (it counts as no request and no failure).</summary>
     public void Refused(GatewayCaller caller, string? model, int status, string reason, string message)
@@ -240,7 +224,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                 routes = [.. routes, new Deployment
                 {
                     Name = knowledge.EmbedModel, Kind = Deployment.Embed, BaseUrl = knowledge.EmbedUrl.TrimEnd('/') + "/v1", Model = knowledge.EmbedModel, Key = knowledge.EmbedKey,
-                    Mode = "embedding", Info = new JsonObject { ["mode"] = "embedding" }, LiteLlm = [], Fingerprint = "embed:" + knowledge.EmbedModel,
+                    Mode = "embedding", Info = new JsonObject { ["mode"] = "embedding" }, Params = [], Fingerprint = "embed:" + knowledge.EmbedModel,
                     Price = TokenPrice.Of(null, null, null, price),
                 }];
             }
@@ -301,7 +285,24 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
 
     private void Down(Deployment d) => _down[Key(d)] = clock.GetUtcNow() + DownFor;
 
-    /// <summary>The body as this deployment takes it: its model's name there, only the fields its engine reads, usage on every stream.</summary>
+    /// <summary>A wait as people read it: "16 minutes", "45 seconds".</summary>
+    internal static string Said(TimeSpan t) => t.TotalMinutes >= 1 && t.Seconds == 0
+        ? $"{(int)t.TotalMinutes} minute{((int)t.TotalMinutes == 1 ? "" : "s")}"
+        : (int)Math.Ceiling(t.TotalSeconds) is var n && n == 1 ? "1 second" : $"{(int)Math.Ceiling(t.TotalSeconds)} seconds";
+
+    /// <summary>Every name a request gives its longest answer by: chat and text completions, Anthropic's messages, OpenAI's newer name, the Responses API.</summary>
+    public static readonly string[] AnswerLimits = ["max_tokens", "max_completion_tokens", "max_output_tokens"];
+
+    /// <summary>A whole number however it was given (parsed, or set from code as an int or a long); null for anything else.</summary>
+    private static long? Whole(JsonNode? node) =>
+        node is JsonValue v && v.GetValueKind() == System.Text.Json.JsonValueKind.Number
+            && long.TryParse(v.ToJsonString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
+
+    /// <summary>
+    /// The body as this deployment takes it: its model's name there, only the fields its engine reads, usage on every
+    /// stream, and a longest answer asked above the model's (its max_output_tokens) lowered to it, by whichever name it is
+    /// asked: vLLM, SGLang and other servers write as long as asked, and refuse one past their window.
+    /// </summary>
     public static JsonObject Shape(JsonObject body, Deployment d)
     {
         var shaped = (JsonObject)body.DeepClone();
@@ -323,6 +324,16 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
             var so = shaped["stream_options"] as JsonObject ?? new JsonObject();
             so["include_usage"] = true;
             shaped["stream_options"] = so;
+        }
+        if (Whole(d.Info["max_output_tokens"]) is { } most and > 0)
+        {
+            foreach (var name in AnswerLimits)
+            {
+                if (Whole(shaped[name]) is { } asked && asked > most)
+                {
+                    shaped[name] = most;
+                }
+            }
         }
         return shaped;
     }
@@ -373,6 +384,11 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                     }
                 }
                 HttpResponseMessage res;
+                // The longest wait for the answer to start (its prompt read, a long one too), then the longest pause in it.
+                var (firstByte, idle) = (timeouts.CurrentValue.FirstByteTimeout, timeouts.CurrentValue.IdleTimeout);
+                var sent = clock.GetUtcNow();
+                using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                waiting.CancelAfter(firstByte);
                 try
                 {
                     using var req = new HttpRequestMessage(HttpMethod.Post, d.BaseUrl.TrimEnd('/') + endpoint)
@@ -384,7 +400,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                     {
                         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
                     }
-                    res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                    res = await clients.CreateClient(d.VerifyTls == false ? UpstreamUnchecked : Upstream).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, waiting.Token);
                 }
                 catch (HttpRequestException ex)
                 {
@@ -392,6 +408,13 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                     Release();
                     Down(d);
                     (lastError, lastStatus) = ($"The model server could not be reached: {ex.Message}", 502);
+                    continue;
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // No answer in time: another copy, else its fallback (nothing has reached the caller yet).
+                    Release();
+                    (lastError, lastStatus) = ($"The model did not start its answer within {Said(firstByte)}.", 504);
                     continue;
                 }
                 catch
@@ -407,7 +430,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                     {
                         row.Call = "completion";
                     }
-                    var inner = await res.Content.ReadAsStreamAsync(ct);
+                    var inner = new TimedStream(await res.Content.ReadAsStreamAsync(ct), meter, firstByte - (clock.GetUtcNow() - sent), firstByte, idle);
                     var metered = new MeteredStream(inner, meter, ended =>
                     {
                         Release();
@@ -512,7 +535,7 @@ public sealed partial class ModelGateway(IServiceScopeFactory scopes, IHttpClien
                 throw new ChatGatewayException("The model server could not be reached: " + ex.Message, 502);
             }
         }
-        decimal Unit(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x : 0m;
+        decimal Unit(string k) => d.Params[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x : 0m;
         if (!res.IsSuccessStatusCode)
         {
             var said = await res.Content.ReadAsStringAsync(ct);
@@ -715,6 +738,9 @@ public sealed class SseMeter(TimeProvider clock)
     public DateTimeOffset? FirstToken { get; private set; }
     public string? Error { get; private set; }
 
+    /// <summary>The answer ended by the gateway (a wait past its limit): booked as failed, with why.</summary>
+    public void Fail(string why) => Error ??= why;
+
     // A body that is not a stream (one JSON answer): kept, up to 4 MB, and read at its end.
     private readonly StringBuilder _whole = new();
     private bool _lines;
@@ -849,6 +875,79 @@ public sealed class SseMeter(TimeProvider clock)
 }
 
 /// <summary>The upstream's body as it is read, each piece shown to the meter; once, at its end or its disposal, <c>ended</c> is told whether it was read whole.</summary>
+/// <summary>
+/// Configuration section "Gateway": how long the gateway waits on a model (Settings → API keys), the app's own calls and
+/// API keys' alike. Past either, the answer is stopped and booked as failed with why; before its first byte reached the
+/// caller, another copy or the model's fallback is asked first.
+/// </summary>
+public sealed class GatewayTimeoutOptions
+{
+    /// <summary>Gateway:FirstByteTimeout: the longest wait for an answer to start (a long prompt read first).</summary>
+    public TimeSpan FirstByteTimeout { get; set; } = TimeSpan.FromMinutes(16);
+
+    /// <summary>Gateway:IdleTimeout: the longest pause in an answer once it started.</summary>
+    public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromMinutes(16);
+}
+
+/// <summary>
+/// A model's answer read with a limit on each wait: its first bytes within what is left of the first-byte wait, then no
+/// pause longer than the idle wait. A wait past its limit ends the read with an error (the request is cancelled at the
+/// server) and the meter says why, so the ledger books it as failed.
+/// </summary>
+internal sealed class TimedStream(Stream inner, SseMeter meter, TimeSpan firstLeft, TimeSpan firstByte, TimeSpan idle) : Stream
+{
+    private bool _started;
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        var limit = _started ? idle : firstLeft < TimeSpan.Zero ? TimeSpan.Zero : firstLeft;
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        wait.CancelAfter(limit);
+        try
+        {
+            var n = await inner.ReadAsync(buffer, wait.Token);
+            _started |= n > 0;
+            return n;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            var why = _started ? $"The model paused its answer for more than {ModelGateway.Said(idle)}: it was stopped."
+                : $"The model did not start its answer within {ModelGateway.Said(firstByte)}.";
+            meter.Fail(why);
+            throw new IOException(why);
+        }
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await inner.DisposeAsync();
+        await base.DisposeAsync();
+    }
+}
+
 internal sealed class MeteredStream(Stream inner, SseMeter meter, Action<bool> ended) : Stream
 {
     private int _ended;

@@ -123,8 +123,8 @@ public sealed class CodeStudioTests(AppFixture app)
         // No company CA given: none goes with it, and the workspace trusts the system's CAs alone.
         Assert.Equal("", spec["ca"]!.GetValue<string>());
         // Its agent's own key at the gateway, the person's.
-        var key = gateway.Keys.Values.Single(k => k.Alias == $"studio:{id:N}");
-        Assert.Equal((email, key.Secret), (key.Email, spec["api_key"]!.GetValue<string>()));
+        var key = (await app.KeysOfAsync(email, f)).Single(k => k.Alias == $"studio:{id:N}");
+        Assert.Equal(key.Token, Llm.Api.Gateway.AnswerCache.HashOf(spec["api_key"]!.GetValue<string>()));
 
         // The IDE's requests, on to the engine with its key; the page never has it.
         var state = await kim.JsonAsync(await kim.GetAsync($"/api/studio/w/{id}/state"));
@@ -172,7 +172,7 @@ public sealed class CodeStudioTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Conflict, await kim.GetAsync($"/api/studio/w/{id}/state"));
         await StatusAssert.Is(HttpStatusCode.NoContent, await kim.Http.DeleteAsync(new Uri($"/api/studio/workspaces/{id}", UriKind.Relative)));
         Assert.Contains(service.Asked, a => a.Method == "DELETE" && a.Path == $"/v1/workspaces/{id:N}");
-        Assert.DoesNotContain(gateway.Keys.Values, k => k.Alias == $"studio:{id:N}");
+        Assert.DoesNotContain(await app.KeysOfAsync(email, f), k => k.Alias == $"studio:{id:N}");
         Assert.Empty((await kim.JsonAsync(await kim.GetAsync("/api/studio/workspaces"))).GetProperty("workspaces").EnumerateArray());
     }
 

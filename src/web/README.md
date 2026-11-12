@@ -59,7 +59,7 @@ E2E_BASE_URL=https://llm.example.com E2E_PASSWORD=... npm run e2e
 
 - `E2E_CHANNEL=chrome` uses the installed Chrome when Playwright's own browser
   can't be downloaded.
-- `E2E_NO_GATEWAY=1` is for a stack without a model gateway, as in CI.
+- `E2E_NO_ENGINE=1` is for a stack with no model behind its gateway, as in CI.
 - CI (`frontend-e2e` in `.github/workflows/app.yml`) runs the real `web` and `app`
   images behind Traefik with the production path split.
 

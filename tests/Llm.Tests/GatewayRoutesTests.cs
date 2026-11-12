@@ -71,7 +71,7 @@ public sealed class GatewayRoutesTests(AppFixture app)
             var t = Assert.Single(listed, m => m.Name == "tiny");
             Assert.Equal((8192, (int?)4096), (t.Context, t.MaxOutput));
         }
-        // LiteLLM was given exactly these, by these fingerprints: nothing is registered anew.
-        Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), gateway.Managed.Values.Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
+        // Built again, the same fingerprints: nothing changed, nothing to pass on.
+        Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), (await app.RoutesOfAsync(f)).Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
     }
 }

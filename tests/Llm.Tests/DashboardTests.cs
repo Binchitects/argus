@@ -70,7 +70,7 @@ public sealed class DashboardTests(AppFixture app)
             var d = await b.JsonAsync(await b.GetAsync($"/api/dashboards/{uid}"));
             var sqlPanels = d.GetProperty("panels").EnumerateArray()
                 .Where(p => p.GetProperty("supported").GetBoolean() && p.GetProperty("type").GetString() is not ("text" or "row")
-                    && p.GetProperty("datasources").EnumerateArray().Any(s => s.GetString() is SqlDatasource.Uid or GatewayDatasource.Uid)).ToList();
+                    && p.GetProperty("datasources").EnumerateArray().Any(s => s.GetString() is GatewayDatasource.Uid)).ToList();
             foreach (var p in sqlPanels)
             {
                 var r = await Query(b, uid, p.GetProperty("key").GetInt32(), 3_600_000);
@@ -319,23 +319,12 @@ public sealed class DashboardTests(AppFixture app)
     [InlineData("select 1; reset role", true)]
     [InlineData("select 1; drop table x", true)]
     public void Only_single_statements_run(string sql, bool rejected) =>
-        Assert.Equal(rejected, SqlDatasource.HasSecondStatement(sql.TrimEnd(';')));
+        Assert.Equal(rejected, SqlRows.HasSecondStatement(sql.TrimEnd(';')));
 }
 
 [Collection(nameof(AppCollection))]
 public sealed class ReadOnlyTests(AppFixture app)
 {
-    [Fact]
-    public async Task Panel_queries_cannot_write_even_through_a_function()
-    {
-        var sql = app.Factory.Services.GetService(typeof(SqlDatasource)) as SqlDatasource;
-        var ex = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() =>
-            sql!.QueryAsync("""delete from "LiteLLM_SpendLogs" returning 1""", CancellationToken.None));
-        Assert.True(ex.SqlState is "25006" or "42501", ex.SqlState); // read-only transaction / permission denied
-        var rows = await sql!.QueryAsync("""select count(*) from "LiteLLM_SpendLogs" where request_id in ('r1','r2','r3','r4','r5')""", CancellationToken.None);
-        Assert.Equal(5.0, rows.Rows[0][0]);
-    }
-
     [Fact]
     public async Task Ledger_panels_read_the_schema_gateway_alone_and_cannot_write()
     {
@@ -351,7 +340,7 @@ public sealed class ReadOnlyTests(AppFixture app)
     [Fact]
     public async Task A_runaway_query_is_stopped()
     {
-        var sql = app.Factory.Services.GetService(typeof(SqlDatasource)) as SqlDatasource;
+        var sql = app.Factory.Services.GetService(typeof(GatewayDatasource)) as GatewayDatasource;
         var ex = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() => sql!.QueryAsync("select pg_sleep(60)", CancellationToken.None));
         Assert.Equal("57014", ex.SqlState); // statement timeout
     }

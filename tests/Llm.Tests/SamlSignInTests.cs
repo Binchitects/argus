@@ -121,7 +121,7 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
         Assert.Equal("ada@example.test", me.GetProperty("email").GetString());
         Assert.Equal("Ada Lovelace", me.GetProperty("displayName").GetString());
         Assert.True(me.GetProperty("isAdmin").GetBoolean());
-        Assert.NotEmpty(saml.Gateway.KeysOf("ada@example.test"));
+        Assert.NotEmpty(await AppFixture.GatewayKeysAsync(saml.App!, "ada@example.test"));
 
         // The provider's groups are kept: a directory group in the app has them as members.
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -186,8 +186,8 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
         Assert.Contains(await AuditAsync(admin), e => e.GetProperty("action").GetString() == "sign_in" && !e.GetProperty("success").GetBoolean()
             && e.GetProperty("detail").GetString()!.StartsWith("company sign-in (SAML): ", StringComparison.Ordinal)
             && e.GetProperty("detail").GetString()!.Contains(reason, StringComparison.Ordinal));
-        Assert.Empty(saml.Gateway.KeysOf(boss.Email!));
-        Assert.Empty(saml.Gateway.KeysOf(mallory.Email!));
+        Assert.Empty(await AppFixture.GatewayKeysAsync(saml.App!, boss.Email!));
+        Assert.Empty(await AppFixture.GatewayKeysAsync(saml.App!, mallory.Email!));
     }
 
     [Fact]
@@ -199,7 +199,7 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
         Assert.Equal("/chat", Location(answer));
         var me = await b.JsonAsync(await b.GetAsync("/api/auth/me"));
         Assert.Equal("carl@example.test.evil.test", me.GetProperty("email").GetString());
-        Assert.Empty(saml.Gateway.KeysOf("carl@example.test"));
+        Assert.Empty(await AppFixture.GatewayKeysAsync(saml.App!, "carl@example.test"));
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await refused.GetAsync("/api/auth/me"));
         // The provider said no: their other sessions end and their keys stop, until they are back in the group.
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await session.GetAsync("/api/auth/me"));
-        Assert.All(saml.Gateway.KeysOf("bea@example.test"), k => Assert.True(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(saml.App!, "bea@example.test"), k => Assert.True(k.Blocked));
         var (back, welcome) = await saml.SignInAsync(f, bea);
         Assert.Equal("/chat", Location(welcome));
         await StatusAssert.Is(HttpStatusCode.OK, await back.GetAsync("/api/auth/me"));

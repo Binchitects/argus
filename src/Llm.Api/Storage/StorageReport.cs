@@ -33,7 +33,7 @@ public sealed record KeepRule(string What, string Rule);
 /// see, and how each grew (the daily samples). Each part answers on its own: one missing says why, the rest stand.
 /// </summary>
 public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, StorageFiles files, StoragePlaces places, StorageCache cache, CodeIntelAdmin codeIntel,
-    PromDatasource prom, LokiDatasource loki, IConfiguration config, IOptions<DashboardOptions> dashboards, IOptionsMonitor<StorageOptions> options,
+    PromDatasource prom, LokiDatasource loki, IOptionsMonitor<StorageOptions> options,
     IOptionsMonitor<Retention.RetentionOptions> retention, IOptionsMonitor<Gateway.AnswerCacheOptions> answerCache, TimeProvider clock, ILogger<StorageReport> logger)
 {
     /// <summary>What the app cannot see without Docker's socket, which it never has (root on the host for anyone who reaches it).</summary>
@@ -64,12 +64,6 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         ["gateway.requests"] = "the app's own ledger of model requests: usage, cost, credit",
         ["gateway.api_keys"] = "API keys, as the app keeps them",
         ["gateway.rate_windows"] = "each API key's requests and tokens this minute",
-        ["LiteLLM_SpendLogs"] = "the gateway's request log: usage, cost, the dashboards",
-        ["LiteLLM_ErrorLogs"] = "the gateway's errors",
-        ["LiteLLM_AuditLog"] = "the gateway's audit log",
-        ["LiteLLM_DailyUserSpend"] = "spend a day, per person",
-        ["LiteLLM_DailyTeamSpend"] = "spend a day, per team",
-        ["LiteLLM_VerificationToken"] = "API keys",
     };
 
     public StorageOptions Settings => options.CurrentValue;
@@ -166,11 +160,10 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         };
     }
 
-    /// <summary>Every database on the server the app can reach, and the largest tables of the app's and the gateway's.</summary>
+    /// <summary>Every database on the server the app can reach, and the largest tables of the app's.</summary>
     public async Task<(IReadOnlyList<DatabaseSize> Databases, IReadOnlyList<TableSize> Tables, string? Problem)> DatabasesAsync(CancellationToken ct)
     {
         var app = db.Database.GetDbConnection().Database;
-        var gateway = dashboards.Value.SqlDatabase;
         var list = new List<DatabaseSize>();
         var tables = new List<TableSize>();
         string? problem = null;
@@ -190,7 +183,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
                     while (await r.ReadAsync(ct))
                     {
                         var name = r.GetString(0);
-                        list.Add(new DatabaseSize(name, r.GetInt64(1), DatabaseWhat(name, app, gateway)));
+                        list.Add(new DatabaseSize(name, r.GetInt64(1), DatabaseWhat(name, app)));
                     }
                 }
                 tables.AddRange(await LargestAsync(conn, app, ct));
@@ -203,19 +196,6 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
         {
             problem = $"The databases' sizes could not be read: {ex.Message}";
-        }
-        if (list.Any(d => d.Name == gateway))
-        {
-            try
-            {
-                await using var conn = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(DatabaseSettings.ConnectionString(config)) { Database = gateway }.ConnectionString);
-                await conn.OpenAsync(ct);
-                tables.AddRange(await LargestAsync(conn, gateway, ct));
-            }
-            catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
-            {
-                problem ??= $"The gateway's tables could not be read: {ex.Message}";
-            }
         }
         return (list, tables, problem);
     }
@@ -239,11 +219,11 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         return list;
     }
 
-    private static string? DatabaseWhat(string name, string app, string gateway) =>
-        name == app ? "The app: chats and their files, settings, company knowledge, the audit log, its ledger of model requests"
-        : name == gateway ? "The gateway: API keys, credit, and its log of every request"
+    private static string? DatabaseWhat(string name, string app) =>
+        name == app ? "The app: chats and their files, settings, company knowledge, the audit log, its ledger of model requests and API keys"
         : name switch
         {
+            "litellm" => "LiteLLM's, from before 8.0: its keys and log are in the app's ledger, and the upgrade drops it",
             "langfuse" => "Langfuse: traces",
             "code-intel" => $"{Brand.CodeIntel}",
             "postgres" => "Postgres's own (usually empty)",
@@ -456,7 +436,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         var r = retention.CurrentValue;
         string Kept(int amount, string unit, string where) => amount > 0 ? $"Kept {amount} {unit}, then deleted by the hourly sweep. {where}" : $"Kept forever. {where}";
         rules.Add(new("The audit log", Kept(r.AuditYears, "years", "Settings → Data retention (HIPAA keeps such records six years); the chain starts again at its oldest entry kept.")));
-        rules.Add(new("The gateway's request log", Kept(r.GatewayLogDays, "days", "Settings → Data retention: usage, credit and the dashboards read it.")));
+        rules.Add(new("The ledger of model requests", Kept(r.GatewayLogDays, "days", "Settings → Data retention: usage, credit and the dashboards read it.")));
         rules.Add(new("The record of tool calls", Kept(r.ToolCallDays, "days", "Settings → Data retention.")));
         rules.Add(new("News in the bell", Kept(r.NotificationDays, "days", "Settings → Data retention.")));
         rules.Add(new("The prompt log of API requests", answerCache.CurrentValue.LogPrompts

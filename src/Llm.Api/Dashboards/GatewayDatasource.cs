@@ -22,7 +22,7 @@ public sealed partial class GatewayDatasource(IOptions<DashboardOptions> options
     public async Task<TableResult> QueryAsync(string sql, CancellationToken ct)
     {
         sql = sql.Trim().TrimEnd(';');
-        if (SqlDatasource.HasSecondStatement(sql))
+        if (SqlRows.HasSecondStatement(sql))
         {
             throw new FormatException("A panel query must be a single statement.");
         }
@@ -31,13 +31,13 @@ public sealed partial class GatewayDatasource(IOptions<DashboardOptions> options
         await conn.OpenAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
         await using (var setup = new NpgsqlCommand(
-            $"SET TRANSACTION READ ONLY; SET LOCAL ROLE {SqlDatasource.ReadOnlyRole}; SET LOCAL search_path = gateway; SET LOCAL statement_timeout = {(int)options.Value.StatementTimeout.TotalMilliseconds}", conn, tx))
+            $"SET TRANSACTION READ ONLY; SET LOCAL ROLE {SqlRows.ReadOnlyRole}; SET LOCAL search_path = gateway; SET LOCAL statement_timeout = {(int)options.Value.StatementTimeout.TotalMilliseconds}", conn, tx))
         {
             await setup.ExecuteNonQueryAsync(ct);
         }
         await using var cmd = new NpgsqlCommand(sql, conn, tx);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var columns = Enumerable.Range(0, reader.FieldCount).Select(i => new Column(reader.GetName(i), SqlDatasource.TypeOf(reader.GetFieldType(i)))).ToList();
+        var columns = Enumerable.Range(0, reader.FieldCount).Select(i => new Column(reader.GetName(i), SqlRows.TypeOf(reader.GetFieldType(i)))).ToList();
         var rows = new List<object?[]>();
         var capped = false;
         while (await reader.ReadAsync(ct))
@@ -50,7 +50,7 @@ public sealed partial class GatewayDatasource(IOptions<DashboardOptions> options
             var row = new object?[reader.FieldCount];
             for (var i = 0; i < row.Length; i++)
             {
-                row[i] = reader.IsDBNull(i) ? null : SqlDatasource.Normalise(reader.GetValue(i));
+                row[i] = reader.IsDBNull(i) ? null : SqlRows.Normalise(reader.GetValue(i));
             }
             rows.Add(row);
         }
@@ -58,8 +58,7 @@ public sealed partial class GatewayDatasource(IOptions<DashboardOptions> options
     }
 
     /// <summary>
-    /// The read-only role (roles are the server's, so it is the one LiteLLM's datasource uses) given the schema gateway of
-    /// the app's database and nothing else of it: public's tables (people, chats, keys) stay out of panel SQL.
+    /// The read-only role given the schema gateway of the app's database and nothing else of it: public's tables (people, chats, keys) stay out of panel SQL.
     /// </summary>
     private async Task EnsureRoleAsync(CancellationToken ct)
     {
@@ -71,16 +70,16 @@ public sealed partial class GatewayDatasource(IOptions<DashboardOptions> options
         await conn.OpenAsync(ct);
         await using var cmd = new NpgsqlCommand($"""
             DO $$ BEGIN
-              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{SqlDatasource.ReadOnlyRole}') THEN
-                CREATE ROLE {SqlDatasource.ReadOnlyRole} NOLOGIN;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{SqlRows.ReadOnlyRole}') THEN
+                CREATE ROLE {SqlRows.ReadOnlyRole} NOLOGIN;
               END IF;
             END $$;
-            GRANT {SqlDatasource.ReadOnlyRole} TO CURRENT_USER;
-            REVOKE ALL ON SCHEMA public FROM {SqlDatasource.ReadOnlyRole};
-            REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {SqlDatasource.ReadOnlyRole};
-            GRANT USAGE ON SCHEMA gateway TO {SqlDatasource.ReadOnlyRole};
-            GRANT SELECT ON ALL TABLES IN SCHEMA gateway TO {SqlDatasource.ReadOnlyRole};
-            ALTER DEFAULT PRIVILEGES IN SCHEMA gateway GRANT SELECT ON TABLES TO {SqlDatasource.ReadOnlyRole};
+            GRANT {SqlRows.ReadOnlyRole} TO CURRENT_USER;
+            REVOKE ALL ON SCHEMA public FROM {SqlRows.ReadOnlyRole};
+            REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {SqlRows.ReadOnlyRole};
+            GRANT USAGE ON SCHEMA gateway TO {SqlRows.ReadOnlyRole};
+            GRANT SELECT ON ALL TABLES IN SCHEMA gateway TO {SqlRows.ReadOnlyRole};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA gateway GRANT SELECT ON TABLES TO {SqlRows.ReadOnlyRole};
             """, conn);
         for (var attempt = 1; ; attempt++)
         {

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using Llm.Api.Dashboards;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace Llm.Api.Gateway;
@@ -12,48 +11,14 @@ namespace Llm.Api.Gateway;
 public sealed record SpendChange(int Rows, decimal Before, decimal After, int Unpriced);
 
 /// <summary>
-/// Writes to the gateway's request log (LiteLLM_SpendLogs), where every page reads spend from (usage,
-/// credit, the dashboards, chargeback): a video clip, and a picture the media studio has the picture server
-/// make itself, both made without the gateway, booked as the gateway books a picture; and past requests' cost worked out again at today's prices
-/// (CostRecalculation). Only these rows: the gateway's own running totals are left as they are.
+/// Writes to the app's ledger of model requests (gateway.requests), where every page reads spend from (usage, credit, the
+/// dashboards, chargeback): a video clip, and a picture or a sound the media studio has its servers make themselves, each
+/// booked as the gateway books one; and past requests' cost worked out again at today's prices (CostRecalculation).
 /// </summary>
-public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfiguration config, IServiceScopeFactory scopes, ILogger<SpendLog> logger)
+public sealed partial class SpendLog(IConfiguration config, IServiceScopeFactory scopes, ILogger<SpendLog> logger)
 {
-    /// <summary>The call type of a clip the app booked (LiteLLM's own name for video generation).</summary>
+    /// <summary>The call types of what the app booked itself (the names the ledger's import knows them by).</summary>
     public const string VideoCall = "avideo_generation";
-
-    private readonly string _connectionString = new NpgsqlConnectionStringBuilder(DatabaseSettings.ConnectionString(config))
-    {
-        Database = options.Value.SqlDatabase,
-        ApplicationName = "llm-app spend",
-    }.ConnectionString;
-
-    /// <summary>
-    /// A person erased (GDPR Article 17): their requests stay in the gateway's totals, no longer theirs. Who, their address, their
-    /// session and what was sent and answered are cleared; the cost, tokens and model stay. Returns the rows changed.
-    /// </summary>
-    public async Task<int> ForgetAsync(string email, CancellationToken ct)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-        await using var update = new NpgsqlCommand("""
-            update "LiteLLM_SpendLogs" set "user" = 'erased', end_user = null, requester_ip_address = null, session_id = null,
-                messages = null, response = null, proxy_server_request = null, metadata = '{}'::jsonb
-            where "user" = @email
-            """, conn);
-        update.Parameters.AddWithValue("email", email);
-        return await update.ExecuteNonQueryAsync(ct);
-    }
-
-    /// <summary>Removes the gateway's requests older than <paramref name="before"/> (retention); returns how many.</summary>
-    public async Task<int> DeleteBeforeAsync(DateTimeOffset before, CancellationToken ct)
-    {
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-        await using var delete = new NpgsqlCommand("""delete from "LiteLLM_SpendLogs" where "startTime" < @before""", conn);
-        delete.Parameters.AddWithValue("before", DateTime.SpecifyKind(before.UtcDateTime, DateTimeKind.Unspecified));
-        return await delete.ExecuteNonQueryAsync(ct);
-    }
 
     /// <summary>The call type of a picture the app booked (LiteLLM's own name for image generation).</summary>
     public const string PictureCall = "aimage_generation";
@@ -63,60 +28,37 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
     public const string MusicCall = "amusic_generation";
 
     /// <summary>
-    /// A clip made for a person (in a chat or the media studio): in the log as the chat's request (its key, its person),
-    /// with its length kept so its cost can be worked out again. A log that cannot be written is logged and left: the clip
-    /// is made, and its cost is still where it was made.
+    /// A clip made for a person (in a chat or the media studio): in the ledger as the chat's request (its person), with its
+    /// length kept so its cost can be worked out again. A ledger that cannot be written is logged and left: the clip is
+    /// made, and its cost is still where it was made.
     /// </summary>
-    public Task BookVideoAsync(string email, string chatKeyHash, string model, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
-        BookAsync(VideoCall, Models.MediaModels.VideoUrl, email, chatKeyHash, model, cost, start, end, new JsonObject { ["video_seconds"] = seconds }, ct);
+    public Task BookVideoAsync(string email, string model, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(VideoCall, Models.MediaModels.VideoUrl, email, model, cost, start, end, new JsonObject { ["video_seconds"] = seconds }, ct);
 
     /// <summary>Pictures made for a person by the picture server itself (the media studio: changed, enlarged), as the gateway books one.</summary>
-    public Task BookPicturesAsync(string email, string chatKeyHash, string model, int count, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
-        BookAsync(PictureCall, Models.MediaModels.ImageUrl, email, chatKeyHash, model, cost, start, end, new JsonObject { ["pictures"] = count }, ct);
+    public Task BookPicturesAsync(string email, string model, int count, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(PictureCall, Models.MediaModels.ImageUrl, email, model, cost, start, end, new JsonObject { ["pictures"] = count }, ct);
 
     /// <summary>A sound the studio server made for a person: speech (its characters kept) or music (its seconds kept).</summary>
-    public Task BookSoundAsync(string call, string email, string chatKeyHash, string model, double amount, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
-        BookAsync(call, Models.MediaModels.StudioUrl, email, chatKeyHash, model, cost, start, end,
+    public Task BookSoundAsync(string call, string email, string model, double amount, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(call, Models.MediaModels.StudioUrl, email, model, cost, start, end,
             new JsonObject { [call == SpeechCall ? "characters" : "music_seconds"] = amount }, ct);
 
-    private async Task BookAsync(string call, string apiBase, string email, string chatKeyHash, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
+    private async Task BookAsync(string call, string apiBase, string email, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
         JsonObject metadata, CancellationToken ct)
     {
         try
         {
-            await using var conn = new NpgsqlConnection(_connectionString);
-            await conn.OpenAsync(ct);
-            await using var insert = new NpgsqlCommand("""
-                insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, total_tokens, prompt_tokens, completion_tokens,
-                  "startTime", "endTime", model, model_group, custom_llm_provider, api_base, "user", metadata, end_user, status)
-                values (@id, @call, @key, @spend, 0, 0, 0, @start, @end, @model, @model, 'arena', @base, '', @metadata::jsonb, @email, 'success')
-                """, conn);
             var id = $"arena-{call switch { VideoCall => "video", PictureCall => "picture", SpeechCall => "speech", _ => "music" }}-{Guid.NewGuid():N}";
-            insert.Parameters.AddWithValue("id", id);
-            insert.Parameters.AddWithValue("call", call);
-            insert.Parameters.AddWithValue("key", chatKeyHash);
-            insert.Parameters.AddWithValue("spend", (double)cost);
-            insert.Parameters.AddWithValue("start", DateTime.SpecifyKind(start.UtcDateTime, DateTimeKind.Unspecified));
-            insert.Parameters.AddWithValue("end", DateTime.SpecifyKind(end.UtcDateTime, DateTimeKind.Unspecified));
-            insert.Parameters.AddWithValue("model", model);
-            insert.Parameters.AddWithValue("base", apiBase);
-            metadata["user_api_key_alias"] = Chat.ChatKey.Alias;
-            metadata["booked_by"] = "app";
-            insert.Parameters.AddWithValue("metadata", metadata.ToJsonString());
-            insert.Parameters.AddWithValue("email", email);
-            await insert.ExecuteNonQueryAsync(ct);
             await LedgerAsync(id, call, apiBase, email, model, cost, start, end, metadata, ct);
         }
-        catch (NpgsqlException ex)
+        catch (Exception ex) when (ex is NpgsqlException or DbUpdateException)
         {
             LogNotBooked(logger, ex.Message);
         }
     }
 
-    /// <summary>
-    /// The same booking in the app's own ledger, at once (its credit counts it now), under LiteLLM's id: the mirror of
-    /// LiteLLM's log finds it there and leaves it.
-    /// </summary>
+    /// <summary>The booking in the ledger, at once (its credit counts it now).</summary>
     private async Task LedgerAsync(string id, string call, string apiBase, string email, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
         JsonObject metadata, CancellationToken ct)
     {
@@ -139,95 +81,16 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
     }
 
     /// <summary>
-    /// The requests of a time range at today's prices: chat completions by their tokens (cached ones at
-    /// the cached price), clips by their length, and pictures booked as free at one picture each. The
-    /// log keeps no count of pictures: a request with a cost may have asked for several (an API key's
-    /// n), so its cost is kept even when every cost is worked out again. <paramref name="onlyFree"/>:
-    /// only those booked at no cost. Applied, each changed row is written; otherwise only counted.
+    /// The requests of a time range at today's prices, in the ledger: chat completions by their tokens (cached ones at the
+    /// cached price), clips by their length, pictures booked as free at one picture each; a sound (speech, music, a
+    /// transcription) and a clip of no known length keep what they cost. <paramref name="onlyFree"/>: only those booked at
+    /// no cost. Applied, each changed row is written; otherwise only counted.
     /// </summary>
     public async Task<SpendChange> RepriceAsync(DateTimeOffset from, DateTimeOffset to, bool onlyFree, IReadOnlyDictionary<string, TokenPrice> models, PriceOptions defaults,
         bool apply, CancellationToken ct)
     {
         var standard = TokenPrice.Of(null, null, null, defaults);
-        var cte = $"""
-            with p as (
-              select * from unnest(@names::text[], @input::numeric[], @cached::numeric[], @output::numeric[]) as t(name, i, c, o)
-            ), r as (
-              select s.request_id, s.spend::numeric as old,
-                case
-                  when s.call_type in ('aimage_generation', 'image_generation') then case when coalesce(s.spend, 0) = 0 then @image else s.spend::numeric end
-                  when s.call_type = '{VideoCall}' and jsonb_typeof(s.metadata->'video_seconds') = 'number' then (s.metadata->>'video_seconds')::numeric * @video
-                  when s.call_type in ('aspeech', 'speech', 'atranscription', 'transcription', '{VideoCall}', '{MusicCall}') then null
-                  else (greatest(coalesce(s.prompt_tokens, 0) - least({UsageEndpoints.Cached}, coalesce(s.prompt_tokens, 0)), 0) * coalesce(p.i, @di)
-                        + least({UsageEndpoints.Cached}, coalesce(s.prompt_tokens, 0)) * coalesce(p.c, @dc)
-                        + coalesce(s.completion_tokens, 0) * coalesce(p.o, @do)) / 1000000
-                end as new
-              from "LiteLLM_SpendLogs" s
-              left join p on p.name = {UsageEndpoints.Model}
-              where s."startTime" >= @from and s."startTime" < @to and s.call_type <> '' and coalesce(s.status, 'success') <> 'failure'
-                and (not @onlyFree or s.spend = 0)
-            )
-            """;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        NpgsqlCommand Command(string sql)
-        {
-            var cmd = new NpgsqlCommand(sql, conn, tx);
-            var names = models.Keys.ToArray();
-            cmd.Parameters.AddWithValue("names", names);
-            cmd.Parameters.AddWithValue("input", names.Select(n => models[n].Input).ToArray());
-            cmd.Parameters.AddWithValue("cached", names.Select(n => models[n].CachedInput).ToArray());
-            cmd.Parameters.AddWithValue("output", names.Select(n => models[n].Output).ToArray());
-            cmd.Parameters.AddWithValue("di", standard.Input);
-            cmd.Parameters.AddWithValue("dc", standard.CachedInput);
-            cmd.Parameters.AddWithValue("do", standard.Output);
-            cmd.Parameters.AddWithValue("image", defaults.PerImage);
-            cmd.Parameters.AddWithValue("video", defaults.PerVideoSecond);
-            cmd.Parameters.AddWithValue("from", from.UtcDateTime);
-            cmd.Parameters.AddWithValue("to", to.UtcDateTime);
-            cmd.Parameters.AddWithValue("onlyFree", onlyFree);
-            return cmd;
-        }
-        SpendChange change;
-        await using (var count = Command(cte + """
-            select count(*) filter (where new is not null and abs(new - old) > 1e-12),
-                   coalesce(sum(old) filter (where new is not null and abs(new - old) > 1e-12), 0),
-                   coalesce(sum(new) filter (where new is not null and abs(new - old) > 1e-12), 0),
-                   count(*) filter (where new is null)
-            from r
-            """))
-        await using (var reader = await count.ExecuteReaderAsync(ct))
-        {
-            await reader.ReadAsync(ct);
-            change = new SpendChange((int)reader.GetInt64(0), reader.GetDecimal(1), reader.GetDecimal(2), (int)reader.GetInt64(3));
-        }
-        if (apply && change.Rows > 0)
-        {
-            await using var update = Command(cte + """
-                update "LiteLLM_SpendLogs" s set spend = r.new
-                from r where s.request_id = r.request_id and r.new is not null and abs(r.new - r.old) > 1e-12
-                """);
-            await update.ExecuteNonQueryAsync(ct);
-        }
-        await tx.CommitAsync(ct);
-        if (apply && change.Rows > 0)
-        {
-            await RepriceLedgerAsync(from, to, onlyFree, models, standard, defaults, ct);
-        }
-        return change;
-    }
-
-    /// <summary>
-    /// The same prices in the app's own ledger, which credit reads: its tokens, its cached tokens, a clip's seconds; a
-    /// sound (speech, music, a transcription) and a clip of no known length keep what they cost.
-    /// </summary>
-    private async Task RepriceLedgerAsync(DateTimeOffset from, DateTimeOffset to, bool onlyFree, IReadOnlyDictionary<string, TokenPrice> models, TokenPrice standard,
-        PriceOptions defaults, CancellationToken ct)
-    {
-        await using var conn = new NpgsqlConnection(DatabaseSettings.ConnectionString(config));
-        await conn.OpenAsync(ct);
-        await using var cmd = new NpgsqlCommand("""
+        const string Cte = """
             with p as (
               select * from unnest(@names::text[], @input::numeric[], @cached::numeric[], @output::numeric[]) as t(name, i, c, o)
             ), r as (
@@ -243,27 +106,55 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
               from gateway.requests g left join p on p.name = g.model
               where g.started_at >= @from and g.started_at < @to and g.status in ('done', 'cached') and (not @onlyFree or g.cost = 0)
             )
-            update gateway.requests g set cost = r.new
-            from r where g.id = r.id and r.new is not null and abs(r.new - r.old) > 1e-12
-            """, conn);
-        var names = models.Keys.ToArray();
-        cmd.Parameters.AddWithValue("names", names);
-        cmd.Parameters.AddWithValue("input", names.Select(n => models[n].Input).ToArray());
-        cmd.Parameters.AddWithValue("cached", names.Select(n => models[n].CachedInput).ToArray());
-        cmd.Parameters.AddWithValue("output", names.Select(n => models[n].Output).ToArray());
-        cmd.Parameters.AddWithValue("di", standard.Input);
-        cmd.Parameters.AddWithValue("dc", standard.CachedInput);
-        cmd.Parameters.AddWithValue("do", standard.Output);
-        cmd.Parameters.AddWithValue("image", defaults.PerImage);
-        cmd.Parameters.AddWithValue("video", defaults.PerVideoSecond);
-        cmd.Parameters.AddWithValue("from", from.ToUniversalTime());
-        cmd.Parameters.AddWithValue("to", to.ToUniversalTime());
-        cmd.Parameters.AddWithValue("onlyFree", onlyFree);
-        await cmd.ExecuteNonQueryAsync(ct);
+            """;
+        await using var conn = new NpgsqlConnection(DatabaseSettings.ConnectionString(config));
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        NpgsqlCommand Command(string sql)
+        {
+            var cmd = new NpgsqlCommand(sql, conn, tx);
+            var names = models.Keys.ToArray();
+            cmd.Parameters.AddWithValue("names", names);
+            cmd.Parameters.AddWithValue("input", names.Select(n => models[n].Input).ToArray());
+            cmd.Parameters.AddWithValue("cached", names.Select(n => models[n].CachedInput).ToArray());
+            cmd.Parameters.AddWithValue("output", names.Select(n => models[n].Output).ToArray());
+            cmd.Parameters.AddWithValue("di", standard.Input);
+            cmd.Parameters.AddWithValue("dc", standard.CachedInput);
+            cmd.Parameters.AddWithValue("do", standard.Output);
+            cmd.Parameters.AddWithValue("image", defaults.PerImage);
+            cmd.Parameters.AddWithValue("video", defaults.PerVideoSecond);
+            cmd.Parameters.AddWithValue("from", from.ToUniversalTime());
+            cmd.Parameters.AddWithValue("to", to.ToUniversalTime());
+            cmd.Parameters.AddWithValue("onlyFree", onlyFree);
+            return cmd;
+        }
+        SpendChange change;
+        await using (var count = Command(Cte + """
+            select count(*) filter (where new is not null and abs(new - old) > 1e-12),
+                   coalesce(sum(old) filter (where new is not null and abs(new - old) > 1e-12), 0),
+                   coalesce(sum(new) filter (where new is not null and abs(new - old) > 1e-12), 0),
+                   count(*) filter (where new is null)
+            from r
+            """))
+        await using (var reader = await count.ExecuteReaderAsync(ct))
+        {
+            await reader.ReadAsync(ct);
+            change = new SpendChange((int)reader.GetInt64(0), reader.GetDecimal(1), reader.GetDecimal(2), (int)reader.GetInt64(3));
+        }
+        if (apply && change.Rows > 0)
+        {
+            await using var update = Command(Cte + """
+                update gateway.requests g set cost = r.new
+                from r where g.id = r.id and r.new is not null and abs(r.new - r.old) > 1e-12
+                """);
+            await update.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return change;
     }
 
     public static string Money(decimal value) => value.ToString(value is > 0 and < 0.01m ? "$0.0000" : "$0.00", CultureInfo.InvariantCulture);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "A clip's or picture's cost could not be booked in the gateway's request log: {Reason}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A clip's or picture's cost could not be booked in the ledger: {Reason}")]
     private static partial void LogNotBooked(ILogger logger, string reason);
 }

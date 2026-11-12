@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace Llm.Tests;
 
 /// <summary>
-/// Anthropic's Messages API answered by the app's own gateway (Gateway:Mode own): the request as one chat completion, the
+/// Anthropic's Messages API answered by the app's own gateway: the request as one chat completion, the
 /// answer, its stream and its errors in Anthropic's shapes; count_tokens; a server tool refused clearly.
 /// </summary>
 [Collection(nameof(AppCollection))]
@@ -66,7 +66,7 @@ public sealed class AnthropicGatewayTests(AppFixture app)
     [Fact]
     public async Task Claude_Codes_requests_are_answered_with_an_x_api_key_in_both_ways_and_counted()
     {
-        await using var f = app.Create(app.ConnectionStringFor("claude_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own" });
+        await using var f = app.Create(app.ConnectionStringFor("claude_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "cc" + Guid.NewGuid().ToString("N")[..8];
         var key = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }))).GetProperty("apiKey").GetString()!;

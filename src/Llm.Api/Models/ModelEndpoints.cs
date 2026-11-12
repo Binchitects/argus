@@ -452,14 +452,7 @@ public static class ModelEndpoints
             await db.SaveChangesAsync(ct);
             await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, ct);
             await media.ChangedAsync(ct);
-            try
-            {
-                await catalog.SyncGatewayAsync(ct);
-            }
-            catch (GatewayException)
-            {
-                // In step within a minute (the engine watcher).
-            }
+            await catalog.SyncGatewayAsync(ct);
             await audit.WriteAsync("model.remove", name);
             var (freed, stayed) = files is true ? await DeleteFilesAsync(itsFiles, disk, db, downloads, audit, ct) : (0L, []);
             return Results.Ok(new { restarting = false, warning = (string?)null, freed, stayed });
@@ -518,15 +511,8 @@ public static class ModelEndpoints
         await catalog.WritePresetsAsync(ct);
         await catalog.WriteVllmPresetsAsync(ct);
         watcher.Wake();
-        try
-        {
-            await catalog.SyncGatewayAsync(ct);
-            return new Changed(true, warning);
-        }
-        catch (GatewayException ex)
-        {
-            return new Changed(true, $"Saved, but the gateway could not be updated yet ({ex.Message}); it is tried again within a minute.");
-        }
+        await catalog.SyncGatewayAsync(ct);
+        return new Changed(true, warning);
     }
 
     /// <summary>

@@ -204,7 +204,7 @@ public static class SettingsCatalog
             { Default = "1.00:00:00", Unit = "hours", Min = 1, Max = 720, Optional = false },
         new("Gateway:RequestsPerMinute", Api, "Requests a minute, per key", "Requests one API key may send to the gateway in a minute; more are refused (HTTP 429, with Retry-After) until the minute is over. A group's own (Admin → Groups) or a person's own (Admin → People) replaces it. The chat is never limited by it. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "0", Min = 0, Max = Gateway.RateLimits.MaxRequests, Optional = false },
-        new("Gateway:TokensPerMinute", Api, "Tokens a minute, per key", "Tokens one API key may use at the gateway in a minute: what the model reads and writes, less the prompt it reads from its cache. A request is let through only if its prompt and its max_tokens fit what is left, so keep it well above the largest request. A group's or a person's own replaces it. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+        new("Gateway:TokensPerMinute", Api, "Tokens a minute, per key", "Tokens one API key may use at the gateway in a minute: what the model reads and writes, less the prompt it reads from its cache. A request goes ahead while the key's tokens this minute are under it, and counts when it ends, so keep it well above the largest request. A group's or a person's own replaces it. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "0", Min = 0, Max = Gateway.RateLimits.MaxTokens, Optional = false },
         new("Chat:AgentsAtOnce", Chat, "Sub-agents at once", "How many sub-agents of one answer run side by side (the Sub-agents tool); the rest wait their turn. Each is a request to the model like an answer of its own, inside the answer's place in line: 1 runs them one after another.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "3", Min = 1, Max = 8, Optional = false },
@@ -279,8 +279,6 @@ public static class SettingsCatalog
         new("Costs:ShareBy", CostsGroup, "Share the cost out by", "How Admin → Accounting shares the running cost among people, groups and projects: spend (their use at the prices above, so output, pictures and video weigh more), tokens, or time (the model's time on their requests).", SettingType.Choice, SettingScope.Live)
             { Default = "spend", Options = ["spend", "tokens", "time"], Optional = false },
 
-        new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
-            { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
 
         // ---------------------------------------------------------------- speech, live: everyone's until they choose their own (Your account → Voice) --
         new("Speech:Language", Speech, "Language people speak", "For speech to text (Talk, voice messages, and API keys' speech to text that names no language): auto lets Whisper hear which; a language speech to text knows (en, fa, de) writes everything down in it, which suits short or accented speech.", SettingType.Text, SettingScope.Live)
@@ -317,7 +315,7 @@ public static class SettingsCatalog
             { Default = "This message was not sent: it goes against your organisation's rules for the assistant. Ask an admin if you think it should be allowed.", Max = 500 },
         new("Safeguards:CheckModel", Safeguards, "The model that judges", "The model that reads texts for the topic and injection rules (Admin → Safeguards), once a text for all of them. A small, quick model is best. Empty: the model the text is for.", SettingType.Text, SettingScope.Live)
             { Max = 200 },
-        new("Safeguards:CheckApi", Safeguards, "Check API requests too", "API keys' requests pass the rules that apply to the API stage (Admin → Safeguards): secrets, personal data. The gateway asks the app before each one (its guardrail in config/litellm.yaml). Credit applies either way.", SettingType.Boolean, SettingScope.Live)
+        new("Safeguards:CheckApi", Safeguards, "Check API requests too", "API keys' requests pass the rules that apply to the API stage (Admin → Safeguards): secrets, personal data. Checked as each one comes in. Credit applies either way.", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
 
         // ---------------------------------------------------------------- retention, live --
@@ -336,10 +334,12 @@ public static class SettingsCatalog
             { Max = 20_000, Lines = 5, Dangerous = true, Impact = "Every request from these addresses is refused at once (403)." },
         new("Retention:PromptLogDays", Retention, "Keep API requests in the prompt log for", "Each API request's last question and its answer (Admin → Prompt log, with prompts.review); the chat's are kept with the chats. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "90", Min = 0, Max = 3650, Unit = "days", Optional = false },
+        new("Gateway:FirstByteTimeout", Api, "Longest wait for an answer to start", "How long the gateway waits for a model to start its answer (a long prompt is read first), for the chat and API keys alike. Past it, another copy of the model or its fallback is asked, else the request fails with why. Longer than Code Arena's 15 minutes, so a long prompt is its to give up on.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:16:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
+        new("Gateway:IdleTimeout", Api, "Longest pause in an answer", "An answer the model has started but then sends nothing for this long is stopped, and booked as failed with why.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:16:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
         new("Gateway:LogPrompts", Api, "Prompt log of API requests", "Keeps each API request's last question and its answer, for those with prompts.review (Admin → Prompt log); the chat's questions and answers are there from the chats themselves. Off: API requests are not kept.", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
-        new("Gateway:Mode", Api, "Model gateway", "Who sends the requests to the models. litellm: LiteLLM, as before 8.0. chat: the app sends its own chat, pictures and speech to the engines itself; API keys still go by LiteLLM. own: the app answers everything it serves itself (API keys, Anthropic's and the Responses API, the model list, embeddings), with its own key checks, limits, ledger and metrics. Applies to the next request.", SettingType.Choice, SettingScope.Live)
-            { Default = "own", Options = ["litellm", "chat", "own"], Optional = false, Dangerous = true, Impact = "Requests under way finish as they began; the next go the new way." },
         new("Gateway:PromptLogKeep", Api, "Prompt log: how much of each question and answer", "The first so many characters of each API request's last question and of its answer are kept; the rest is cut (…).", SettingType.WholeNumber, SettingScope.Live)
             { Default = "20000", Min = 200, Max = 20_000, Unit = "characters", Optional = false },
         new("Gateway:PromptLogPictures", Api, "Prompt log: keep the pictures", "A question's pictures (sent as data) are kept with its line and go with it. Off: only the words.", SettingType.Boolean, SettingScope.Live)
@@ -552,10 +552,6 @@ public static class SettingsCatalog
         new("Retention:Interval", Retention, "Look for what is past its time every", "How often the clean-up looks for chats, files and logs past the times above.", SettingType.Duration, SettingScope.Live)
             { Default = "01:00:00", Unit = "minutes", Min = 5, Max = 1440, Optional = false },
 
-        new("Gateway:ConnectWaitSeconds", Model, "Wait for the gateway, at most", "How long a chat's request waits for a gateway it cannot reach (restarting after an upgrade takes it 10 to 20 seconds), trying again meanwhile.", SettingType.WholeNumber, SettingScope.Live)
-            { Default = "30", Unit = "seconds", Min = 0, Max = 600, Optional = false },
-        new("Gateway:KeyWaitSeconds", Model, "Wait for the chat's key, at most", "How long a new installation's first chat waits for the gateway to make the chat's key (its first start sets up its database first).", SettingType.WholeNumber, SettingScope.Live)
-            { Default = "90", Unit = "seconds", Min = 0, Max = 600, Optional = false },
         new("Engine:Threads", Model, "CPU threads for the models", "Of llama.cpp's models. Empty: llama.cpp's own choice.", SettingType.WholeNumber, SettingScope.AppRestart)
             { Min = 1, Max = 1024, Impact = "Applies as the models are next loaded." },
         new("Engine:RamReserveBytes", Model, "RAM kept for all but the engine", "What the model planner leaves of the host's memory to the rest of the stack.", SettingType.WholeNumber, SettingScope.AppRestart)

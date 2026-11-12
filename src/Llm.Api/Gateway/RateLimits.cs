@@ -44,15 +44,13 @@ public sealed record Refusal(string Limit, long Count, DateTimeOffset Last);
 public sealed record RateUse(long Requests, long Tokens, IReadOnlyList<Refusal> Refused);
 
 /// <summary>
-/// Rate limits for API keys: requests and tokens a minute. The app decides each person's
-/// (their own, else the most generous of their groups that set one, else the company's) and
-/// puts it on each of their keys at the gateway; LiteLLM counts every request and refuses the
-/// rest with HTTP 429 and Retry-After, in one place for every app replica. The chat's own key
-/// carries none: the chat has its fair line. Nothing is limited until an admin sets a limit, but
-/// an upgrade keeps a limit a key already carried (<see cref="KeepRow"/>).
+/// Rate limits for API keys: requests and tokens a minute. The app decides each person's (their own, else the most
+/// generous of their groups that set one, else the company's); the gateway counts each key's minute in the database
+/// (<see cref="RateWindows"/>, one count for every app replica) and refuses the rest with HTTP 429 and Retry-After
+/// (<see cref="Admission"/>). The chat carries none: it has its fair line. Nothing is limited until an admin sets a limit.
 /// </summary>
-public sealed partial class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, LedgerSql ledger, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
-    ModelCalls running, Audit audit, KeyWriters writers, ILogger<RateLimits> logger)
+public sealed partial class RateLimits(AppDbContext db, AccessService access, ApiKeys keys, LedgerSql ledger, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
+    ModelCalls running)
 {
     /// <summary>
     /// The chat's tools that reach a model: pictures, speech, video, and deep research ("research",
@@ -65,14 +63,6 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
 
     /// <summary>The audit log's word for an Arena MCP call refused for the person's requests a minute.</summary>
     public const string McpRefused = "mcp.rate_limited";
-
-    /// <summary>
-    /// The settings row (not a setting of the Settings page) that the upgrade to rate limits adds,
-    /// at the time it ran. Until the first key check after it has seen everyone's keys, a limit that
-    /// keys made before it carry (an admin's, set in LiteLLM's own pages: the only way to limit a
-    /// key before) is kept as their person's own instead of being lifted. That check removes it.
-    /// </summary>
-    public const string KeepRow = "gateway.rate_limits_keep";
 
     /// <summary>The most requests a minute an admin may set (0 is no limit).</summary>
     public const int MaxRequests = 1_000_000;
@@ -116,138 +106,11 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
             Resolve(own.Tokens, groups.Select(g => (g.Name, g.Tokens)), company.TokensPerMinute));
     }
 
-    /// <summary>Puts a person's limits on each of their keys at the gateway; returns how many keys changed.</summary>
-    public async Task<int> ApplyAsync(AppUser user, CancellationToken ct = default) =>
-        user.Email is { } email ? await ApplyAsync(user, email, (await ForAsync(user, ct)).Key, async () => (await ForAsync(user, ct)).Key, await UpgradeAsync(ct), ct) : 0;
-
-    /// <summary>
-    /// What a new key of theirs carries when it replaces these: their limits, once a limit these
-    /// carried from before the upgrade is kept as their own (a new key must not drop it).
-    /// </summary>
-    public async Task<KeyRate> ForNewKeyAsync(AppUser user, IReadOnlyList<GatewayKey> replaced, CancellationToken ct = default)
-    {
-        var want = (await ForAsync(user, ct)).Key;
-        if (replaced.Any(k => (k.Rate ?? KeyRate.None) != want) && await UpgradeAsync(ct) is { } upgrade && await KeepAsync(user, replaced, want, upgrade, ct))
-        {
-            want = (await ForAsync(user, ct)).Key;
-        }
-        return want;
-    }
-
-    /// <param name="recheck">What the person's keys should carry as the database says it now, asked only when a key is to change.</param>
-    /// <param name="upgrade">When the upgrade to rate limits ran, while limits keys carried before it are still to be kept (<see cref="KeepRow"/>).</param>
-    private async Task<int> ApplyAsync(AppUser user, string email, KeyRate want, Func<Task<KeyRate>> recheck, DateTimeOffset? upgrade, CancellationToken ct)
-    {
-        // Their keys as they are now, and their own keys' limits, read and written in the person's turn (KeyWriters).
-        using var turn = await writers.EnterAsync(user.Id, ct);
-        var keys = await gateway.KeysAsync(email, ct);
-        // A key the person made with limits of its own carries the tighter of theirs and its own (OwnKeys).
-        var own = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id && k.Kind == Llm.Core.Gateway.ApiKey.Own).ToDictionaryAsync(k => k.Hash, ct);
-        KeyRate Target(GatewayKey k, KeyRate w) => OwnKeys.Tighter(w, own.GetValueOrDefault(k.Token));
-        if (keys.Any(k => (k.Rate ?? KeyRate.None) != Target(k, want)))
-        {
-            if (upgrade is { } since)
-            {
-                // Keys made since the upgrade carry nothing from before it.
-                await KeepAsync(user, [.. keys.Where(k => !own.ContainsKey(k.Token))], want, since, ct);
-            }
-            want = await recheck();
-        }
-        var changed = 0;
-        foreach (var key in keys)
-        {
-            if ((key.Rate ?? KeyRate.None) is var now && Target(key, want) is var target && now != target)
-            {
-                await gateway.SetKeyRateAsync(key.Token, target, ct);
-                changed++;
-            }
-        }
-        return changed;
-    }
-
-    /// <summary>
-    /// Brings everyone's keys to their limits (groups, their members and the company's may have
-    /// changed); returns how many keys changed. A person's own limit is read again before their
-    /// keys change: an admin may have set it, and put it on their keys, since this sync began.
-    /// </summary>
-    public async Task<int> SyncAsync(CancellationToken ct = default)
-    {
-        var upgrade = await UpgradeAsync(ct);
-        var groups = await db.Groups.AsNoTracking().Where(g => g.RequestsPerMinute != null || g.TokensPerMinute != null).ToListAsync(ct);
-        var ids = groups.Select(g => g.Id).ToList();
-        var added = (await db.GroupMembers.AsNoTracking().Where(m => ids.Contains(m.GroupId)).ToListAsync(ct)).ToLookup(m => m.UserId, m => m.GroupId);
-        var changed = 0;
-        // One by one in their names' order, each in their turn (KeyWriters): a change of someone's limits waits only while theirs are written.
-        foreach (var user in await db.Users.AsNoTracking().Where(u => u.Email != null).OrderBy(u => u.UserName).ToListAsync(ct))
-        {
-            var mine = groups.Where(g => g.Directory is { } d ? AccessService.InDirectoryGroup(user.DirectoryGroups, d) : added[user.Id].Contains(g.Id))
-                .Select(g => (g.Name, g.RequestsPerMinute, g.TokensPerMinute)).ToList();
-            var want = Rates((user.RequestsPerMinute, user.TokensPerMinute), mine).Key;
-            changed += await ApplyAsync(user, user.Email!, want, async () =>
-            {
-                var own = await db.Users.AsNoTracking().Where(u => u.Id == user.Id).Select(u => new { u.RequestsPerMinute, u.TokensPerMinute }).SingleOrDefaultAsync(ct);
-                return own is null ? want : Rates((own.RequestsPerMinute, own.TokensPerMinute), mine).Key;
-            }, upgrade, ct);
-        }
-        if (upgrade is not null)
-        {
-            // Everyone's keys were seen: what they carried from before the upgrade is kept, and from now on a key carries the app's limits.
-            await db.Settings.Where(s => s.Key == KeepRow).ExecuteDeleteAsync(ct);
-        }
-        return changed;
-    }
-
-    /// <summary>When the upgrade to rate limits ran, while limits keys carried before it are still to be kept; null once they are.</summary>
-    private Task<DateTimeOffset?> UpgradeAsync(CancellationToken ct) =>
-        db.Settings.AsNoTracking().Where(s => s.Key == KeepRow).Select(s => (DateTimeOffset?)s.UpdatedAt).SingleOrDefaultAsync(ct);
-
-    /// <summary>
-    /// Before the app first changes a person's keys after the upgrade: a limit that their keys made
-    /// before it carry, stricter than what the app would give them, becomes their own (the strictest
-    /// of their keys'), where they have none of their own of that kind; audited. So the upgrade lifts
-    /// no limit. True when it kept one.
-    /// </summary>
-    private async Task<bool> KeepAsync(AppUser user, IReadOnlyList<GatewayKey> keys, KeyRate want, DateTimeOffset upgrade, CancellationToken ct)
-    {
-        var before = keys.Where(k => k.CreatedAt is not { } made || made < upgrade).Select(k => k.Rate ?? KeyRate.None).ToList();
-        var requests = user.RequestsPerMinute is null ? Stricter(before.Min(r => r.RequestsPerMinute), want.RequestsPerMinute) : null;
-        var tokens = user.TokensPerMinute is null ? Stricter(before.Min(r => r.TokensPerMinute), want.TokensPerMinute) : null;
-        // Only where the database has none of their own either: an admin may have set one since this began.
-        if (requests is not null && await db.Users.Where(u => u.Id == user.Id && u.RequestsPerMinute == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(u => u.RequestsPerMinute, requests), ct) == 0)
-        {
-            requests = null;
-        }
-        if (tokens is not null && await db.Users.Where(u => u.Id == user.Id && u.TokensPerMinute == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(u => u.TokensPerMinute, tokens), ct) == 0)
-        {
-            tokens = null;
-        }
-        if (requests is null && tokens is null)
-        {
-            return false;
-        }
-        user.RequestsPerMinute ??= requests;
-        user.TokensPerMinute ??= tokens;
-        var kept = string.Join("; ", new[] { Words("requests a minute", requests), Words("tokens a minute", tokens) }.OfType<string>());
-        await audit.WriteAsync("person.set_limits", user.UserName, detail: $"kept from their API key, set at the gateway before the upgrade: {kept}");
-        LogKept(logger, user.UserName ?? user.Email ?? user.Id.ToString(), kept);
-        return true;
-
-        static string? Words(string what, int? value) => value is { } n ? $"{what} {n.ToString("N0", CultureInfo.InvariantCulture)}" : null;
-    }
-
-    /// <summary>A key's limit when it is stricter than what the app would give; null when it has none, or it is not.</summary>
-    private static int? Stricter(int? key, int? want) => key is { } k && (want is not { } w || k < w) ? k : null;
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Rate limits: {Person}'s API key carried {Kept}, set at the gateway before the upgrade; kept as their own")]
-    private static partial void LogKept(ILogger logger, string person, string kept);
-
     /// <summary>
     /// What these keys (hashed tokens) used in the last minute, and what the gateway refused the
     /// person (any key of theirs, older ones too: a new key must not hide them) in the last day,
-    /// from its request log. LiteLLM writes the log every few seconds, and a streamed answer when
-    /// it ends, so the minute is close, not exact. Tokens count as the gateway counts them: what
+    /// from its ledger. The gateway writes it every second or so, and a streamed answer when it
+    /// ends, so the minute is close, not exact. Tokens count as the gateway counts them: what
     /// the model read and wrote, less the prompt it read from its cache.
     /// </summary>
     public async Task<RateUse> UseAsync(IReadOnlyCollection<string> tokens, string? email, CancellationToken ct = default)
@@ -318,11 +181,11 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         var counted = await ModelCallsSinceAsync(user.Id, started.AddMinutes(-1), ct);
         try
         {
-            counted += (int)(await MinuteAsync([.. (await gateway.KeysAsync(user.Email!, ct)).Select(k => k.Token)], ct)).Requests;
+            counted += (int)(await MinuteAsync([.. (await keys.KeysAsync(user, ct)).Select(k => k.Token)], ct)).Requests;
         }
-        catch (Exception ex) when (ex is GatewayException or Npgsql.NpgsqlException or InvalidOperationException)
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException)
         {
-            // The gateway or its log cannot be read now: what the app counted itself still holds.
+            // The ledger cannot be read now: what the app counted itself still holds.
         }
         if (running.TryStart(user.Id, started, now => counted + now < most) is { } slot)
         {

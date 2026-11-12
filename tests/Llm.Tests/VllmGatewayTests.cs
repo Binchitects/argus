@@ -79,7 +79,7 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             }
 
             // The pool: two copies under its name, each at its port with its limit; and each under its own name, in no list.
-            var pool = gateway.Managed.Values.Where(m => m.Name == "flash").OrderBy(m => m.Params["api_base"]!.GetValue<string>()).ToList();
+            var pool = (await app.RoutesOfAsync(f)).Where(m => m.Name == "flash").OrderBy(m => m.Params["api_base"]!.GetValue<string>()).ToList();
             Assert.Equal(["http://vllm:8001/v1", "http://vllm:8002/v1"], pool.Select(m => m.Params["api_base"]!.GetValue<string>()));
             Assert.All(pool, m => Assert.Equal(16, m.Params["max_parallel_requests"]!.GetValue<int>()));
             Assert.All(pool, m => Assert.Equal("os.environ/ENGINE_API_KEY", m.Params["api_key"]!.GetValue<string>()));
@@ -89,7 +89,7 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             Assert.All(pool, m => Assert.True(m.Info["supports_vision"]!.GetValue<bool>()));
             // Each request may hold the whole context (16 at once share the cache, not the window), and half of it at most is the answer.
             Assert.Equal((65536, 32768), (pool[0].Info["max_input_tokens"]!.GetValue<int>(), pool[0].Info["max_output_tokens"]!.GetValue<int>()));
-            var copies = gateway.Managed.Values.Where(m => m.Name.StartsWith("flash@", StringComparison.Ordinal)).OrderBy(m => m.Name).ToList();
+            var copies = (await app.RoutesOfAsync(f)).Where(m => m.Name.StartsWith("flash@", StringComparison.Ordinal)).OrderBy(m => m.Name).ToList();
             Assert.Equal(["flash@0", "flash@1"], copies.Select(m => m.Name));
             Assert.All(copies, m => Assert.Equal("flash", m.Info["llm_app_replica_of"]!.GetValue<string>()));
             Assert.DoesNotContain(gateway.Models, m => m.Name.Contains('@', StringComparison.Ordinal));
@@ -103,14 +103,14 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             Assert.Equal([("http://vllm:8001/v1", "flash@0"), ("http://vllm:8002/v1", "flash@1")], flash.Select(r => (r.BaseUrl, r.Model)));
             Assert.All(flash, r => Assert.Equal((EngineKinds.Vllm, true, 16, 16, 2, "Qwen3.8-Flash-Next"), (r.Kind, r.EngineKey, r.MaxParallel, r.Weight, r.Copies, r.Fallback)));
             Assert.Equal([("flash@0", "flash"), ("flash@1", "flash")], routes.Where(r => r.CopyOf is not null).OrderBy(r => r.Name, StringComparer.Ordinal).Select(r => (r.Name, r.CopyOf)));
-            Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), gateway.Managed.Values.Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
+            Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), (await app.RoutesOfAsync(f)).Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
             // In step: a second sync changes nothing.
-            var before = gateway.Managed.Keys.ToHashSet();
+            var before = (await app.RoutesOfAsync(f)).Select(r => r.Fingerprint).ToHashSet();
             await using (var scope = f.Services.CreateAsyncScope())
             {
                 await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync();
             }
-            Assert.Equal(before, gateway.Managed.Keys.ToHashSet());
+            Assert.Equal(before, (await app.RoutesOfAsync(f)).Select(r => r.Fingerprint).ToHashSet());
 
             var state = f.Services.GetRequiredService<EngineState>();
             var watcher = f.Services.GetRequiredService<EngineWatcher>();
@@ -127,10 +127,11 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             {
                 Assert.Equal("Qwen3.8-Flash-Next", sending.Model);
             }
-            // An API key's request goes on at once: the gateway's own fallbacks (set from the app) answer while flash cannot.
+            // An API key's request goes on at once: the gateway's fallback answers while flash cannot.
             Assert.Null(await route.RoomForKeyAsync("flash", CancellationToken.None));
-            Assert.Equal(["Qwen3.8-Flash-Next"], gateway.Fallbacks!["flash"]);
-            Assert.False(gateway.Fallbacks.ContainsKey("solo"));
+            var built = await app.RoutesOfAsync(f);
+            Assert.All(built.Where(r => r.Name == "flash"), r => Assert.Equal("Qwen3.8-Flash-Next", r.Fallback));
+            Assert.All(built.Where(r => r.Name == "solo"), r => Assert.Null(r.Fallback));
 
             // Up again: it starts, and a conversation stays on one copy.
             vllm.Running = true;

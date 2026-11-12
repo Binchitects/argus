@@ -52,12 +52,12 @@ public sealed class MediaModelsTests(AppFixture app)
             await scope.ServiceProvider.GetRequiredService<MediaControl>().ChangedAsync(CancellationToken.None);
             await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync();
         }
-        Assert.Equal(0.03m, gateway.Managed.Values.Single(m => m.Name == MediaModels.ImageModel).Params["input_cost_per_image"]!.GetValue<decimal>());
-        Assert.Equal(0.015m / 1000, gateway.Managed.Values.Single(m => m.Name == MediaModels.TextToSpeech).Params["input_cost_per_character"]!.GetValue<decimal>());
+        Assert.Equal(0.03m, (await app.RoutesOfAsync(f)).Single(m => m.Name == MediaModels.ImageModel).Params["input_cost_per_image"]!.GetValue<decimal>());
+        Assert.Equal(0.015m / 1000, (await app.RoutesOfAsync(f)).Single(m => m.Name == MediaModels.TextToSpeech).Params["input_cost_per_character"]!.GetValue<decimal>());
         var price = (await MediaRowsAsync(admin)).Single(r => r.GetProperty("name").GetString() == MediaModels.ImageModel).GetProperty("unitPrice");
         Assert.Equal((0.03m, true), (price.GetProperty("amount").GetDecimal(), price.GetProperty("own").GetBoolean()));
         // Videos are made by the app, not the gateway.
-        Assert.DoesNotContain(gateway.Managed.Values, m => m.Name == MediaModels.VideoModel);
+        Assert.DoesNotContain(await app.RoutesOfAsync(f), m => m.Name == MediaModels.VideoModel);
     }
 
     [Fact]
@@ -69,11 +69,11 @@ public sealed class MediaModelsTests(AppFixture app)
         {
             await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync();
         }
-        Assert.Contains(gateway.Managed.Values, m => m.Name == MediaModels.TextToSpeechPersian);
+        Assert.Contains(await app.RoutesOfAsync(f), m => m.Name == MediaModels.TextToSpeechPersian);
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri($"/api/admin/models/{MediaModels.TextToSpeechPersian}", UriKind.Relative)));
         Assert.DoesNotContain(await MediaRowsAsync(admin), r => r.GetProperty("name").GetString() == MediaModels.TextToSpeechPersian);
-        Assert.DoesNotContain(gateway.Managed.Values, m => m.Name == MediaModels.TextToSpeechPersian);
-        Assert.Contains(gateway.Managed.Values, m => m.Name == MediaModels.TextToSpeech);
+        Assert.DoesNotContain(await app.RoutesOfAsync(f), m => m.Name == MediaModels.TextToSpeechPersian);
+        Assert.Contains(await app.RoutesOfAsync(f), m => m.Name == MediaModels.TextToSpeech);
         // Turning a model off is gone: removing it is how.
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/models/{MediaModels.TextToSpeech}/enabled", UriKind.Relative), new { enabled = false }));
     }
@@ -128,7 +128,7 @@ public sealed class MediaModelsTests(AppFixture app)
         Assert.Contains("Not in the library yet", await added.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         var row = (await MediaRowsAsync(admin)).Single(r => r.GetProperty("name").GetString() == "FLUX-8");
         Assert.Equal((8, 5), (row.GetProperty("settings").GetProperty("steps").GetInt32(), row.GetProperty("idleMinutes").GetInt32()));
-        Assert.Equal(0.02m, gateway.Managed.Values.Single(m => m.Name == "FLUX-8").Params["input_cost_per_image"]!.GetValue<decimal>());
+        Assert.Equal(0.02m, (await app.RoutesOfAsync(f)).Single(m => m.Name == "FLUX-8").Params["input_cost_per_image"]!.GetValue<decimal>());
 
         async Task Refused(Task<HttpResponseMessage> call, string field)
         {

@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Projects;
 
 /// <summary>
-/// How a request at the gateway is known to be a project's: it carries tags in its metadata (LiteLLM keeps them in its log as
-/// request_tags), chat:ID for the chat it answers and project:ID for a project its caller names (Code Arena, a script with
+/// How a request at the gateway is known to be a project's: it carries tags in its metadata (the ledger keeps them with its
+/// row), chat:ID for the chat it answers and project:ID for a project its caller names (Code Arena, a script with
 /// an API key). As the ledger takes the request in (LedgerImport), the chat's project is its project, as the chat is now;
 /// else a project the person may add to. A chat moved to another project takes its requests with it (<see cref="RetagAsync"/>).
 /// </summary>

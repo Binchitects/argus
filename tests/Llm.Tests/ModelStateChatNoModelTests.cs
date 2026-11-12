@@ -145,7 +145,6 @@ public sealed class ModelStateChatNoModelTests(AppFixture app) : IDisposable
         };
         var f = app.Create(app.ConnectionStringFor("nomodel_" + Guid.NewGuid().ToString("N")[..8]), gateway, settings, s =>
         {
-            s.AddHttpClient<GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => router);
             // The app's own gateway sends the chat to the engine's router itself.
             s.AddHttpClient(Llm.Api.Gateway.ModelGateway.Upstream).ConfigurePrimaryHttpMessageHandler(() => router);
             s.AddHttpClient(Llm.Api.Gateway.ModelGateway.UpstreamUnchecked).ConfigurePrimaryHttpMessageHandler(() => router);
@@ -191,7 +190,8 @@ public sealed class ModelStateChatNoModelTests(AppFixture app) : IDisposable
     private static async Task<Guid> ChatAsync(TestBrowser b, string? model)
     {
         object body = model is null ? new { thinking = "off", tools = Array.Empty<string>() } : new { model, thinking = "off", tools = Array.Empty<string>() };
-        return (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", body))).GetProperty("id").GetGuid();
+        var made = await b.JsonAsync(await b.PostAsync("/api/chat/conversations", body));
+        return made.TryGetProperty("id", out var id) ? id.GetGuid() : throw new Xunit.Sdk.XunitException($"No chat on {model ?? "no model"}: {made}");
     }
 
     /// <summary>A message and what the chat said back (the stream's events), within <see cref="Deadline"/>.</summary>

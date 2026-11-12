@@ -24,7 +24,7 @@ const report: StorageReport = {
   databases: {
     list: [
       { name: 'llmapp', bytes: 3 * GB, what: 'The app: chats and their files' },
-      { name: 'litellm', bytes: 1 * GB, what: 'The gateway' },
+      { name: 'litellm', bytes: 1 * GB, what: "LiteLLM's, from before 8.0: its keys and log are in the app's ledger, and the upgrade drops it" },
     ],
     tables: [{ database: 'llmapp', name: 'chat_attachments', bytes: 2 * GB, rows: 1200, what: "the chat's files" }],
     problem: null,

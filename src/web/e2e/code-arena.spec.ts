@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { noGateway, watchConsole } from './helpers.ts'
+import { noEngine, watchConsole } from './helpers.ts'
 
 /**
  * A Code Arena session's chat, open on the web, follows the session without a reload: what it adds, its turn (the page
@@ -7,7 +7,7 @@ import { noGateway, watchConsole } from './helpers.ts'
  * is its own API (/api/code-arena) with a new person's key, as `code-arena login` is given it; no model answers.
  */
 test('the open web chat follows a Code Arena session: its messages, its turn and its compaction', async ({ browser, baseURL, playwright }) => {
-  test.skip(noGateway, 'makes a person')
+  test.skip(noEngine, 'makes a person')
   test.setTimeout(120_000)
   const admin = await browser.newContext({ ignoreHTTPSErrors: true, baseURL, storageState: 'e2e/.auth/state.json' })
   const name = `e2ec${Date.now().toString(36)}`

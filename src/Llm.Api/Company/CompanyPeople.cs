@@ -78,14 +78,7 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
         await audit.WriteAsync("person.create", user.UserName, detail: how);
         if (!user.IsDisabled)
         {
-            try
-            {
-                await people.ProvisionGatewayAsync(user);
-            }
-            catch (GatewayException ex)
-            {
-                await audit.WriteAsync("person.provision_gateway", user.UserName, success: false, detail: ex.Message);
-            }
+            await people.ProvisionGatewayAsync(user);
         }
         await directory.WriteAsync();
         return user;

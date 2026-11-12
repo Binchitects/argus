@@ -1,8 +1,8 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, type Page, type TestInfo } from '@playwright/test'
 
-/** CI runs without a model gateway (E2E_NO_GATEWAY=1): the API answers 502 for what needs it. */
-export const noGateway = !!process.env.E2E_NO_GATEWAY
+/** CI runs without a model behind the gateway (E2E_NO_ENGINE=1): the API answers 502 for what needs one. */
+export const noEngine = !!process.env.E2E_NO_ENGINE
 
 /** CI runs without Prometheus, Loki and Alertmanager (E2E_NO_OBSERVE=1): the Logs, Alerts and metric panels have nothing to read. */
 export const noObserve = !!process.env.E2E_NO_OBSERVE
@@ -24,7 +24,7 @@ export function watchConsole(page: Page): string[] {
     // The service worker's script, its fetch cut short (the test went on to the next page, or Chrome reloaded its
     // certificates): Chrome says so itself, and the app goes on without the worker until the next page.
     if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') ||
-      t.includes('An unknown error occurred when fetching the script') || t.startsWith("Blocked script execution in 'about:srcdoc'") || (noGateway && t.includes('502'))) return
+      t.includes('An unknown error occurred when fetching the script') || t.startsWith("Blocked script execution in 'about:srcdoc'") || (noEngine && t.includes('502'))) return
     errors.push(`${t} (${m.location().url || 'no url'})`)
   })
   page.on('pageerror', (e) => errors.push(e.message))

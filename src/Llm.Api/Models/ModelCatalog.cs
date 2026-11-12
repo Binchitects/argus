@@ -472,9 +472,8 @@ public sealed class EngineState(TimeProvider clock)
 /// (config/engine/keep, one name a line), Prometheus's scrape targets
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
-public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, MediaControl media, HardwareProbe hardware, ILogger<ModelCatalog> logger,
-    Gateway.ModelGateway own)
+public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
+    ModelHoursState hours, Modules modules, VllmBackends vllm, MediaControl media, HardwareProbe hardware, Gateway.ModelGateway own)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -586,7 +585,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         }
         // A request that asks no longest answer (the chat's own by default, Code Arena's turns, many clients') writes at most
         // the model's, as the gateway says it (max_output_tokens), not until its slot is full. One that asks more is lowered by
-        // the gateway (arena_limits.py, which litellm.yaml names): llama-server takes it as asked.
+        // the gateway (ModelGateway.Shape): llama-server takes it as asked.
         sb.Append(inv, $"n-predict = {OutputLimit(m)}\n");
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
         if (m.Placement == "manual")
@@ -1212,72 +1211,18 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>
-    /// Brings the gateway in step with the app: the engine's models added here, and the models
-    /// chosen from other GPU servers. Each deployment is known by a fingerprint of everything
-    /// it is registered with, so a changed one is replaced and two of one name (a model here
-    /// and its copy on a server) are both kept: the gateway spreads requests between them.
-    /// Every model carries its prices (its own, else Settings → Prices), so every request has a cost.
-    /// One sync at a time per gateway (the watcher's pass and an admin's save would both add what is missing); a copy
-    /// registered twice (two replicas syncing at once) is taken away.
+    /// The models changed (one added, removed, its prices or placement): the app's own gateway reads its routes afresh at
+    /// its next call, and the model list with it. The routes are built from the app's tables (<see cref="Gateway.GatewayRoutes"/>).
     /// </summary>
-    public async Task SyncGatewayAsync(CancellationToken ct = default)
+    public Task SyncGatewayAsync(CancellationToken ct = default)
     {
-        // The app's own gateway reads the routes afresh at its next call.
         own.Invalidate();
-        var syncing = Syncing.GetValue(gateway, _ => new SemaphoreSlim(1, 1));
-        await syncing.WaitAsync(ct);
-        try
-        {
-            await SyncGatewayOnceAsync(ct);
-        }
-        finally
-        {
-            syncing.Release();
-        }
-    }
-
-    private async Task SyncGatewayOnceAsync(CancellationToken ct)
-    {
-        var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
-        // The app's own routes only: those given besides (a test's) are not the app's to register.
-        foreach (var d in await routes.BuildAsync(ct, others: false))
-        {
-            wanted[d.Fingerprint] = (d.Name, d.LiteLlm, d.Info);
-        }
-        var managed = await gateway.ManagedModelsAsync(ct);
-        // What is no longer wanted, and every copy but the first of one registered twice.
-        var twice = managed.Where(g => g.Fingerprint is not null).GroupBy(g => g.Fingerprint!, StringComparer.Ordinal).SelectMany(g => g.Skip(1));
-        foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)).Concat(twice))
-        {
-            await gateway.DeleteModelAsync(old.Id, ct);
-        }
-        var kept = managed.Where(g => g.Fingerprint is not null && wanted.ContainsKey(g.Fingerprint)).Select(g => g.Fingerprint!).ToHashSet(StringComparer.Ordinal);
-        foreach (var (fingerprint, w) in wanted.Where(w => !kept.Contains(w.Key)))
-        {
-            await gateway.AddModelAsync(w.Name, w.Params, w.Info, fingerprint, ct);
-            LogRegistered(logger, w.Name);
-        }
-        // The fallbacks, at the gateway itself: an API key's request whose model fails (its engine restarts) goes on to it.
-        var fallbacks = (await db.LocalModels.AsNoTracking().Where(m => m.Fallback != null).Select(m => new { m.Name, m.Fallback }).ToListAsync(ct))
-            .ToDictionary(m => m.Name, m => (IReadOnlyList<string>)[m.Fallback!], StringComparer.Ordinal);
-        var said = string.Join(';', fallbacks.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => f.Key + "=" + f.Value[0]));
-        // Nothing set and nothing to set (a stack without fallbacks): the gateway's settings are left untouched.
-        if ((GivenFallbacks.TryGetValue(gateway, out var given) ? given : "") != said)
-        {
-            await gateway.SetFallbacksAsync(fallbacks, ct);
-            GivenFallbacks.AddOrUpdate(gateway, said);
-        }
         chatModels.Forget();
+        return Task.CompletedTask;
     }
 
     /// <summary>The longest answer when none is set: half the window (<see cref="Window"/>), at most 32,768 tokens.</summary>
     public static int DefaultMaxOutput(int window) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, window / 2 / 1024 * 1024));
-
-    /// <summary>The fallbacks each gateway was last given (by any catalog of this replica): set again only when they change, and at start.</summary>
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, string> GivenFallbacks = [];
-
-    /// <summary>The sync running against each gateway: the next waits for it.</summary>
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, SemaphoreSlim> Syncing = [];
 
     /// <summary>The engines' presets being written: one writer at a time on every replica (they share the engines' files).</summary>
     private const long Writing = 0x50524553455453;
@@ -1334,8 +1279,6 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     [GeneratedRegex(@"^([a-z0-9][a-z0-9-]*)\s*=\s*([^\r\n\[\]]+)$")]
     private static partial Regex PresetLine();
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Model {Model} registered at the gateway")]
-    private static partial void LogRegistered(ILogger logger, string model);
 }
 
 /// <summary>Who may use which model, and whether it can answer now.</summary>

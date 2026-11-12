@@ -34,8 +34,7 @@ public sealed class VoiceTests(AppFixture app)
     /// An app with the speech models at the gateway and a speech server to ask (or none: the audio module left out); API
     /// keys' speech goes on to <paramref name="keySpeech"/> (else the fake gateway), and time is <paramref name="clock"/>'s.
     /// </summary>
-    /// <param name="mode">Gateway:Mode for a test of LiteLLM's way (the request passed on to it as it came).</param>
-    private Setup NewApp(bool audio = true, bool down = false, HttpMessageHandler? keySpeech = null, TimeProvider? clock = null, string? mode = null)
+    private Setup NewApp(bool audio = true, bool down = false, TimeProvider? clock = null)
     {
         var gateway = new FakeGateway();
         gateway.Models.Add(new GatewayModel(MediaModels.SpeechToText, null, null, false, false, false, null, null, null, Mode: "audio_transcription"));
@@ -43,12 +42,11 @@ public sealed class VoiceTests(AppFixture app)
         gateway.Models.Add(new GatewayModel(MediaModels.TextToSpeechPersian, null, null, false, false, false, null, null, null, Mode: "audio_speech"));
         var fake = new FakeAudio { Down = down };
         var f = app.Create(app.ConnectionStringFor("voice_" + Guid.NewGuid().ToString("N")[..8]), gateway,
-            new Dictionary<string, string?> { ["Modules:audio"] = audio ? "true" : "false", ["Gateway:Mode"] = mode ?? AppFixture.GatewayMode }, s =>
+            new Dictionary<string, string?> { ["Modules:audio"] = audio ? "true" : "false" }, s =>
             {
                 s.AddHttpClient(VoiceCatalog.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
                 s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
                 s.AddHttpClient(Provisioning.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
-                s.AddHttpClient(KeySpeech.Client).ConfigurePrimaryHttpMessageHandler(() => keySpeech ?? app.Model);
                 if (clock is not null)
                 {
                     s.AddSingleton(clock);
@@ -318,15 +316,8 @@ public sealed class VoiceTests(AppFixture app)
         // A key the gateway does not know: the app's own gateway refuses it; LiteLLM is sent it as it came, to answer for it.
         var stranger = $"Who am I {marker}?";
         var unknown = await KeySpeakAsync(s.App, "sk-not-a-key", new { model = "kokoro", input = stranger });
-        if (AppFixture.GatewayMode == GatewayModes.Own)
-        {
-            await StatusAssert.Is(HttpStatusCode.Unauthorized, unknown);
-            Assert.DoesNotContain(app.Model.SpeechRequests, r => r["input"]?.GetValue<string>() == stranger);
-        }
-        else
-        {
-            Assert.Null(SpokenText(stranger)["voice"]);
-        }
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, unknown);
+        Assert.DoesNotContain(app.Model.SpeechRequests, r => r["input"]?.GetValue<string>() == stranger);
     }
 
     /// <summary>Speech to text as a tool sends it at gateway.DOMAIN: the key, a form with the sound, a marker to find it by, and the fields given.</summary>
@@ -381,11 +372,10 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Equal([MediaModels.SpeechToText], form["model"]);
         Assert.Equal("RIFF0000WAVEfmt ", form["file"].Single());
 
-        // A language the request names wins. The app's own gateway sends only it; for LiteLLM their language goes first and
-        // the one named after it, since LiteLLM keeps a field's last value. Without the path's /v1 too.
+        // A language the request names wins: only it is sent. Without the path's /v1 too.
         var named = "n" + Guid.NewGuid().ToString("N")[..10];
         await StatusAssert.Is(HttpStatusCode.OK, await KeyHearAsync(s.App, key, named, "en", "/audio/transcriptions"));
-        Assert.Equal(AppFixture.GatewayMode == GatewayModes.Own ? ["en"] : ["fa", "en"], (await HeardFormAsync(named))["language"]);
+        Assert.Equal(["en"], (await HeardFormAsync(named))["language"]);
 
         // Detect it (theirs or the company's): Whisper hears which.
         await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "auto" }));
@@ -397,15 +387,8 @@ public sealed class VoiceTests(AppFixture app)
         await ChooseAsync(b, new { language = "fa" });
         var stranger = "s" + Guid.NewGuid().ToString("N")[..10];
         var unknown = await KeyHearAsync(s.App, "sk-not-a-key", stranger);
-        if (AppFixture.GatewayMode == GatewayModes.Own)
-        {
-            await StatusAssert.Is(HttpStatusCode.Unauthorized, unknown);
-            Assert.DoesNotContain(app.Model.Transcriptions, t => t.Contains(stranger, StringComparison.Ordinal));
-        }
-        else
-        {
-            Assert.False((await HeardFormAsync(stranger)).ContainsKey("language"));
-        }
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, unknown);
+        Assert.DoesNotContain(app.Model.Transcriptions, t => t.Contains(stranger, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -603,94 +586,6 @@ public sealed class VoiceTests(AppFixture app)
         {
             length = body.Length;
             return true;
-        }
-    }
-
-    [Fact]
-    public async Task An_API_keys_speech_goes_on_before_its_body_has_come_and_nothing_is_held_before_the_key_says_whose_it_is()
-    {
-        var held = new HeldGateway();
-        // LiteLLM's way: the app's own gateway reads a request whole and answers a preflight itself (GatewayMediaTests).
-        await using var s = NewApp(keySpeech: held, mode: GatewayModes.LiteLlm);
-        var (b, key, _) = await PersonAsync(s.App);
-        // No redirects followed: the test client would hold the whole body to send it again.
-        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false, AllowAutoRedirect = false });
-
-        // Sends a body of which only the first 200 bytes come before the gateway has the request; then the rest.
-        async Task<(HttpRequestMessage Arrived, byte[] Received)> SendAsync(string path, string? bearer, byte[] body, string type)
-        {
-            held.Next();
-            var go = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = new Trickle(body, 200, go.Task) };
-            req.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(type);
-            if (bearer is not null)
-            {
-                req.Headers.Authorization = new("Bearer", bearer);
-            }
-            var sending = client.SendAsync(req);
-            HttpRequestMessage arrived;
-            try
-            {
-                // The app held none of it: the gateway has the request while most of its body has still to come.
-                arrived = await held.Arrived.WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            finally
-            {
-                go.TrySetResult();
-            }
-            await StatusAssert.Is(HttpStatusCode.OK, await sending);
-            return (arrived, await held.Received.WaitAsync(TimeSpan.FromSeconds(10)));
-        }
-
-        using var form = new MultipartFormDataContent("form-" + Guid.NewGuid().ToString("N"));
-        form.Add(new StringContent(MediaModels.SpeechToText), "model");
-        form.Add(new ByteArrayContent(new byte[64 * 1024]), "file", "meeting.wav");
-        var sound = await form.ReadAsByteArrayAsync();
-        var formType = form.Headers.ContentType!.ToString();
-
-        // No key: as it came, whatever length it says it has.
-        var (anyone, heard) = await SendAsync("/v1/audio/transcriptions", null, sound, formType);
-        Assert.Equal(sound, heard);
-        Assert.Equal(sound.Length, anyone.Content!.Headers.ContentLength);
-        var json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { model = "kokoro", input = new string('a', 4000) }));
-        var (reader, read) = await SendAsync("/v1/audio/speech", null, json, "application/json");
-        Assert.Equal(json, read);
-        Assert.Equal(json.Length, reader.Content!.Headers.ContentLength);
-
-        // A person who lets Whisper hear their language (as everyone does by default): as it came too.
-        var (detect, detected) = await SendAsync("/v1/audio/transcriptions", key, sound, formType);
-        Assert.Equal(sound, detected);
-        Assert.Equal(sound.Length, detect.Content!.Headers.ContentLength);
-
-        // One who speaks Persian: their language put first, and the sound streamed on after it.
-        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "fa" }));
-        var (persian, sent) = await SendAsync("/audio/transcriptions", key, sound, formType);
-        var boundary = form.Headers.ContentType!.Parameters.Single(p => p.Name == "boundary").Value!.Trim('"');
-        Assert.Equal([.. Encoding.ASCII.GetBytes($"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nfa\r\n"), .. sound], sent);
-        Assert.Equal(sent.Length, persian.Content!.Headers.ContentLength);
-    }
-
-    [Fact]
-    public async Task A_browsers_preflight_for_an_API_keys_speech_is_passed_on_as_it_came()
-    {
-        var held = new HeldGateway();
-        // LiteLLM's way: the app's own gateway reads a request whole and answers a preflight itself (GatewayMediaTests).
-        await using var s = NewApp(keySpeech: held, mode: GatewayModes.LiteLlm);
-        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false, AllowAutoRedirect = false });
-        foreach (var path in KeySpeech.Paths)
-        {
-            held.Next();
-            using var req = new HttpRequestMessage(HttpMethod.Options, new Uri(path, UriKind.Relative));
-            req.Headers.Add("Origin", "https://tools.example.test");
-            req.Headers.Add("Access-Control-Request-Method", "POST");
-            req.Headers.Add("Access-Control-Request-Headers", "authorization, content-type");
-            var res = await client.SendAsync(req);
-            await StatusAssert.Is(HttpStatusCode.OK, res);
-            Assert.Equal("*", res.Headers.GetValues("Access-Control-Allow-Origin").Single());
-            var arrived = await held.Arrived.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Equal((HttpMethod.Options, path), (arrived.Method, arrived.RequestUri!.AbsolutePath));
-            Assert.Null(arrived.Content);
-            Assert.Equal("POST", arrived.Headers.GetValues("Access-Control-Request-Method").Single());
         }
     }
 

@@ -245,11 +245,11 @@ public static class AccountEndpoints
     /// The person's keys (none while their API access is off), what they spent this month, and where they stand on each kind
     /// of credit (the home page shows these too).
     /// </summary>
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Credit credit, Access.AccessService access)
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ApiKeys apiKeys, Ledger ledger, Credit credit, Access.AccessService access)
     {
         var user = (await users.GetUserAsync(p))!;
         var apiOff = await access.ApiOffAsync(user);
-        var keys = apiOff ? [] : await gateway.KeysAsync(user.Email!);
+        var keys = apiOff ? [] : await apiKeys.KeysAsync(user);
         var spending = await ledger.ReadAsync();
         var standing = await credit.StandingAsync(user);
         var api = standing?.FirstOrDefault(s => s.Kind == CreditKind.Api);
@@ -269,11 +269,11 @@ public static class AccountEndpoints
     /// The person's keys' rate limits, with what the keys used in the last minute and what was
     /// refused in the last day: only the key's card asks, as it reads the gateway's request log.
     /// </summary>
-    private static async Task<IResult> LimitsAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, RateLimits rateLimits, Models.KeyAccess keyAccess,
+    private static async Task<IResult> LimitsAsync(ClaimsPrincipal p, UserManager<AppUser> users, ApiKeys apiKeys, RateLimits rateLimits, Models.KeyAccess keyAccess,
         CancellationToken ct)
     {
         var user = (await users.GetUserAsync(p))!;
-        return Results.Ok(await rateLimits.ViewAsync(user, await gateway.KeysAsync(user.Email!, ct), keyAccess.AtOnce, ct));
+        return Results.Ok(await rateLimits.ViewAsync(user, await apiKeys.KeysAsync(user, ct), keyAccess.AtOnce, ct));
     }
 
     /// <summary>A key call, its refusal said as it is (409 for a name taken, 429 for too many an hour...).</summary>
@@ -286,10 +286,6 @@ public static class AccountEndpoints
         catch (Gateway.OwnKeyException e)
         {
             return AuthEndpoints.Problem(e.Status, e.Code, e.Message);
-        }
-        catch (Gateway.GatewayException e)
-        {
-            return AuthEndpoints.Problem(502, "gateway", e.Message);
         }
     }
 

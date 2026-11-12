@@ -31,14 +31,7 @@ public sealed class KeyAuthentication(
             return AuthenticateResult.NoResult();
         }
         McpCaller caller;
-        try
-        {
-            caller = await people.FromHeaderAsync(header, Context.RequestAborted);
-        }
-        catch (GatewayException)
-        {
-            return AuthenticateResult.Fail("The gateway cannot say whose that key is now: try again in a moment.");
-        }
+        caller = await people.FromHeaderAsync(header, Context.RequestAborted);
         if (caller.User is not { } user)
         {
             return AuthenticateResult.Fail(caller.Refusal ?? McpPeople.NoKey);

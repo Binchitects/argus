@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Llm.Tests;
 
 /// <summary>
-/// OpenAI's Responses API (Codex) and the legacy completions answered by the app's own gateway (Gateway:Mode own): the
+/// OpenAI's Responses API (Codex) and the legacy completions answered by the app's own gateway: the
 /// request as one chat completion, the answer and its stream as a response; previous_response_id and built-in tools
 /// refused; a completion passed on to the engine and booked; a non-streamed answer booked by its usage.
 /// </summary>
@@ -63,7 +63,7 @@ public sealed class ResponsesGatewayTests(AppFixture app)
     [Fact]
     public async Task Codex_and_the_editors_completions_are_answered_and_booked()
     {
-        await using var f = app.Create(app.ConnectionStringFor("codex_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own" });
+        await using var f = app.Create(app.ConnectionStringFor("codex_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "cx" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));

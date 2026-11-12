@@ -204,12 +204,6 @@ public sealed class ArenaMcpTests(AppFixture app)
         var disabled = await agent.PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" }));
         await StatusAssert.Is(HttpStatusCode.Unauthorized, disabled);
         Assert.Contains("disabled", await disabled.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-
-        // The gateway down: the app knows its keys itself, so a key still signs in.
-        var (_, _, _, freshKey) = await PersonAsync(f);
-        gateway.Down = true;
-        await StatusAssert.Is(HttpStatusCode.OK, await Agent(f, freshKey).PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
-        gateway.Down = false;
     }
 
     [Fact]

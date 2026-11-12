@@ -2,35 +2,24 @@ using Llm.Api.Chat;
 using Llm.Api.Gateway;
 using Llm.Api.Operations;
 using Llm.Core.Identity;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
 
 /// <summary>
-/// Who may use which model holds for API keys too: each person's keys carry the
-/// models they may call (LiteLLM refuses the rest with 403). The chat's own key
-/// is not one of them; the app checks the chat itself. Fair use holds for keys
-/// too: each carries how many requests it may have at once.
+/// Who may use which model holds for API keys too: a request of a key is let in only for a model its person may use
+/// (<see cref="Gateway.Admission"/>, 403 for the rest), pictures, video and speech only with their features. Fair use
+/// holds for keys too: <see cref="AtOnce"/> of a key's requests are answered at once, the rest wait their turn.
 /// </summary>
-public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access,
-    Core.Data.AppDbContext db, Gateway.KeyWriters writers)
+public sealed class KeyAccess(ModelPolicy policy, ChatModels models, IOptionsMonitor<ChatOptions> chat, Access.AccessService access)
 {
-    /// <summary>
-    /// LiteLLM's own limit of a key's requests at once; null: none. The app's line (KeyLine) holds a key to
-    /// Chat:ApiRequestsPerKey and has the rest wait their turn; LiteLLM's limit, four times that, is the
-    /// safety net for what reaches it without the app (its failover, the paths it does not take).
-    /// </summary>
     /// <summary>A key's requests answered at once (Chat:ApiRequestsPerKey; the rest wait their turn); null: no limit.</summary>
     public int? AtOnce => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey : null;
 
-    public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey * 4 : null;
-
-    /// <summary>LiteLLM's word for "no model": an empty list would mean every model.</summary>
+    /// <summary>The word for "no model" in a key's list: an empty list means every model.</summary>
     public const string NoModels = "no-default-models";
 
-    /// <summary>The list a person's keys carry: empty (every model) when nothing is kept from them.</summary>
+    /// <summary>The models a person's keys may call: empty (every model) when nothing is kept from them.</summary>
     public async Task<IReadOnlyList<string>> ListForAsync(AppUser user, CancellationToken ct = default)
     {
         var every = await models.AllAsync(ct);
@@ -42,7 +31,7 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
         return allowed.Count == all.Count ? [] : allowed.Count == 0 ? [NoModels] : [.. all.Where(allowed.Contains)];
     }
 
-    /// <summary>The feature permission a gateway model of this mode needs; null: chat's own.</summary>
+    /// <summary>The feature permission a model of this mode needs; null: chat's own.</summary>
     public static string? FeatureOf(string mode) => mode switch
     {
         "image_generation" => Core.Access.Permissions.Pictures,
@@ -50,82 +39,29 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
         "audio_speech" or "audio_transcription" => Core.Access.Permissions.Speech,
         _ => null,
     };
-
-    /// <summary>Each person's keys blocked while they are disabled or have no API access, unblocked otherwise; returns how many changed.</summary>
-    public async Task<int> BlocksAsync(CancellationToken ct = default)
-    {
-        var changed = 0;
-        var people = await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct);
-        var memberships = await access.MembershipsAsync(people, ct);
-        foreach (var user in people)
-        {
-            var blocked = user.IsDisabled || memberships[user.Id].ApiOff;
-            var wrong = (await gateway.KeysAsync(user.Email!, ct)).Where(k => k.Blocked != blocked).Select(k => k.Token).ToList();
-            if (wrong.Count > 0)
-            {
-                await gateway.SetBlockedAsync(wrong, blocked, ct);
-                changed += wrong.Count;
-            }
-        }
-        return changed;
-    }
-
-    /// <summary>Brings everyone's keys in step; returns how many keys changed.</summary>
-    public async Task<int> SyncAsync(CancellationToken ct = default)
-    {
-        var changed = 0;
-        foreach (var user in await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
-        {
-            var want = await ListForAsync(user, ct);
-            // Read and written in the person's turn (KeyWriters): a key of theirs made or changed meanwhile is not written over.
-            using var turn = await writers.EnterAsync(user.Id, ct);
-            // A key the person made with fewer at once of its own carries that.
-            var own = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Hash, k => k.Parallel, ct);
-            foreach (var key in await gateway.KeysAsync(user.Email!, ct))
-            {
-                var parallel = Gateway.OwnKeys.TighterParallel(MaxParallel, own.GetValueOrDefault(key.Token));
-                if (!(key.Models ?? []).Order(StringComparer.Ordinal).SequenceEqual(want.Order(StringComparer.Ordinal)) || key.MaxParallel != parallel)
-                {
-                    await gateway.SetKeyAccessAsync(key.Token, want, parallel, ct);
-                    changed++;
-                }
-            }
-        }
-        return changed;
-    }
 }
 
 /// <summary>
-/// Runs <see cref="KeyAccess.SyncAsync"/>, <see cref="Gateway.GroupTeams.SyncAsync"/> and <see cref="Gateway.RateLimits.SyncAsync"/> when access, groups or
-/// the company's rate limits change, and every 10 minutes (the directory's groups change on their own). With several replicas, the one that leads runs it.
+/// What a key may do changed (a model's access, a group, a person's rules or limits, Chat:ApiRequestsPerKey, the company's
+/// rate limits): whose a key is and what it may call is read again at once, on every replica (<see cref="KeyBook"/>).
 /// </summary>
-/// <remarks>Keys:Watch=false turns the looking off (a test that calls the checks itself, without the watcher's pass between).</remarks>
-public sealed partial class KeyAccessWatcher : BackgroundService
+public sealed class KeyAccessWatcher : IDisposable
 {
     private const string WakeTopic = "keys:wake";
-    private readonly SemaphoreSlim _wake = new(0);
-    private readonly IServiceScopeFactory scopes;
     private readonly Replicas replicas;
     private readonly KeyBook book;
-    private readonly ILogger<KeyAccessWatcher> logger;
-    private readonly bool _watch;
     private readonly IDisposable? _onChange;
     private readonly IDisposable? _onRates;
 
-    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, KeyBook book, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat,
-        IOptionsMonitor<Gateway.RateLimitOptions> rates, IConfiguration config)
+    public KeyAccessWatcher(Replicas replicas, KeyBook book, IOptionsMonitor<ChatOptions> chat, IOptionsMonitor<Gateway.RateLimitOptions> rates)
     {
-        this.scopes = scopes;
-        _watch = config.GetValue("Keys:Watch", true);
         this.replicas = replicas;
         this.book = book;
-        this.logger = logger;
         replicas.On(WakeTopic, _ =>
         {
-            WakeHere();
+            book.Changed();
             return true;
         });
-        // A new limit of requests per key reaches every key at once, not in ten minutes.
         var perKey = chat.CurrentValue.ApiRequestsPerKey;
         _onChange = chat.OnChange(o =>
         {
@@ -135,7 +71,6 @@ public sealed partial class KeyAccessWatcher : BackgroundService
                 Wake();
             }
         });
-        // So does the company's rate limit.
         var limits = (rates.CurrentValue.RequestsPerMinute, rates.CurrentValue.TokensPerMinute);
         _onRates = rates.OnChange(o =>
         {
@@ -147,114 +82,16 @@ public sealed partial class KeyAccessWatcher : BackgroundService
         });
     }
 
-    /// <summary>
-    /// What a key may do changed (a model's access, a group, a person's rules or limits): the app's own answer to whose a key is
-    /// and what it may call is read again at once on every replica, as the gateway's keys are synced now. Believed for its ten
-    /// seconds, it would let a key load a model its gateway key no longer has.
-    /// </summary>
+    /// <summary>Every replica reads its keys again.</summary>
     public void Wake()
     {
         book.Changed();
-        WakeHere();
         replicas.Tell(WakeTopic);
     }
 
-    private void WakeHere()
-    {
-        if (_wake.CurrentCount == 0)
-        {
-            _wake.Release();
-        }
-    }
-
-    public override void Dispose()
+    public void Dispose()
     {
         _onChange?.Dispose();
         _onRates?.Dispose();
-        _wake.Dispose();
-        base.Dispose();
     }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (!_watch)
-        {
-            return;
-        }
-        // Soon after start (an upgrade may bring a new limit), then every ten minutes or when woken.
-        var wait = TimeSpan.FromSeconds(15);
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await _wake.WaitAsync(wait, stoppingToken);
-                if (!replicas.IsLeader)
-                {
-                    wait = TimeSpan.FromMinutes(1);
-                    continue;
-                }
-                wait = TimeSpan.FromMinutes(10);
-                await using var scope = scopes.CreateAsyncScope();
-                // The gateway holds no budget (the first time, the old ones become the app's credits).
-                if (await scope.ServiceProvider.GetRequiredService<Gateway.CreditMove>().RunAsync(stoppingToken) is > 0 and var moved)
-                {
-                    LogMoved(logger, moved);
-                }
-                // Each key blocked or not as its person is: disabled, or without API access (a block that failed is done again).
-                if (await scope.ServiceProvider.GetRequiredService<KeyAccess>().BlocksAsync(stoppingToken) is > 0 and var blocks)
-                {
-                    LogBlocks(logger, blocks);
-                }
-                var changed = await scope.ServiceProvider.GetRequiredService<KeyAccess>().SyncAsync(stoppingToken);
-                if (changed > 0)
-                {
-                    LogChanged(logger, changed);
-                }
-                // The teams the app once made for groups' credit at the gateway go (the credits are the app's now).
-                if (await scope.ServiceProvider.GetRequiredService<Gateway.GroupTeams>().SyncAsync(stoppingToken) is > 0 and var teams)
-                {
-                    LogTeams(logger, teams);
-                }
-                // And each key's rate limits: the person's own, their groups' or the company's.
-                if (await scope.ServiceProvider.GetRequiredService<Gateway.RateLimits>().SyncAsync(stoppingToken) is > 0 and var rated)
-                {
-                    LogRates(logger, rated);
-                }
-            }
-            catch (GatewayException ex)
-            {
-                LogFailed(logger, ex.Message);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                // A background failure must never stop the app.
-                LogError(logger, ex);
-            }
-        }
-    }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "API keys: {Changed} keys now carry the models their people may use")]
-    private static partial void LogChanged(ILogger logger, int changed);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Groups' old teams at the gateway: {Changed} keys or teams taken away")]
-    private static partial void LogTeams(ILogger logger, int changed);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Credits: the gateway's budgets of {Moved} people became their credits of every kind")]
-    private static partial void LogMoved(ILogger logger, int moved);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "API keys: {Changed} keys blocked or unblocked to match their people")]
-    private static partial void LogBlocks(ILogger logger, int changed);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Rate limits: {Changed} keys now carry their person's requests and tokens a minute")]
-    private static partial void LogRates(ILogger logger, int changed);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "API keys: the sync failed; trying again later")]
-    private static partial void LogError(ILogger logger, Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "API keys could not be brought in step with model access: {Reason}")]
-    private static partial void LogFailed(ILogger logger, string reason);
 }

@@ -232,11 +232,6 @@ public sealed partial class EngineWatcher : BackgroundService
             {
                 state.Fail(ex.Message);
             }
-            catch (GatewayException ex)
-            {
-                // Tried again next round.
-                LogGateway(logger, ex.Message);
-            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 LogFiles(logger, options.Value.ConfigDir, ex.Message);
@@ -481,10 +476,6 @@ public sealed partial class EngineWatcher : BackgroundService
                     await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync(stoppingToken);
                 }
                 await CapacityAsync(scope.ServiceProvider, false, [], [], stoppingToken);
-            }
-            catch (GatewayException ex)
-            {
-                LogGateway(logger, ex.Message);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

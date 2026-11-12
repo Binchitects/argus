@@ -67,7 +67,7 @@ public sealed class RemoteServersTests(AppFixture app)
         ]));
         await StatusAssert.Is(HttpStatusCode.Created, made);
 
-        var big = Assert.Single(gateway.Managed.Values, m => m.Name == "big");
+        var big = Assert.Single(await app.RoutesOfAsync(f), m => m.Name == "big");
         Assert.Equal("openai/big-remote", big.Params["model"]!.GetValue<string>());
         Assert.Equal(FakeRemote.Base, big.Params["api_base"]!.GetValue<string>());
         Assert.Equal(FakeRemote.Key, big.Params["api_key"]!.GetValue<string>());
@@ -76,7 +76,7 @@ public sealed class RemoteServersTests(AppFixture app)
         Assert.Equal((65536, 8192, 8192), (big.Info["max_input_tokens"]!.GetValue<int>(), big.Info["max_output_tokens"]!.GetValue<int>(), big.Info["max_tokens"]!.GetValue<int>()));
         Assert.Equal("GPU box", big.Info["llm_app_server"]!.GetValue<string>());
         // Without a longest answer of its own: half its window, as a model of this machine's.
-        var named = Assert.Single(gateway.Managed.Values, m => m.Name == "Qwen3.8-Flash-Next");
+        var named = Assert.Single(await app.RoutesOfAsync(f), m => m.Name == "Qwen3.8-Flash-Next");
         Assert.Equal((32768, 16384), (named.Info["max_input_tokens"]!.GetValue<int>(), named.Info["max_output_tokens"]!.GetValue<int>()));
 
         // Kept encrypted, and never sent back.
@@ -104,8 +104,8 @@ public sealed class RemoteServersTests(AppFixture app)
         var id = server.GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/servers/{id}", UriKind.Relative),
             new { models = new[] { new { remote = "big-remote", name = "big-2", context = 65536 } } }));
-        Assert.Equal(["big-2"], gateway.Managed.Values.Select(m => m.Name));
-        Assert.Equal(FakeRemote.Key, gateway.Managed.Values.Single().Params["api_key"]!.GetValue<string>());
+        Assert.Equal(["big-2"], (await app.RoutesOfAsync(f)).Select(m => m.Name));
+        Assert.Equal(FakeRemote.Key, (await app.RoutesOfAsync(f)).Single().Params["api_key"]!.GetValue<string>());
 
         // Down: the page says so, and which models it no longer lists once it is back without them.
         app.Remote.Down = true;
@@ -122,7 +122,7 @@ public sealed class RemoteServersTests(AppFixture app)
 
         // Removed: its models leave the gateway.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri($"/api/admin/servers/{id}", UriKind.Relative)));
-        Assert.Empty(gateway.Managed);
+        Assert.Empty(await app.RoutesOfAsync(f));
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("server.add", audit);
         Assert.Contains("server.remove", audit);
@@ -139,8 +139,8 @@ public sealed class RemoteServersTests(AppFixture app)
             new { name = "Checked", baseUrl = "https://gpu-box:8000/v1", apiKey = FakeRemote.Key, models = new[] { new { remote = "big-remote", name = "checked" } } }));
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/servers",
             new { name = "Unchecked", baseUrl = "https://gpu-box:8000/v1", apiKey = FakeRemote.Key, verifyTls = false, models = new[] { new { remote = "big-remote", name = "unchecked" } } }));
-        Assert.True(gateway.Managed.Values.Single(m => m.Name == "checked").Params["ssl_verify"]!.GetValue<bool>());
-        Assert.False(gateway.Managed.Values.Single(m => m.Name == "unchecked").Params["ssl_verify"]!.GetValue<bool>());
+        Assert.True((await app.RoutesOfAsync(f)).Single(m => m.Name == "checked").Params["ssl_verify"]!.GetValue<bool>());
+        Assert.False((await app.RoutesOfAsync(f)).Single(m => m.Name == "unchecked").Params["ssl_verify"]!.GetValue<bool>());
         // Two models of one name on one server, or a name that is not one, are refused.
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/servers",
             new { name = "Twice", baseUrl = FakeRemote.Base, apiKey = FakeRemote.Key, models = new[] { new { remote = "a", name = "x" }, new { remote = "b", name = "x" } } }));

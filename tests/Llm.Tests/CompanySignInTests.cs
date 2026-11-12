@@ -93,7 +93,7 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
         Assert.Equal("Ada Lovelace", me.GetProperty("displayName").GetString());
         Assert.True(me.GetProperty("isAdmin").GetBoolean());
         Assert.False(me.GetProperty("twoFactorEnabled").GetBoolean());
-        Assert.NotEmpty(company.Gateway.KeysOf("ada@example.test"));
+        Assert.NotEmpty(await AppFixture.GatewayKeysAsync(company.App!, "ada@example.test"));
         // Two-factor sign-in is the provider's, and so is the password.
         Assert.Equal("oidc", (await b.JsonAsync(await b.PostAsync("/api/account/2fa/setup"))).GetProperty("status").GetString());
         Assert.Equal("oidc", (await b.JsonAsync(await b.PostAsync("/api/account/password", new { current = "x", next = "violet tractor humming seaweed" }))).GetProperty("status").GetString());
@@ -160,7 +160,7 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await refused.GetAsync("/api/auth/me"));
         // The provider said no: their other sessions end and their keys stop.
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await session.GetAsync("/api/auth/me"));
-        Assert.All(company.Gateway.KeysOf("bea@example.test"), k => Assert.True(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(company.App!, "bea@example.test"), k => Assert.True(k.Blocked));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/people"))).GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bea");
         Assert.True(row.GetProperty("disabled").GetBoolean());
@@ -169,7 +169,7 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
         var (back, welcome) = await company.SignInAsync(f, bea);
         Assert.Equal("/chat", Location(welcome));
         await StatusAssert.Is(HttpStatusCode.OK, await back.GetAsync("/api/auth/me"));
-        Assert.All(company.Gateway.KeysOf("bea@example.test"), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(company.App!, "bea@example.test"), k => Assert.False(k.Blocked));
 
         // Someone the app never saw is not made at all.
         var (_, stranger) = await company.SignInAsync(f, new("sub-stranger", "stranger", "stranger@example.test", []));
@@ -201,7 +201,7 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         Assert.Contains(await AuditAsync(admin), e => e.GetProperty("action").GetString() == "sign_in" && !e.GetProperty("success").GetBoolean()
             && e.GetProperty("detail").GetString()!.Contains(reason, StringComparison.Ordinal));
-        Assert.Empty(company.Gateway.KeysOf($"forged-{flaw}@example.test"));
+        Assert.Empty(await AppFixture.GatewayKeysAsync(company.App!, $"forged-{flaw}@example.test"));
     }
 
     [Fact]

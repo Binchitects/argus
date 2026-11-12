@@ -90,7 +90,9 @@ public sealed class TokenCostTests(AppFixture app)
                 new { remote = "small-remote", name = "small", context = 32768, cachedInputPerMtok = 0.01m },
             },
         }));
-        decimal Param(string model, string key) => gateway.Managed.Values.Single(m => m.Name == model).Params[key]!.GetValue<decimal>();
+        var routes = await app.RoutesOfAsync(f);
+        // The routes as the gateway builds them now.
+        decimal Param(string model, string key) => routes.Single(m => m.Name == model).Params[key]!.GetValue<decimal>();
 
         // Its own prices, per token; the cached input it does not set is the default (0.02), never above its input.
         Assert.Equal(1.5e-6m, Param("big", "input_cost_per_token"));
@@ -127,6 +129,7 @@ public sealed class TokenCostTests(AppFixture app)
         {
             await scope.ServiceProvider.GetRequiredService<ModelCatalog>().SyncGatewayAsync();
         }
+        routes = await app.RoutesOfAsync(f);
         Assert.Equal(0.01m, Param(MediaModels.ImageModel, "input_cost_per_image"));
         Assert.Equal(0m, Param(MediaModels.ImageModel, "input_cost_per_token"));
         Assert.Equal(0.006m / 60, Param(MediaModels.SpeechToText, "input_cost_per_second"));
@@ -138,6 +141,7 @@ public sealed class TokenCostTests(AppFixture app)
         {
             changes = new object[] { new { key = "Prices:OutputPerMtok", value = "1.20" }, new { key = "Prices:PerImage", value = "0.04" } },
         }));
+        routes = await app.RoutesOfAsync(f);
         Assert.Equal(1.2e-6m, Param("small", "output_cost_per_token"));
         Assert.Equal(6e-6m, Param("big", "output_cost_per_token"));
         Assert.Equal(0.04m, Param(MediaModels.ImageModel, "input_cost_per_image"));
@@ -312,28 +316,20 @@ public sealed class TokenCostTests(AppFixture app)
         var answer = (await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&source=chat"))).GetProperty("rows").EnumerateArray().Single();
         Assert.Equal(0.10m + 2 * Round, answer.GetProperty("cost").GetDecimal());
 
-        // Booked in the gateway's log as the chat's request for the person, with its length.
-        DateTime start;
+        // Booked in the ledger as the chat's request for the person, with its length.
+        DateTimeOffset start;
         string request;
-        await using (var conn = new NpgsqlConnection(app.LitellmConnectionString))
+        using (var scope = f.Services.CreateScope())
         {
-            await conn.OpenAsync();
-            await using var cmd = new NpgsqlCommand("""
-                select request_id, call_type, metadata->>'user_api_key_alias', spend::numeric, (metadata->>'video_seconds')::numeric, model, model_group, "startTime"
-                from "LiteLLM_SpendLogs" where end_user = @email
-                """, conn);
-            cmd.Parameters.AddWithValue("email", email);
-            await using var reader = await cmd.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            request = reader.GetString(0);
-            Assert.Equal(SpendLog.VideoCall, reader.GetString(1));
-            Assert.Equal(Llm.Api.Chat.ChatKey.Alias, reader.GetString(2));
-            Assert.Equal(0.10m, Math.Round(reader.GetDecimal(3), 12));
-            Assert.Equal(2m, reader.GetDecimal(4));
-            Assert.Equal(MediaModels.VideoModel, reader.GetString(5));
-            Assert.Equal(MediaModels.VideoModel, reader.GetString(6));
-            start = reader.GetDateTime(7);
-            Assert.False(await reader.ReadAsync());
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.GatewayRequests.AsNoTracking().SingleAsync(r => r.Person == email && r.Call == "video");
+            request = row.SourceId!;
+            Assert.Equal("video", row.Call);
+            Assert.Equal(Llm.Api.Chat.ChatKey.Alias, row.KeyAlias);
+            Assert.Equal(0.10m, Math.Round(row.Cost, 12));
+            Assert.Equal(2d, row.Seconds);
+            Assert.Equal(MediaModels.VideoModel, row.Model);
+            start = row.StartedAt;
         }
         // It is the chat's (in the answer above), not a request of the person's API keys.
         Assert.Empty((await b.JsonAsync(await b.GetAsync($"/api/usage/prompts?{Now}&source=api"))).GetProperty("rows").EnumerateArray());
@@ -344,12 +340,12 @@ public sealed class TokenCostTests(AppFixture app)
         {
             changes = new object[] { new { key = "Prices:PerVideoSecond", value = "0.08" } },
         }));
-        var from = new DateTimeOffset(DateTime.SpecifyKind(start, DateTimeKind.Utc));
+        var from = start;
         var again = await admin.JsonAsync(await admin.PostAsync("/api/admin/usage/recalculate", new { from, to = from.AddMilliseconds(1), onlyFree = false, apply = true }));
         Assert.Equal(1, again.GetProperty("requests").GetProperty("rows").GetInt32());
         Assert.Equal(0.10m, again.GetProperty("requests").GetProperty("before").GetDecimal());
         Assert.Equal(0.16m, again.GetProperty("requests").GetProperty("after").GetDecimal());
-        Assert.Equal(0.16m, await SpendAsync(request));
+        Assert.Equal(0.16m, await SpendAsync(f, request));
     }
 
     /// <summary>The video server: a clip's job done at the first look, and the server up for the media control.</summary>
@@ -443,7 +439,7 @@ public sealed class TokenCostTests(AppFixture app)
         Assert.Equal(3 * Round + 0.01m, counted.GetProperty("answers").GetProperty("after").GetDecimal());
         Assert.False(counted.GetProperty("applied").GetBoolean());
         // Nothing changed by counting, and nothing was audited.
-        Assert.Equal(0m, await SpendAsync(model + "-1"));
+        Assert.Equal(0m, await SpendAsync(f, model + "-1"));
         using (var scope = f.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -453,9 +449,9 @@ public sealed class TokenCostTests(AppFixture app)
 
         var applied = await RunAsync(apply: true);
         Assert.True(applied.GetProperty("applied").GetBoolean());
-        Assert.Equal(completion, await SpendAsync(model + "-1"));
-        Assert.Equal(0.01m, await SpendAsync(model + "-2"));
-        Assert.Equal(0m, await SpendAsync(model + "-3"));
+        Assert.Equal(completion, await SpendAsync(f, model + "-1"));
+        Assert.Equal(0.01m, await SpendAsync(f, model + "-2"));
+        Assert.Equal(0m, await SpendAsync(f, model + "-3"));
         // The app's own ledger, which credit reads, has the same prices.
         using (var scope = f.Services.CreateScope())
         {
@@ -464,7 +460,7 @@ public sealed class TokenCostTests(AppFixture app)
             Assert.Equal((completion, 0.01m, 0m, 0.5m), (ledger[model + "-1"], ledger[model + "-2"], ledger[model + "-3"], ledger[model + "-4"]));
         }
         // Already priced, and so left alone.
-        Assert.Equal(0.5m, await SpendAsync(model + "-4"));
+        Assert.Equal(0.5m, await SpendAsync(f, model + "-4"));
         using (var scope = f.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -478,18 +474,17 @@ public sealed class TokenCostTests(AppFixture app)
         var every = await RunAsync(apply: true, onlyFree: false);
         Assert.Equal(1, every.GetProperty("requests").GetProperty("rows").GetInt32());
         Assert.Equal((100 * 0.20m + 10 * 0.80m) / 1_000_000m, every.GetProperty("requests").GetProperty("after").GetDecimal());
-        Assert.Equal(0.04m, await SpendAsync(model + "-6"));
-        Assert.Equal(0.01m, await SpendAsync(model + "-2"));
+        Assert.Equal(0.04m, await SpendAsync(f, model + "-6"));
+        Assert.Equal(0.01m, await SpendAsync(f, model + "-2"));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/usage/recalculate", new { from = to, to = from }));
     }
 
-    private async Task<decimal> SpendAsync(string request)
+    /// <summary>A request's cost in the ledger, by the id it was booked or imported under.</summary>
+    private static async Task<decimal> SpendAsync(WebApplicationFactory<Program> f, string request)
     {
-        await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand("""select spend::numeric from "LiteLLM_SpendLogs" where request_id = @id""", conn);
-        cmd.Parameters.AddWithValue("id", request);
-        return Math.Round((decimal)(await cmd.ExecuteScalarAsync())!, 12);
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return Math.Round(await db.GatewayRequests.AsNoTracking().Where(r => r.SourceId == request).Select(r => r.Cost).SingleAsync(), 12);
     }
 
     [Fact]

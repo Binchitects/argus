@@ -173,7 +173,7 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
             Assert.Contains("tiny", s.Desired("vllm"));
             Assert.Equal("ready", s.Vllm.Phase("tiny"));
             Assert.DoesNotContain("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
-            Assert.Equal(["http://vllm:8001/v1"], s.Gateway.Managed.Values.Where(m => m.Name == "tiny").Select(m => m.Params["api_base"]!.GetValue<string>()));
+            Assert.Equal(["http://vllm:8001/v1"], (await app.RoutesOfAsync(s.App)).Where(m => m.Name == "tiny").Select(m => m.Params["api_base"]!.GetValue<string>()));
             row = await RowAsync(s, "tiny");
             Assert.Equal(0.8m, row.GetProperty("outputPerMtok").GetDecimal());
             Assert.Equal("Admins", row.GetProperty("access").GetProperty("audience").GetString());
@@ -357,7 +357,7 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
             Assert.Contains("llama.cpp", row.GetProperty("move").GetProperty("error").GetString(), StringComparison.Ordinal);
             Assert.Contains("flash", s.Desired("vllm"));
             Assert.DoesNotContain("[flash]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
-            Assert.Equal(["http://vllm:8001/v1"], s.Gateway.Managed.Values.Where(m => m.Name == "flash").Select(m => m.Params["api_base"]!.GetValue<string>()));
+            Assert.Equal(["http://vllm:8001/v1"], (await app.RoutesOfAsync(s.App)).Where(m => m.Name == "flash").Select(m => m.Params["api_base"]!.GetValue<string>()));
 
             // The failure put away, and tried again once llama.cpp can load it: it moves.
             await StatusAssert.Is(HttpStatusCode.NoContent, await s.Admin.Http.DeleteAsync(new Uri("/api/admin/models/flash/move", UriKind.Relative)));
@@ -466,7 +466,7 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
             await UntilAsync(s, () => Task.FromResult(s.Sglang.Phase("flash") == "ready"), "flash ready on SGLang");
             await UntilAsync(s, async () => await PhaseAsync(s, "flash") == "ready", "the move waiting for vLLM's answers");
             Assert.Contains("flash", s.Desired("vllm"));
-            Assert.Equal(["http://sglang:8001/v1"], s.Gateway.Managed.Values.Where(m => m.Name == "flash").Select(m => m.Params["api_base"]!.GetValue<string>()));
+            Assert.Equal(["http://sglang:8001/v1"], (await app.RoutesOfAsync(s.App)).Where(m => m.Name == "flash").Select(m => m.Params["api_base"]!.GetValue<string>()));
             s.Vllm.Busy.Clear();
             await UntilAsync(s, async () => await PhaseAsync(s, "flash") is null, "the move over");
             Assert.DoesNotContain("flash", s.Desired("vllm"));

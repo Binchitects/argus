@@ -115,9 +115,7 @@ public sealed class IdentityTests(AppFixture app)
         var (_, password, key, email) = await CreatePersonAsync(admin, credits: new { api = 12.5m });
         Assert.Equal(20, password.Length);
         Assert.StartsWith("sk-", key, StringComparison.Ordinal);
-        Assert.Contains(app.Gateway.KeysOf(email), k => k.Secret == key);
-        // The credits are the app's: the gateway holds no budget.
-        Assert.Null(app.Gateway.Budgets.GetValueOrDefault(email));
+        Assert.Contains(await AppFixture.GatewayKeysAsync(app.Factory, email), k => k.Token == AppFixture.TokenOf(key));
 
         var person = await Browser().SignedInAsync(email, password); // by email works too
         var me = await person.JsonAsync(await person.GetAsync("/api/auth/me"));
@@ -229,12 +227,12 @@ public sealed class IdentityTests(AppFixture app)
 
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative), new { disabled = true }));
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await person.GetAsync("/api/auth/me"));
-        Assert.All(app.Gateway.KeysOf(email), k => Assert.True(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(app.Factory, email), k => Assert.True(k.Blocked));
         var res = await Browser().LoginAsync(email, password);
         Assert.Equal("disabled", (await Browser().JsonAsync(res)).GetProperty("status").GetString());
 
         await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative), new { disabled = false });
-        Assert.All(app.Gateway.KeysOf(email), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(app.Factory, email), k => Assert.False(k.Blocked));
         await StatusAssert.Is(HttpStatusCode.OK, await Browser().LoginAsync(email, password));
     }
 
@@ -277,12 +275,12 @@ public sealed class IdentityTests(AppFixture app)
         var res = await admin.PostAsync($"/api/admin/people/{id}/key");
         var newKey = (await admin.JsonAsync(res)).GetProperty("apiKey").GetString()!;
         Assert.NotEqual(oldKey, newKey);
-        Assert.Equal([newKey], app.Gateway.KeysOf(email).Select(k => k.Secret));
+        Assert.Equal([AppFixture.TokenOf(newKey)], (await AppFixture.GatewayKeysAsync(app.Factory, email)).Select(k => k.Token));
 
         // A person may rotate their own key too.
         var person = await Browser().SignedInAsync(email, password);
         var own = (await person.JsonAsync(await person.PostAsync("/api/account/keys/rotate"))).GetProperty("apiKey").GetString()!;
-        Assert.Equal([own], app.Gateway.KeysOf(email).Select(k => k.Secret));
+        Assert.Equal([AppFixture.TokenOf(own)], (await AppFixture.GatewayKeysAsync(app.Factory, email)).Select(k => k.Token));
     }
 
     [Fact]
@@ -299,7 +297,6 @@ public sealed class IdentityTests(AppFixture app)
         credits = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("credits");
         Assert.All(new[] { "chat", "api", "pictures", "video", "speech" }, k => Assert.Equal(JsonValueKind.Null, credits.GetProperty(k).GetProperty("credit").ValueKind));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative), new { chat = -1 }));
-        Assert.Null(app.Gateway.Budgets.GetValueOrDefault(email));
     }
 
     [Fact]
@@ -310,9 +307,9 @@ public sealed class IdentityTests(AppFixture app)
         var person = await Browser().SignedInAsync(email, password);
         Assert.False((await person.JsonAsync(await person.GetAsync("/api/account/keys"))).GetProperty("apiOff").GetBoolean());
 
-        // Taken: the keys are blocked at the gateway, none is shown or made, and the guardrail refuses them.
+        // Taken: the keys are blocked, none is shown or made, and the gateway refuses them.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/api", UriKind.Relative), new { on = false }));
-        Assert.All(app.Gateway.KeysOf(email), k => Assert.True(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(app.Factory, email), k => Assert.True(k.Blocked));
         var keys = await person.JsonAsync(await person.GetAsync("/api/account/keys"));
         Assert.True(keys.GetProperty("apiOff").GetBoolean());
         Assert.Equal(0, keys.GetProperty("keys").GetArrayLength());
@@ -328,9 +325,9 @@ public sealed class IdentityTests(AppFixture app)
 
         // Given back: the keys work again.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/api", UriKind.Relative), new { on = true }));
-        Assert.All(app.Gateway.KeysOf(email), k => Assert.False(k.Blocked));
+        Assert.All(await AppFixture.GatewayKeysAsync(app.Factory, email), k => Assert.False(k.Blocked));
         Assert.Equal("NONE", (await GroupCreditTests.GuardrailAsync(app.Factory, email, "hello")).GetProperty("action").GetString());
-        Assert.Contains(key, app.Gateway.KeysOf(email).Select(k => k.Secret));
+        Assert.Contains(AppFixture.TokenOf(key), (await AppFixture.GatewayKeysAsync(app.Factory, email)).Select(k => k.Token));
         var audit = await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync();
         Assert.Contains("person.api_off", audit, StringComparison.Ordinal);
         Assert.Contains("person.api_on", audit, StringComparison.Ordinal);
@@ -342,53 +339,9 @@ public sealed class IdentityTests(AppFixture app)
         var admin = await Admin();
         var (id, password, _, email) = await CreatePersonAsync(admin);
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative)));
-        Assert.Empty(app.Gateway.KeysOf(email));
+        Assert.Empty(await AppFixture.GatewayKeysAsync(app.Factory, email));
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.GetAsync($"/api/admin/people/{id}"));
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await Browser().LoginAsync(email, password));
-    }
-
-    [Fact]
-    public async Task A_person_is_created_even_when_the_gateway_is_down_and_is_told_so()
-    {
-        var admin = await Admin();
-        app.Gateway.Down = true;
-        try
-        {
-            var res = await admin.PostAsync("/api/admin/people", new { userName = "gw" + Guid.NewGuid().ToString("N")[..8], email = $"gw{Guid.NewGuid():N}@example.test" });
-            await StatusAssert.Is(HttpStatusCode.Created, res);
-            var body = await admin.JsonAsync(res);
-            Assert.False(string.IsNullOrEmpty(body.GetProperty("password").GetString()));
-            Assert.Equal(JsonValueKind.Null, body.GetProperty("apiKey").ValueKind);
-            Assert.Contains("gateway", body.GetProperty("warning").GetString(), StringComparison.Ordinal);
-            // The list needs no gateway: the credits are the app's, the spend the request log's.
-            var list = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
-            Assert.Equal(JsonValueKind.Null, list.GetProperty("warning").ValueKind);
-        }
-        finally
-        {
-            app.Gateway.Down = false;
-        }
-    }
-
-    [Fact]
-    public async Task With_the_gateway_down_a_persons_key_page_says_so_instead_of_failing()
-    {
-        var admin = await Admin();
-        var (_, password, _, email) = await CreatePersonAsync(admin);
-        var person = await Browser().SignedInAsync(email, password);
-        app.Gateway.Down = true;
-        try
-        {
-            foreach (var res in new[] { await person.GetAsync("/api/account/keys"), await person.GetAsync("/api/account/keys/limits"), await person.PostAsync("/api/account/keys/rotate") })
-            {
-                await StatusAssert.Is(HttpStatusCode.BadGateway, res);
-                Assert.Contains("gateway is not reachable", (await person.JsonAsync(res)).GetProperty("error").GetString(), StringComparison.Ordinal);
-            }
-        }
-        finally
-        {
-            app.Gateway.Down = false;
-        }
     }
 
     [Fact]

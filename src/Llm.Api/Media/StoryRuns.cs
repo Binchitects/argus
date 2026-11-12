@@ -137,7 +137,6 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
         var gpu = sp.GetRequiredService<GpuShare>();
         var prices = sp.GetRequiredService<Gateway.PriceBook>();
         var spendLog = sp.GetRequiredService<Gateway.SpendLog>();
-        var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<ChatKey>().GetAsync(ct));
         if (await quotas.RefusalAsync(me.Id, 0, ct) is { } full)
         {
             throw new Refused(full);
@@ -178,7 +177,7 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
                 media.Touch(picture.Name);
                 shots[i] = shot with { Picture = await KeepAsync(db, me, $"shot-{i + 1}.png", "image/png", "image", "picture", png, null, ct) };
                 await PhaseAsync(db, story, $"Drew shot {i + 1}", shots);
-                await spendLog.BookPicturesAsync(me.Email ?? "", key, picture.Name, 1, picture.Row.UnitPrice ?? prices.Defaults.PerImage, began, DateTimeOffset.UtcNow, ct);
+                await spendLog.BookPicturesAsync(me.Email ?? "", picture.Name, 1, picture.Row.UnitPrice ?? prices.Defaults.PerImage, began, DateTimeOffset.UtcNow, ct);
             }
         }
 
@@ -209,7 +208,7 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
                 media.Touch(video.Name);
                 shots[i] = shots[i] with { Clip = await KeepAsync(db, me, $"shot-{i + 1}{(type == "video/webm" ? ".webm" : ".avi")}", type, "video", "video", clip, seconds, ct) };
                 await PhaseAsync(db, story, $"Shot {i + 1} moves", shots);
-                await spendLog.BookVideoAsync(me.Email ?? "", key, video.Name, seconds, (video.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * seconds, began, DateTimeOffset.UtcNow, ct);
+                await spendLog.BookVideoAsync(me.Email ?? "", video.Name, seconds, (video.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * seconds, began, DateTimeOffset.UtcNow, ct);
             }
         }
 
@@ -237,7 +236,7 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
                     var (mp3, said) = await studio.SpeakAsync(shot.Narration, sample, 0.5, ct);
                     shots[i] = shots[i] with { Speech = await KeepAsync(db, me, $"shot-{i + 1}.mp3", "audio/mpeg", "audio", "speech", mp3, said, ct) };
                     await PhaseAsync(db, story, $"Narrated shot {i + 1}", shots);
-                    await spendLog.BookSoundAsync(Gateway.SpendLog.SpeechCall, me.Email ?? "", key, StudioServer.VoiceModel, shot.Narration.Length, prices.Speech(shot.Narration.Length),
+                    await spendLog.BookSoundAsync(Gateway.SpendLog.SpeechCall, me.Email ?? "", StudioServer.VoiceModel, shot.Narration.Length, prices.Speech(shot.Narration.Length),
                         began, DateTimeOffset.UtcNow, ct);
                 }
             }
@@ -289,7 +288,7 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
                 story.MusicFileId = await KeepAsync(db, me, "music.mp3", "audio/mpeg", "audio", "music", music, seconds, ct);
                 story.MusicMadeFor = madeFor;
                 await db.SaveChangesAsync(ct);
-                await spendLog.BookSoundAsync(Gateway.SpendLog.MusicCall, me.Email ?? "", key, StudioServer.MusicModel, seconds, prices.Defaults.PerMusicMinute * (decimal)seconds / 60m,
+                await spendLog.BookSoundAsync(Gateway.SpendLog.MusicCall, me.Email ?? "", StudioServer.MusicModel, seconds, prices.Defaults.PerMusicMinute * (decimal)seconds / 60m,
                     began, DateTimeOffset.UtcNow, ct);
             }
         }

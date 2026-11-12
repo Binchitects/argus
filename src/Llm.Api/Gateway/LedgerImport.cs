@@ -11,17 +11,23 @@ using NpgsqlTypes;
 namespace Llm.Api.Gateway;
 
 /// <summary>
-/// LiteLLM's request log brought into the app's own ledger (gateway.requests) while LiteLLM still answers: on the leader,
-/// every few seconds, the rows written since the last look (each once, by LiteLLM's request id), and at first all it keeps
-/// (Retention:GatewayLogDays). Each row is attributed as the usage pages attribute it today (the person, the key, the kind
-/// of credit), so the pages can read the ledger and show the same numbers; refusals and failures are told apart. People's
-/// keys come over too (gateway.api_keys), every half minute: those LiteLLM holds that the app does not (made before the app
-/// made them, or by a replica of the version before), and what each spent.
+/// An upgrade from before 8.0 (when LiteLLM was the gateway): its people's keys and its request log brought into the
+/// app's own (gateway.api_keys, gateway.requests) once, at the first start, on the leader. Keys the app does not have come
+/// over by their hash (a key of the app's is never taken away); every row of the log comes over once, by LiteLLM's
+/// request id, attributed as the usage pages attribute it (the person, the key, the kind of credit), refusals and failures
+/// told apart. Done, it is marked (<see cref="DoneRow"/>) and never runs again; the installer drops LiteLLM's database
+/// after its backup. A stack that never had LiteLLM is marked done at once. Until then, the importer tries every minute.
 /// </summary>
-public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<DashboardOptions> dashboards, IConfiguration config, Replicas replicas,
+public sealed partial class LedgerImport(IServiceScopeFactory scopes, IConfiguration config, Replicas replicas,
     TimeProvider clock, ILogger<LedgerImport> logger) : BackgroundService
 {
-    private static readonly TimeSpan Every = TimeSpan.FromSeconds(5);
+    /// <summary>The settings row that says the import is done (its value: when).</summary>
+    public const string DoneRow = "gateway.imported";
+
+    /// <summary>LiteLLM's database, as the installers before 8.0 made it (Gateway:ImportDatabase names another).</summary>
+    public const string Database = "litellm";
+
+    private static readonly TimeSpan Every = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// LiteLLM writes its log in batches, each replica its own: a row may land a little after a later one, so each look reads
@@ -32,14 +38,9 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
     /// <summary>The most rows one look reads: a look that read as many reads on.</summary>
     public const int Batch = 5000;
 
-    /// <summary>How often people's keys are read again.</summary>
-    private static readonly TimeSpan KeysEvery = TimeSpan.FromSeconds(30);
-
-    private DateTimeOffset _keysRead = DateTimeOffset.MinValue;
-
     private readonly string _litellm = new NpgsqlConnectionStringBuilder(DatabaseSettings.ConnectionString(config))
     {
-        Database = dashboards.Value.SqlDatabase, ApplicationName = "llm-app ledger import",
+        Database = config["Gateway:ImportDatabase"] is { Length: > 0 } named ? named : Database, ApplicationName = "llm-app ledger import",
     }.ConnectionString;
 
     /// <summary>Where the next look starts: a row's time of writing, and its id (a batch written at once shares one time).</summary>
@@ -57,22 +58,48 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             }
             try
             {
-                if (clock.GetUtcNow() - _keysRead >= KeysEvery)
+                if (await RunOnceAsync(stoppingToken))
                 {
-                    await ImportKeysAsync(stoppingToken);
-                    _keysRead = clock.GetUtcNow();
-                }
-                while (await ImportAsync(stoppingToken) == Batch)
-                {
-                    // A full batch: there is more (the first look brings the whole log over).
+                    return;
                 }
             }
-            catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException && !stoppingToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException or DbUpdateException && !stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex.Message);
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    /// <summary>The import, unless it was done: the keys, then the whole log, then the mark. True when it is done.</summary>
+    public async Task<bool> RunOnceAsync(CancellationToken ct)
+    {
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            if (await scope.ServiceProvider.GetRequiredService<AppDbContext>().Settings.AsNoTracking().AnyAsync(x => x.Key == DoneRow, ct))
+            {
+                return true;
+            }
+        }
+        var keys = await ImportKeysAsync(ct);
+        var requests = 0;
+        int read;
+        while ((read = await ImportAsync(ct)) > 0)
+        {
+            requests += read;
+            if (read < Batch)
+            {
+                break;
+            }
+        }
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Settings.Add(new Setting { Key = DoneRow, Value = clock.GetUtcNow().ToString("O", System.Globalization.CultureInfo.InvariantCulture), UpdatedAt = clock.GetUtcNow() });
+            await db.SaveChangesAsync(ct);
+        }
+        LogDone(logger, keys, requests);
+        return true;
     }
 
     private sealed record Row(string RequestId, string CallType, string ApiKey, double Spend, int Prompt, int Completion, DateTime Start, DateTime End, DateTime? FirstToken,
@@ -172,9 +199,8 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
     /// <summary>
     /// People's keys as LiteLLM holds them, into gateway.api_keys: a key the app does not have yet comes over by its hash, of
     /// its kind (a Code Studio workspace's, one of the person's own, else their main key); one it has keeps its kind, name
-    /// and limits (the app's) and takes LiteLLM's alias, preview, expiry and what it spent. A key LiteLLM no longer holds
-    /// goes, unless the app made it in the last two minutes (it makes the row first, then registers the key). The chat's
-    /// own key, and keys of no one with an account, stay out. How many are kept.
+    /// and limits (the app's) and takes LiteLLM's alias, preview, expiry and what it spent. None of the app's keys is taken
+    /// away. The chat's own key, and keys of no one with an account, stay out. How many LiteLLM's are kept.
     /// </summary>
     public async Task<int> ImportKeysAsync(CancellationToken ct)
     {
@@ -242,11 +268,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
         }
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var have = await db.ApiKeys.ToListAsync(ct);
-        // What went first, then what is new or changed: an alias freed by a key that went may be taken by a new one. A key
-        // the app made a moment ago may not be at LiteLLM yet.
-        var settled = clock.GetUtcNow() - TimeSpan.FromMinutes(2);
-        db.ApiKeys.RemoveRange(have.Where(k => !wanted.ContainsKey(k.Hash.TrimEnd()) && k.CreatedAt < settled));
-        await db.SaveChangesAsync(ct);
+        // A key of the app's is never taken away; one LiteLLM holds that the app has keeps the app's kind, name and limits.
         var kept = have.Where(k => wanted.ContainsKey(k.Hash.TrimEnd())).ToDictionary(k => k.Hash.TrimEnd(), StringComparer.Ordinal);
         var taken = have.Where(k => !wanted.ContainsKey(k.Hash.TrimEnd())).Select(k => k.Alias).ToHashSet(StringComparer.Ordinal);
         foreach (var (hash, k) in wanted)
@@ -447,6 +469,9 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "LiteLLM's request log could not be brought into the ledger: {Reason}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "LiteLLM's keys and request log could not be brought into the app's yet: {Reason}")]
     private static partial void LogFailed(ILogger logger, string reason);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "LiteLLM's {Keys} keys and {Requests} requests are in the app's own now: the import is done")]
+    private static partial void LogDone(ILogger logger, int keys, int requests);
 }

@@ -61,7 +61,7 @@ public sealed class GatewayAlertTests(AppFixture app, Promtool promtool) : IClas
     [Fact]
     public async Task The_gateways_metrics_are_on_the_apps_metrics_and_its_health_on_the_overview()
     {
-        await using var f = app.Create(app.ConnectionStringFor("gwmon_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own" });
+        await using var f = app.Create(app.ConnectionStringFor("gwmon_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
         var gateway = f.Services.GetRequiredService<ModelGateway>();
         using (var res = await gateway.ChatAsync(new System.Text.Json.Nodes.JsonObject
         {

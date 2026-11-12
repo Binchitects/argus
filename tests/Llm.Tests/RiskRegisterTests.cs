@@ -27,6 +27,32 @@ public sealed class RiskRegisterTests(AppFixture app)
             .Single(c => c.GetProperty("id").GetString() == "risks") is var c ? $"{c.GetProperty("state").GetString()}: {c.GetProperty("detail").GetString()}" : "";
 
     [Fact]
+    public async Task An_upgrade_from_7_names_the_gateway_asset_of_a_risk_as_the_app_s_own()
+    {
+        var cs = app.ConnectionStringFor("riskup_" + Guid.NewGuid().ToString("N")[..8]);
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        options.UseNpgsql(cs);
+        options.UseOpenIddict<Guid>();
+        await using var db = new AppDbContext(options.Options);
+        var migrator = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db);
+        var all = db.Database.GetMigrations().ToList();
+        await migrator.MigrateAsync(all[all.FindIndex(m => m.EndsWith("_RenameGatewayAsset", StringComparison.Ordinal)) - 1]);
+        await using (var conn = new Npgsql.NpgsqlConnection(cs))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new Npgsql.NpgsqlCommand("""
+                INSERT INTO risks ("Id","Title","Category","Assets","Controls","Likelihood","Impact","Treatment","CreatedBy","CreatedAt","UpdatedAt","ReviewDue")
+                  VALUES ('00000000-0000-0000-0000-0000000000f1','The gateway leaks keys','security','{"The gateway (LiteLLM)","The audit log"}','{}',2,4,'reduce','ciso',now(),now(),now())
+                """, conn);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        await migrator.MigrateAsync();
+        var risk = await db.Risks.AsNoTracking().SingleAsync();
+        Assert.Equal(["The model gateway (in the app)", "The audit log"], risk.Assets);
+        Assert.Contains("The model gateway (in the app)", Llm.Api.Compliance.Risks.Stores);
+    }
+
+    [Fact]
     [Trait("Control", "GOV-04")]
     public async Task A_risk_has_its_levels_before_and_after_treatment_its_controls_and_a_review_its_level_sets()
     {

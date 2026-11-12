@@ -142,7 +142,7 @@ public sealed class AppFixture : IAsyncLifetime
 
     /// <summary>A separate app on its own database, for tests that need a fresh start (imports, LDAP).</summary>
     /// <param name="services">Test services of its own (a clock), after the fakes.</param>
-    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null) =>
+    public WebApplicationFactory<Program> Create(string connectionString, FakeGateway gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null) =>
         Build(connectionString, gateway, settings, services);
 
     /// <summary>The services of each app whose host is running: listed as it starts, gone as it stops.</summary>
@@ -165,27 +165,19 @@ public sealed class AppFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// What a test wrote into LiteLLM's request log, brought into an app's ledger (gateway.requests) as the leader's mirror
-    /// does every few seconds: the apps read the ledger, and each read the shared log before. This app's (the shared one's when
-    /// none is named): each other app reads the whole shared log at its first import.
+    /// What a test wrote into LiteLLM's request log (an upgrade's, as the tests seed it), brought into an app's ledger
+    /// (gateway.requests) as the import at an upgrade does: the apps read the ledger. This app's (the shared one's when none
+    /// is named): each other app reads the whole shared log at its first import.
     /// </summary>
-    /// <summary>The gateway mode the tests run in: own (the default), or ARENA_TEST_GATEWAY_MODE's.</summary>
-    public static string GatewayMode { get; } = Environment.GetEnvironmentVariable("ARENA_TEST_GATEWAY_MODE") is { Length: > 0 } m ? m : GatewayModes.Own;
 
     public Task MirrorAsync(WebApplicationFactory<Program>? into = null) => MirrorIntoAsync((into ?? Factory).Services);
 
     /// <summary>
-    /// The tags of the model calls the app's own gateway booked (Gateway:Mode own, the default), oldest first: the tag is
-    /// the ledger's, since the gateway does not send LiteLLM's metadata on to the engine. Written lines are flushed first.
+    /// The tags of the model calls the app's gateway booked, oldest first: the tag is the ledger's (the gateway does not send
+    /// the request's metadata on to the engine). Written lines are flushed first.
     /// </summary>
     public async Task<List<string?>> TagsAsync(string? person = null, WebApplicationFactory<Program>? into = null)
     {
-        if (GatewayMode != Llm.Api.Gateway.GatewayModes.Own)
-        {
-            // Through LiteLLM the tag goes with the request, as its metadata: LiteLLM's own spend log keeps it.
-            return [.. Model.Requests.Where(r => person == null || r.Body["user"]?.ToString() == person)
-                .Select(r => r.Body["metadata"]?["tags"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } t ? t[0]!.ToString() : null)];
-        }
         var services = (into ?? Factory).Services;
         await services.GetRequiredService<Llm.Api.Gateway.ModelGateway>().FlushAsync(CancellationToken.None);
         await using var scope = services.CreateAsyncScope();
@@ -201,6 +193,36 @@ public sealed class AppFixture : IAsyncLifetime
         await using var scope = services.CreateAsyncScope();
         return await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().GatewayRequests.AsNoTracking()
             .Where(r => r.Person == person).SumAsync(r => r.Cost);
+    }
+
+    /// <summary>A person's keys as the app keeps them (gateway.api_keys), the oldest first: Token is the key's hash.</summary>
+    public async Task<List<TestKey>> KeysOfAsync(string email, WebApplicationFactory<Program>? into = null)
+    {
+        await using var scope = (into ?? Factory).Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var normalized = email.ToUpperInvariant();
+        return await (from k in db.ApiKeys.AsNoTracking()
+                      join u in db.Users.AsNoTracking() on k.UserId equals u.Id
+                      where u.NormalizedEmail == normalized
+                      orderby k.CreatedAt
+                      select new TestKey(k.Hash.TrimEnd(), k.Alias, k.Kind, k.Name, k.Parallel, k.RequestsPerMinute, k.TokensPerMinute, k.MonthlyBudget, k.ExpiresAt)).ToListAsync();
+    }
+
+    /// <summary>A person's keys as their pages show them (<see cref="Llm.Api.Gateway.ApiKeys.KeysAsync(string, CancellationToken)"/>): hashed token, whether blocked.</summary>
+    public static async Task<IReadOnlyList<Llm.Api.Gateway.GatewayKey>> GatewayKeysAsync(WebApplicationFactory<Program> into, string email)
+    {
+        await using var scope = into.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Llm.Api.Gateway.ApiKeys>().KeysAsync(email);
+    }
+
+    /// <summary>A key's hashed token, as the app keeps it.</summary>
+    public static string TokenOf(string key) => Llm.Api.Gateway.AnswerCache.HashOf(key);
+
+    /// <summary>The routes the app builds from its own tables (not a test's): each one's name, fingerprint, what it is given and what it says of itself.</summary>
+    public async Task<List<Llm.Api.Gateway.Deployment>> RoutesOfAsync(WebApplicationFactory<Program>? into = null)
+    {
+        await using var scope = (into ?? Factory).Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Llm.Api.Gateway.GatewayRoutes>().BuildAsync(CancellationToken.None, others: false);
     }
 
     /// <summary>How many model calls the app booked with this tag (<see cref="TagsAsync"/>).</summary>
@@ -239,7 +261,7 @@ public sealed class AppFixture : IAsyncLifetime
         }
     }
 
-    private WebApplicationFactory<Program> Build(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings, Action<IServiceCollection>? services) =>
+    private WebApplicationFactory<Program> Build(string connectionString, FakeGateway gateway, IDictionary<string, string?>? settings, Action<IServiceCollection>? services) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("ConnectionStrings:App", connectionString);
@@ -253,8 +275,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Oidc:ApiSecret", ApiSecret);
             b.UseSetting("Dashboards:Path", DashboardsPath);
             b.UseSetting("Plugins:Directory", PluginsPath);
-            b.UseSetting("Dashboards:SqlDatabase", "litellm_test" + _run);
-            // The ledger's mirror of LiteLLM's log runs when a test asks it to (LedgerImportTests), not on its own between tests.
+            // LiteLLM's database of an upgrade, as the tests seed it: imported when a test asks (LedgerImportTests, SpendAsync), not on its own.
+            b.UseSetting("Gateway:ImportDatabase", "litellm_test" + _run);
             b.UseSetting("Gateway:LedgerImport", "false");
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             // Many apps at once here: the bell's watcher would hold their connections (its checks are called directly).
@@ -268,7 +290,6 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Chat:CodeIntelChatToken", FakeCodeIntel.ChatToken);
             // Every tool whole, unless a test sends tools on demand: the default set grows with each new tool.
             b.UseSetting("Chat:ToolTextChars", "0");
-            b.UseSetting("Gateway:MasterKey", "sk-master-for-tests");
             // No engine and no media servers here unless a test brings them (the models tests do).
             b.UseSetting("Engine:Enabled", "false");
             b.UseSetting("Modules:imagegen", "false");
@@ -292,12 +313,9 @@ public sealed class AppFixture : IAsyncLifetime
             // No Laya unless a test brings it (LayaTests).
             b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.
-            b.UseSetting("Stack:LiteLlmProbeUrl", "http://127.0.0.1:9");
             b.UseSetting("Stack:PrometheusUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:AlertmanagerUrl", "http://127.0.0.1:9");
             b.UseSetting("Dashboards:LokiUrl", "http://127.0.0.1:9");
-            // The app's own gateway, as installed; any class runs in another mode with dotnet test --environment ARENA_TEST_GATEWAY_MODE=litellm.
-            b.UseSetting("Gateway:Mode", GatewayMode);
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>())
             {
                 b.UseSetting(k, v);
@@ -305,16 +323,11 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseEnvironment("Production");
             b.ConfigureTestServices(s =>
             {
+                // The models a test asks for, as routes beside the app's own.
                 s.AddSingleton(gateway);
-                if (gateway is IRoutesSource routes)
-                {
-                    // The models a test asks for, as routes beside the app's own.
-                    s.AddSingleton(routes);
-                }
+                s.AddSingleton<IRoutesSource>(gateway);
                 s.AddHttpClient<Llm.Api.Operations.CodeIntelAdmin>().ConfigurePrimaryHttpMessageHandler(() => CodeIntel);
                 s.AddHttpClient<Llm.Api.Chat.CodeIntelMcp>().ConfigurePrimaryHttpMessageHandler(() => CodeIntel);
-                s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);
-                s.AddHttpClient(AnswerCache.Client).ConfigurePrimaryHttpMessageHandler(() => Model);
                 // The app's own gateway sends to the engines: here, the fake model behind every route.
                 s.AddHttpClient(Llm.Api.Gateway.ModelGateway.Upstream).ConfigurePrimaryHttpMessageHandler(() => Model);
                 s.AddHttpClient(Llm.Api.Gateway.ModelGateway.UpstreamUnchecked).ConfigurePrimaryHttpMessageHandler(() => Model);
@@ -362,3 +375,7 @@ public sealed class AppFixture : IAsyncLifetime
 
 [CollectionDefinition(nameof(AppCollection))]
 public sealed class AppCollection : ICollectionFixture<AppFixture>;
+
+/// <summary>A key as the app keeps it, for a test: its hash (Token), alias, kind, name and own limits.</summary>
+public sealed record TestKey(string Token, string Alias, string Kind, string? Name, int? Parallel, int? RequestsPerMinute, int? TokensPerMinute, decimal? MonthlyBudget,
+    DateTimeOffset? ExpiresAt);

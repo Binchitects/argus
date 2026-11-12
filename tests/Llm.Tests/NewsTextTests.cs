@@ -28,8 +28,8 @@ public sealed class GatewayExplainTests
     [Fact]
     public void A_model_that_failed_to_load_is_explained()
     {
-        var said = Llm.Api.Chat.GatewayChat.Explain("""{"error":{"message":"litellm.InternalServerError: InternalServerError: OpenAIException - model name=Qwen3.8-Flash-Next failed to load"}}""", 500);
+        var said = Llm.Api.Chat.GatewayChat.Explain("""{"error":{"message":"InternalServerError: OpenAIException - model name=Qwen3.8-Flash-Next failed to load"}}""", 500);
         Assert.StartsWith("Qwen3.8-Flash-Next could not be loaded: most often it needs more GPU memory", said, StringComparison.Ordinal);
-        Assert.Equal("The model could not answer: upstream reset", Llm.Api.Chat.GatewayChat.Explain("""{"error":{"message":"litellm.APIError: APIError: OpenAIException - upstream reset"}}""", 502));
+        Assert.Equal("The model could not answer: upstream reset", Llm.Api.Chat.GatewayChat.Explain("""{"error":{"message":"APIError: OpenAIException - upstream reset"}}""", 502));
     }
 }

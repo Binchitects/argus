@@ -14,8 +14,8 @@ namespace Llm.Api.Gateway;
 /// <summary>
 /// One place a model name is answered: llama.cpp's router here, a copy of a vLLM or SGLang model, another GPU server, or a
 /// picture or speech server; with the name it is sent, its key, how many requests it takes at once, its share of a pool, its
-/// prices and its fallback. While LiteLLM still answers, each also carries what LiteLLM is given for it (<see cref="LiteLlm"/>
-/// and <see cref="Info"/>), known there by <see cref="Fingerprint"/>.
+/// prices and its fallback; with what it is given and costs (<see cref="Params"/>) and what it says of itself (<see cref="Info"/>),
+/// and a <see cref="Fingerprint"/> of them all that changes when any of it does.
 /// </summary>
 public sealed record Deployment
 {
@@ -76,8 +76,8 @@ public sealed record Deployment
     /// <summary>Its window, longest answer and what it reads and does, as /v1/model/info tells it.</summary>
     public required JsonObject Info { get; init; }
 
-    /// <summary>What LiteLLM is given for it (litellm_params).</summary>
-    public required JsonObject LiteLlm { get; init; }
+    /// <summary>What the model is given and costs, by OpenAI's and the clients' field names (model, api_base, input_cost_per_token…): the prices are read from here.</summary>
+    public required JsonObject Params { get; init; }
 
     /// <summary>A hash of everything it is registered with: a changed one is a new deployment.</summary>
     public required string Fingerprint { get; init; }
@@ -113,7 +113,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             // Built here, a number is an int; read from JSON, any integer.
             int? Int(string k) => d.Info[k] is JsonValue v ? v.TryGetValue<int>(out var i) ? i : v.TryGetValue<long>(out var n) ? (int)Math.Min(n, int.MaxValue) : null : null;
             bool? Flag(string k) => d.Info[k] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
-            decimal? PerMtok(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x * 1_000_000m : null;
+            decimal? PerMtok(string k) => d.Params[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x * 1_000_000m : null;
             models.Add(new GatewayModel(d.Name, Int("max_input_tokens"), Int("max_output_tokens"), Flag("supports_vision") ?? false, Flag("supports_function_calling") ?? true,
                 Flag("supports_reasoning") ?? true, PerMtok("input_cost_per_token"), PerMtok("cache_read_input_token_cost"), PerMtok("output_cost_per_token"), d.Mode,
                 Flag("supports_audio_input") ?? false));
@@ -134,12 +134,12 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
             // The window one conversation really has: its slot's share of the context.
             var info = Info(ModelCatalog.Window(m), ModelCatalog.OutputLimit(m), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
-            var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
+            var given = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
             var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
-            Prices(litellm, price);
+            Prices(given, price);
             var d = new Deployment
             {
-                Name = m.Name, Kind = Deployment.LlamaCpp, BaseUrl = engine.Value.Url.TrimEnd('/') + "/v1", Model = m.Name, EngineKey = true, Mode = "chat", Price = price, Info = info, LiteLlm = litellm, Fingerprint = "",
+                Name = m.Name, Kind = Deployment.LlamaCpp, BaseUrl = engine.Value.Url.TrimEnd('/') + "/v1", Model = m.Name, EngineKey = true, Mode = "chat", Price = price, Info = info, Params = given, Fingerprint = "",
             };
             deployments.Add((d, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, price.Input, price.CachedInput, price.Output,
                 info.ToJsonString()], m.Parallel));
@@ -165,24 +165,24 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             foreach (var e in entries)
             {
                 var url = $"http://{backend.Host}:{e.Port}/v1";
-                var litellm = new JsonObject
+                var given = new JsonObject
                 {
                     ["model"] = "openai/" + e.Name, ["api_base"] = url, ["api_key"] = "os.environ/ENGINE_API_KEY", ["max_parallel_requests"] = Math.Max(1, m.Parallel),
                 };
-                Prices(litellm, price);
+                Prices(given, price);
                 object?[] print = [m.EngineKind, m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
                     price.Input, price.CachedInput, price.Output, info.ToJsonString()];
                 var d = new Deployment
                 {
                     Name = m.Name, Kind = m.EngineKind, BaseUrl = url, Model = e.Name, EngineKey = true, MaxParallel = Math.Max(1, m.Parallel), Fallback = m.Fallback, Mode = "chat",
-                    Price = price, Info = (JsonObject)info.DeepClone(), LiteLlm = litellm, Fingerprint = "",
+                    Price = price, Info = (JsonObject)info.DeepClone(), Params = given, Fingerprint = "",
                 };
                 deployments.Add((d, print, Math.Max(1, m.Parallel)));
                 if (entries.Count > 1)
                 {
                     var own = (JsonObject)info.DeepClone();
                     own["llm_app_replica_of"] = m.Name;
-                    built.Add(d with { Name = e.Name, CopyOf = m.Name, Info = own, LiteLlm = (JsonObject)litellm.DeepClone(), Fingerprint = Fingerprint([.. print, "replica"]) });
+                    built.Add(d with { Name = e.Name, CopyOf = m.Name, Info = own, Params = (JsonObject)given.DeepClone(), Fingerprint = Fingerprint([.. print, "replica"]) });
                 }
             }
         }
@@ -194,21 +194,21 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                 // Its window as the admin set it (or its server said), and its longest answer within it.
                 var info = Info(m.Context, m.Context is { } window ? ModelCatalog.OutputLimit(window, m.MaxOutput) : m.MaxOutput, m.Vision, m.Tools, m.Thinking);
                 info["llm_app_server"] = server.Name;
-                var litellm = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
+                var given = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
                 bool? verify = null;
                 if (server.BaseUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
                 {
                     // The public roots, or no check at all.
-                    litellm["ssl_verify"] = server.VerifyTls;
+                    given["ssl_verify"] = server.VerifyTls;
                     verify = server.VerifyTls;
                 }
                 var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
-                Prices(litellm, price);
+                Prices(given, price);
                 var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
                 var d = new Deployment
                 {
                     Name = m.Name, Kind = Deployment.Remote, BaseUrl = server.BaseUrl.TrimEnd('/'), Model = m.Remote, Key = key, VerifyTls = verify, MaxParallel = m.Parallel,
-                    Server = server.Name, Mode = "chat", Price = price, Info = info, LiteLlm = litellm, Fingerprint = "",
+                    Server = server.Name, Mode = "chat", Price = price, Info = info, Params = given, Fingerprint = "",
                 };
                 deployments.Add((d, ["remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
                     price.Input, price.CachedInput, price.Output, info.ToJsonString()], m.Parallel));
@@ -224,7 +224,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                     ? d with { Fingerprint = Fingerprint(print) }
                     : d with
                     {
-                        Copies = size, MaxParallel = slots is > 0 ? slots : d.MaxParallel, Weight = slots is > 0 and var s ? s : 1, LiteLlm = Pooled(d.LiteLlm, d.Info, size, slots),
+                        Copies = size, MaxParallel = slots is > 0 ? slots : d.MaxParallel, Weight = slots is > 0 and var s ? s : 1, Params = Pooled(d.Params, d.Info, size, slots),
                         Fingerprint = Fingerprint([.. print, "pool", size, slots]),
                     });
             }
@@ -239,12 +239,12 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
     {
         void Add(string name, string kind, string model, string url, JsonObject info, decimal? own)
         {
-            var litellm = new JsonObject { ["model"] = "openai/" + model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
-            MediaPrices(litellm, info["mode"]!.GetValue<string>(), defaults, own);
+            var given = new JsonObject { ["model"] = "openai/" + model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
+            MediaPrices(given, info["mode"]!.GetValue<string>(), defaults, own);
             built.Add(new Deployment
             {
-                Name = name, Kind = kind, BaseUrl = url + "/v1", Model = model, Mode = info["mode"]!.GetValue<string>(), UnitPrice = own, Info = info, LiteLlm = litellm,
-                Fingerprint = Fingerprint("media", name, "openai/" + model, url, info.ToJsonString(), litellm.ToJsonString()),
+                Name = name, Kind = kind, BaseUrl = url + "/v1", Model = model, Mode = info["mode"]!.GetValue<string>(), UnitPrice = own, Info = info, Params = given,
+                Fingerprint = Fingerprint("media", name, "openai/" + model, url, info.ToJsonString(), given.ToJsonString()),
             });
         }
         await media.RefreshAsync(ct);
@@ -263,51 +263,50 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
     }
 
     /// <summary>
-    /// A picture or speech model's price as LiteLLM reads it: per picture, per second of sound
-    /// transcribed, per character read aloud. Pictures and speech also carry token prices of 0:
-    /// LiteLLM prices a request by its deployment's own entry only when that entry has a token
-    /// or per-second price (LiteLLM 1.100, cost_calculator._select_model_name_for_cost_calc).
+    /// A picture or speech model's price: per picture, per second of sound transcribed, per
+    /// character read aloud. Pictures and speech also carry token prices of 0, so a request that
+    /// reports tokens is never priced as a chat model's.
     /// </summary>
-    private static void MediaPrices(JsonObject litellm, string mode, PriceOptions p, decimal? own)
+    private static void MediaPrices(JsonObject given, string mode, PriceOptions p, decimal? own)
     {
         switch (mode)
         {
             case "image_generation":
-                litellm["input_cost_per_image"] = own ?? p.PerImage;
-                litellm["input_cost_per_token"] = 0m;
-                litellm["output_cost_per_token"] = 0m;
+                given["input_cost_per_image"] = own ?? p.PerImage;
+                given["input_cost_per_token"] = 0m;
+                given["output_cost_per_token"] = 0m;
                 break;
             case "audio_transcription":
-                litellm["input_cost_per_second"] = (own ?? p.PerAudioMinute) / 60m;
+                given["input_cost_per_second"] = (own ?? p.PerAudioMinute) / 60m;
                 break;
             case "audio_speech":
-                litellm["input_cost_per_character"] = (own ?? p.PerThousandCharacters) / 1000m;
-                litellm["input_cost_per_token"] = 0m;
-                litellm["output_cost_per_token"] = 0m;
+                given["input_cost_per_character"] = (own ?? p.PerThousandCharacters) / 1000m;
+                given["input_cost_per_token"] = 0m;
+                given["output_cost_per_token"] = 0m;
                 break;
         }
     }
 
     /// <summary>
     /// One copy of a model served by several engines (this machine's and other GPU servers'): the gateway sends each
-    /// request to the least busy copy (router_settings in config/litellm.yaml), never more at once than a copy's
+    /// request to the least busy copy, never more at once than a copy's
     /// slots, and weighs the copies by their slots when it shuffles.
     /// </summary>
-    public static JsonObject Pooled(JsonObject litellm, JsonObject info, int copies, int? slots)
+    public static JsonObject Pooled(JsonObject given, JsonObject info, int copies, int? slots)
     {
         if (slots is > 0 and var s)
         {
-            litellm["max_parallel_requests"] = s;
+            given["max_parallel_requests"] = s;
         }
-        litellm["weight"] = slots is > 0 ? slots : 1;
+        given["weight"] = slots is > 0 ? slots : 1;
         info["llm_app_pool"] = copies;
-        return litellm;
+        return given;
     }
 
     /// <summary>
     /// What the gateway says of a chat model (its /model/info, which Code Arena and the chat read): its window, what one
-    /// request holds, its prompt and its answer together (max_input_tokens, as LiteLLM names a model's context); its
-    /// longest answer (max_output_tokens, and max_tokens, LiteLLM's older name for it); and what it can do.
+    /// request holds, its prompt and its answer together (max_input_tokens, as the clients name a model's context); its
+    /// longest answer (max_output_tokens, and max_tokens, the older name for it); and what it can do.
     /// </summary>
     private static JsonObject Info(int? window, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)
     {
@@ -327,12 +326,12 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
         return info;
     }
 
-    /// <summary>A chat model's prices, per token: LiteLLM prices a prompt's cached tokens at the cache read price, and at nothing without one.</summary>
-    private static void Prices(JsonObject litellm, TokenPrice price)
+    /// <summary>A chat model's prices, per token: a prompt's cached tokens are priced at the cache read price, and at nothing without one.</summary>
+    private static void Prices(JsonObject given, TokenPrice price)
     {
-        litellm["input_cost_per_token"] = price.Input / 1_000_000m;
-        litellm["cache_read_input_token_cost"] = price.CachedInput / 1_000_000m;
-        litellm["output_cost_per_token"] = price.Output / 1_000_000m;
+        given["input_cost_per_token"] = price.Input / 1_000_000m;
+        given["cache_read_input_token_cost"] = price.CachedInput / 1_000_000m;
+        given["output_cost_per_token"] = price.Output / 1_000_000m;
     }
 
     private static string Fingerprint(params object?[] parts) =>

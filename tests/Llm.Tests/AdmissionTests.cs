@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Llm.Tests;
 
 /// <summary>
-/// API keys through the app's own gateway (Gateway:Mode own): a request let in is answered by the engine and booked in the
+/// API keys through the app's own gateway: a request let in is answered by the engine and booked in the
 /// ledger as the key's; one refused is refused before anything is sent, with the words the clients read (an unknown key,
 /// an unknown model, the requests a minute with Retry-After and the rate-limit headers, the key's own budget).
 /// </summary>
@@ -36,7 +36,7 @@ public sealed class AdmissionTests(AppFixture app)
     public async Task A_key_let_in_is_answered_by_the_engine_and_booked_as_its_own_and_refusals_say_what_the_clients_read()
     {
         var cs = app.ConnectionStringFor("admit_" + Guid.NewGuid().ToString("N")[..8]);
-        await using var f = app.Create(cs, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:Mode"] = "own", ["Gateway:KeyCacheSeconds"] = "0" });
+        await using var f = app.Create(cs, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:KeyCacheSeconds"] = "0" });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "ad" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));

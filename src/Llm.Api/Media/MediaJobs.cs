@@ -302,16 +302,15 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
 
         // Booked as the chat's request (its key, the person), at the model's price.
         var prices = sp.GetRequiredService<Gateway.PriceBook>();
-        var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<ChatKey>().GetAsync(ct));
         var spendLog = sp.GetRequiredService<Gateway.SpendLog>();
         if (video)
         {
             var secs = results[0].Seconds ?? 0;
-            await spendLog.BookVideoAsync(me.Email ?? "", key, model.Name, secs, (model.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * (decimal)secs, began, DateTimeOffset.UtcNow, ct);
+            await spendLog.BookVideoAsync(me.Email ?? "", model.Name, secs, (model.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * (decimal)secs, began, DateTimeOffset.UtcNow, ct);
         }
         else
         {
-            await spendLog.BookPicturesAsync(me.Email ?? "", key, model.Name, results.Count, (model.Row.UnitPrice ?? prices.Defaults.PerImage) * results.Count, began, DateTimeOffset.UtcNow, ct);
+            await spendLog.BookPicturesAsync(me.Email ?? "", model.Name, results.Count, (model.Row.UnitPrice ?? prices.Defaults.PerImage) * results.Count, began, DateTimeOffset.UtcNow, ct);
         }
         return items;
     }
@@ -448,19 +447,18 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         await db.SaveChangesAsync(ct);
 
         var prices = sp.GetRequiredService<Gateway.PriceBook>();
-        var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<ChatKey>().GetAsync(ct));
         var spendLog = sp.GetRequiredService<Gateway.SpendLog>();
         var now = DateTimeOffset.UtcNow;
         switch (job.Action)
         {
             case MediaJob.Cutout:
-                await spendLog.BookPicturesAsync(me.Email ?? "", key, model, 1, prices.Images(1), began, now, ct);
+                await spendLog.BookPicturesAsync(me.Email ?? "", model, 1, prices.Images(1), began, now, ct);
                 break;
             case MediaJob.Speak:
-                await spendLog.BookSoundAsync(call, me.Email ?? "", key, model, prompt.Length, prices.Speech(prompt.Length), began, now, ct);
+                await spendLog.BookSoundAsync(call, me.Email ?? "", model, prompt.Length, prices.Speech(prompt.Length), began, now, ct);
                 break;
             default:
-                await spendLog.BookSoundAsync(call, me.Email ?? "", key, model, seconds ?? 0, prices.Defaults.PerMusicMinute * (decimal)(seconds ?? 0) / 60m, began, now, ct);
+                await spendLog.BookSoundAsync(call, me.Email ?? "", model, seconds ?? 0, prices.Defaults.PerMusicMinute * (decimal)(seconds ?? 0) / 60m, began, now, ct);
                 break;
         }
         return [item];

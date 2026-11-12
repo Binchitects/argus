@@ -438,9 +438,9 @@
       "title": "Which key belongs to whom",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
-      "description": "The key inventory. LiteLLM shows only a masked key_name -- the full key is shown once at creation and never stored in the clear.",
+      "description": "The key inventory, as the app keeps it: each key's name, its person (by the requests it made), what may be shown of it (its last four characters: the key itself is shown once when it is made, and kept only as its SHA-256), its spend in the ledger and its own 30-day budget.",
       "gridPos": {
         "x": 12,
         "y": 13,
@@ -452,11 +452,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(v.key_alias, '(no alias)') as \"Key alias\", coalesce(v.user_id, '(unowned)') as \"Owner\", coalesce(v.key_name, '') as \"Key (masked)\", round(coalesce(v.spend,0)::numeric,4) as \"Spend\", coalesce(v.max_budget, 0) as \"Budget\", v.\"created_at\" as \"Created\" from \"LiteLLM_VerificationToken\" v order by v.spend desc nulls last"
+          "rawSql": "select k.alias as \"Key alias\", coalesce(r.person, '(no request yet)') as \"Owner\", k.preview as \"Key (masked)\", round(coalesce(r.spend, 0)::numeric, 4) as \"Spend\", coalesce(k.monthly_budget, 0) as \"Budget\", k.created_at as \"Created\" from api_keys k left join (select key_hash, sum(cost) as spend, max(person) as person from requests where key_hash is not null group by key_hash) r on r.key_hash = k.hash order by \"Spend\" desc nulls last"
         }
       ],
       "fieldConfig": {

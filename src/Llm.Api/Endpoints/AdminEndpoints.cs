@@ -234,21 +234,13 @@ public static class AdminEndpoints
         }
     }
 
-    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Access.AccessService access, AppDbContext db,
+    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ApiKeys apiKeys, Ledger ledger, Access.AccessService access, AppDbContext db,
         RateLimits rateLimits, Models.KeyAccess keyAccess, Credit credit) =>
         WithPerson(id, people, async u =>
         {
-            IReadOnlyList<GatewayKey> keys = [];
+            var keys = await apiKeys.KeysAsync(u);
             var spending = await ledger.ReadAsync();
             var warning = spending.Problem;
-            try
-            {
-                keys = await gateway.KeysAsync(u.Email!);
-            }
-            catch (GatewayException ex)
-            {
-                warning = ex.Message;
-            }
             var member = await access.MembershipAsync(u);
             var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id)).OrderBy(g => g.Name)
                 .Select(g => new { g.Id, g.Name, directory = g.Directory != null }).ToListAsync();
@@ -445,10 +437,6 @@ public static class AdminEndpoints
         catch (PeopleException ex)
         {
             return AuthEndpoints.Problem(400, "invalid", ex.Message);
-        }
-        catch (GatewayException ex)
-        {
-            return AuthEndpoints.Problem(502, "gateway", ex.Message);
         }
     }
 }

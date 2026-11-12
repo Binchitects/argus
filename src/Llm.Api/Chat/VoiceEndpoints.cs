@@ -45,12 +45,6 @@ public static class VoiceEndpoints
         services.AddSingleton<Settings.ISettingWarning>(sp => sp.GetRequiredService<VoiceCatalog>());
         services.AddSingleton<Settings.ISettingWarning, SpeechLanguageWarning>();
         services.AddHttpClient(VoiceCatalog.Client, c => c.Timeout = TimeSpan.FromSeconds(5));
-        services.AddHttpClient(KeySpeech.Client, (sp, c) =>
-        {
-            c.BaseAddress = new Uri(sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.Url);
-            // A long text is read for as long as the gateway allows (its own timeout).
-            c.Timeout = Timeout.InfiniteTimeSpan;
-        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false });
         return services;
     }
 
@@ -64,8 +58,7 @@ public static class VoiceEndpoints
         var company = app.MapGroup("/api/admin/speech").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsModels);
         company.MapGet("/voices", OfferedAsync);
         company.MapPost("/try", TryCompanyAsync);
-        // API keys' speech at gateway.DOMAIN, sent here while the app is up: every method, as the gateway answers them all
-        // (a browser's preflight gets its CORS headers).
+        // API keys' speech and pictures at gateway.DOMAIN (a browser's preflight gets its CORS headers).
         foreach (var path in KeySpeech.Paths)
         {
             app.Map(path, KeySpeech.ProxyAsync).AllowAnonymous("The OpenAI-style speech API: the API key is checked.").DisableAntiforgery();

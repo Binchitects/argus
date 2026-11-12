@@ -13,34 +13,6 @@ namespace Llm.Api.Dashboards;
 /// </summary>
 public static class UsageEndpoints
 {
-    /// <summary>Who a request belongs to. Identical to the dashboards' expression, so the numbers agree.</summary>
-    public const string Person =
-        """coalesce(nullif(s."user",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)')""";
-
-    /// <summary>A request's prompt tokens the engine read from its cache, as LiteLLM keeps them.</summary>
-    public const string Cached =
-        """coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)""";
-
-    /// <summary>A request's model, by the name people know it by (the deployment's model is the engine's id).</summary>
-    public const string Model = """coalesce(nullif(s.model_group,''), s.model)""";
-
-    public const string From = """ from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key """;
-
-    /// <summary>The key a request came with, by its alias ("chat" for the chat's own).</summary>
-    public const string KeyAlias = """coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')""";
-
-    /// <summary>
-    /// What a request's spend counts to (Llm.Core.Access.CreditKind, by name): the pictures, videos and speech made, by the kind
-    /// of call, whichever way they came; else the chat's answers (its own key) or an API key's text request.
-    /// </summary>
-    public static readonly string CreditKind = $"""
-        (case when s.call_type in ('image_generation', 'aimage_generation', 'image_edit', 'aimage_edit') then 'pictures'
-              when s.call_type in ('video_generation', 'avideo_generation') then 'video'
-              when s.call_type in ('speech', 'aspeech', 'transcription', 'atranscription') then 'speech'
-              when {KeyAlias} = '{Chat.ChatKey.Alias}' then 'chat'
-              else 'api' end)
-        """;
-
     public static void MapUsage(this IEndpointRouteBuilder app) =>
         app.MapGet("/api/usage/me", MeAsync).PersonOnly();
 

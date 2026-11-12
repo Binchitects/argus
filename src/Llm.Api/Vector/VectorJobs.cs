@@ -252,8 +252,7 @@ public static partial class VectorJobs
         var png = (await sp.GetRequiredService<SdServer>().PicturesAsync(model, $"{seen.Text ?? scene}, {FlatStyle}", 1024, 1024, 1, ct))[0];
         media.Touch(model.Name);
         var prices = sp.GetRequiredService<Gateway.PriceBook>();
-        var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<Chat.ChatKey>().GetAsync(ct));
-        await sp.GetRequiredService<Gateway.SpendLog>().BookPicturesAsync(me.Email ?? "", key, model.Name, 1, model.Row.UnitPrice ?? prices.Defaults.PerImage, began, DateTimeOffset.UtcNow, ct);
+        await sp.GetRequiredService<Gateway.SpendLog>().BookPicturesAsync(me.Email ?? "", model.Name, 1, model.Row.UnitPrice ?? prices.Defaults.PerImage, began, DateTimeOffset.UtcNow, ct);
         var file = new ChatAttachment
         {
             UserId = me.Id, FileName = Chat.Tools.ImageTool.FileName(job.Prompt ?? "picture"), ContentType = "image/png", Size = png.Length, Kind = "image", Data = png,

@@ -23,7 +23,7 @@ public static class UserSources
 
 /// <summary>
 /// A person. UserName is the sign-in name, and for code-intel it must equal their
-/// GitLab username. Email is how LiteLLM knows them (their spend is under it).
+/// GitLab username. Email is how the ledger knows them (their spend is under it).
 /// </summary>
 public sealed class AppUser : IdentityUser<Guid>
 {

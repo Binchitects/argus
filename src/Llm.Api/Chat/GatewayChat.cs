@@ -47,17 +47,13 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 }
 
 /// <summary>
-/// Streams a chat completion from LiteLLM and turns its SSE lines into events. A request to a model
-/// of this engine goes to the slot the <see cref="SlotTable"/> chooses (id_slot, which the gateway
-/// passes on): a conversation's turn to the slot that holds its start, a side request to the last
-/// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
+/// The app's own calls to its models, through its own gateway (<see cref="Gateway.ModelGateway"/>: straight to the
+/// engine, booked in the ledger here), a chat completion's SSE lines turned into events. A request to a model of this
+/// engine goes to the slot the <see cref="SlotTable"/> chooses (id_slot): a conversation's turn to the slot that holds its
+/// start, a side request to the last slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
-public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media,
-    Microsoft.Extensions.Options.IOptionsMonitor<Gateway.LiteLlmOptions> gatewayOptions, Gateway.ModelGateway own)
+public sealed partial class GatewayChat(EngineRoute route, Models.MediaControl media, Gateway.ModelGateway own)
 {
-    /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
-    public const string UserEmailHeader = "X-LLM-User-Email";
-
     /// <summary>A side request (a title, the safeguards' check, a summary, Auto's choice): it goes to the side requests' slot first (SlotTable).</summary>
     public IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, CancellationToken ct) => StreamAsync(request, personEmail, null, ct);
 
@@ -82,8 +78,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         string[] fallbacks = [];
         if (route.FallbackOf(asked) is { } fallback && slot.Model != fallback)
         {
-            // Should the model fail mid-way (its engine restarts), the gateway asks its fallback.
-            request["fallbacks"] = new JsonArray(fallback);
+            // Should the model fail (its engine restarts), the gateway asks its fallback.
             fallbacks = [fallback];
         }
         if (slot.Slot is { } id)
@@ -94,33 +89,17 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         {
             request.Remove("id_slot");
         }
-        var registered = false;
         for (var attempt = 1; ; attempt++)
         {
             HttpResponseMessage? res;
             try
             {
-                // The app's own gateway (Gateway:Mode chat or own): straight to the engine, booked in the ledger here.
-                res = own.ForChat ? await own.ChatAsync(request, Caller(request, personEmail, conversation), fallbacks, ct) : await OpenAsync(request, personEmail, ct);
-            }
-            catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
-            {
-                // The chat key was removed at the gateway: make a new one and try once more.
-                await key.ForgetAsync(ct);
-                continue;
+                res = await own.ChatAsync(request, Caller(request, personEmail, conversation), fallbacks, ct);
             }
             catch (ChatGatewayException ex) when (ex.Message.Contains("Loading model", StringComparison.OrdinalIgnoreCase) && attempt <= 24)
             {
                 // The engine is still loading the model (it says 503 meanwhile): wait for it, two minutes at most.
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
-                continue;
-            }
-            catch (ChatGatewayException ex) when (ex.Status == 400 && !registered && !own.ForChat && ex.Message.Contains("Invalid model name", StringComparison.OrdinalIgnoreCase))
-            {
-                // A model the app has not registered yet (a first start, the gateway just up): register now, ask again.
-                registered = true;
-                await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<Models.ModelCatalog>().SyncGatewayAsync(ct);
                 continue;
             }
             await foreach (var e in ReadAsync(res, ct))
@@ -147,27 +126,10 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
     public async Task<byte[]> GenerateImageAsync(string model, string prompt, string size, string personEmail, CancellationToken ct)
     {
         var body = new JsonObject { ["model"] = model, ["prompt"] = prompt, ["size"] = size, ["n"] = 1, ["response_format"] = "b64_json", ["user"] = personEmail };
-        for (var attempt = 1; ; attempt++)
-        {
-            HttpResponseMessage res;
-            try
-            {
-                res = own.ForChat
-                    ? await own.MediaAsync("/v1/images/generations", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), "application/json",
-                        new Gateway.GatewayCaller(personEmail), ct, pictures: 1)
-                    : await PostAsync("/v1/images/generations", body, personEmail, "application/json", ct);
-            }
-            catch (ChatGatewayException ex) when (ex.Status == 401 && attempt == 1)
-            {
-                await key.ForgetAsync(ct);
-                continue;
-            }
-            using (res)
-            {
-                var b64 = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["data"]?[0]?["b64_json"]?.GetValue<string>();
-                return string.IsNullOrEmpty(b64) ? throw new ChatGatewayException("The image model sent no picture.") : Convert.FromBase64String(b64);
-            }
-        }
+        using var res = await own.MediaAsync("/v1/images/generations", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), "application/json",
+            new Gateway.GatewayCaller(personEmail), ct, pictures: 1);
+        var b64 = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["data"]?[0]?["b64_json"]?.GetValue<string>();
+        return string.IsNullOrEmpty(b64) ? throw new ChatGatewayException("The image model sent no picture.") : Convert.FromBase64String(b64);
     }
 
     /// <summary>What was said in a sound, from the speech to text model at the gateway. The spend is the person's.</summary>
@@ -177,8 +139,8 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         string? language = null)
     {
         media.Touch(model);
-        // verbose_json says the sound's length: the gateway prices a transcription by it (a plain json answer is priced at nothing).
-        using var res = await WithKeyAsync(() => MediaPostAsync("/v1/audio/transcriptions", model, () =>
+        // verbose_json says the sound's length: the gateway prices a transcription by it.
+        using var res = await MediaPostAsync("/v1/audio/transcriptions", model, () =>
         {
             var form = new MultipartFormDataContent
             {
@@ -192,7 +154,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
                 form.Add(new StringContent(language), "language");
             }
             return form;
-        }, personEmail, "application/json", ct), ct);
+        }, personEmail, "application/json", ct);
         return JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["text"]?.GetValue<string>() ?? "";
     }
 
@@ -207,7 +169,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         CancellationToken ct, string? language = null)
     {
         media.Touch(model);
-        using var res = await WithKeyAsync(() => MediaPostAsync("/v1/audio/transcriptions", model, () =>
+        using var res = await MediaPostAsync("/v1/audio/transcriptions", model, () =>
         {
             var form = new MultipartFormDataContent
             {
@@ -223,7 +185,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
                 form.Add(new StringContent(language), "language");
             }
             return form;
-        }, personEmail, "application/json", ct), ct);
+        }, personEmail, "application/json", ct);
         var answer = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
         // With each word's time: parts cut where a speaker may change (a sentence's end, a pause), as short as a turn can be;
         // a segment of speech to text's own runs over several turns when nobody pauses long.
@@ -307,86 +269,13 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         {
             body["speed"] = speed;
         }
-        return WithKeyAsync(() => MediaPostAsync("/v1/audio/speech", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), personEmail,
-            "audio/mpeg", ct, characters: text.Length), ct);
+        return MediaPostAsync("/v1/audio/speech", model, () => new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"), personEmail,
+            "audio/mpeg", ct, characters: text.Length);
     }
 
-    /// <summary>The chat key removed at the gateway: a new one is made and the request tried once more.</summary>
-    private async Task<HttpResponseMessage> WithKeyAsync(Func<Task<HttpResponseMessage>> send, CancellationToken ct)
-    {
-        try
-        {
-            return await send();
-        }
-        catch (ChatGatewayException ex) when (ex.Status == 401)
-        {
-            await key.ForgetAsync(ct);
-            return await send();
-        }
-    }
-
-    /// <summary>A picture or speech request: to the app's own gateway with Gateway:Mode chat or own, else to LiteLLM.</summary>
+    /// <summary>A picture or speech request, to the app's own gateway.</summary>
     private Task<HttpResponseMessage> MediaPostAsync(string path, string model, Func<HttpContent> content, string personEmail, string accept, CancellationToken ct, int characters = 0) =>
-        own.ForChat ? own.MediaAsync(path, model, content, accept, new Gateway.GatewayCaller(personEmail), ct, characters: characters) : PostAsync(path, content, personEmail, accept, ct);
-
-    private Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct) =>
-        PostAsync("/v1/chat/completions", request, personEmail, "text/event-stream", ct);
-
-    /// <summary>The waits between tries of a gateway that refuses the connection, in seconds (as many as Gateway:ConnectWaitSeconds holds).</summary>
-    private static readonly int[] ConnectWaits = [1, 2, 4, 8, 15];
-
-    private Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct) =>
-        PostAsync(path, () => new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"), personEmail, accept, ct);
-
-    private async Task<HttpResponseMessage> PostAsync(string path, Func<HttpContent> content, string personEmail, string accept, CancellationToken ct)
-    {
-        string bearer;
-        try
-        {
-            bearer = await key.GetAsync(ct);
-        }
-        catch (Gateway.GatewayException ex)
-        {
-            throw new ChatGatewayException("The model gateway is not reachable right now: " + ex.Message);
-        }
-
-        HttpResponseMessage res;
-        // A dropped connection (the gateway restarting, a new deployment settling) is tried again for about half a minute
-        // (Gateway:ConnectWaitSeconds): the gateway takes 10-20 s to start after an upgrade or a restart.
-        var budget = gatewayOptions.CurrentValue.ConnectWaitSeconds;
-        var spent = 0;
-        int[] waits = [.. ConnectWaits.TakeWhile(w => (spent += w) <= budget)];
-        for (var attempt = 1; ; attempt++)
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = content() };
-            // Attribution (LiteLLM's user_header_mappings); enforcement is the body's
-            // `user` field, set by the caller.
-            req.Headers.Add(UserEmailHeader, personEmail);
-            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
-            try
-            {
-                res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-                break;
-            }
-            catch (HttpRequestException) when (attempt <= waits.Length)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(waits[attempt - 1]), ct);
-            }
-            catch (HttpRequestException ex)
-            {
-                throw new ChatGatewayException("The model gateway is not reachable right now.", null) { Data = { ["inner"] = ex.Message } };
-            }
-        }
-        if (!res.IsSuccessStatusCode)
-        {
-            using (res)
-            {
-                throw ChatGatewayException.From(await res.Content.ReadAsStringAsync(ct), (int)res.StatusCode);
-            }
-        }
-        return res;
-    }
+        own.MediaAsync(path, model, content, accept, new Gateway.GatewayCaller(personEmail), ct, characters: characters);
 
     private static async IAsyncEnumerable<StreamEvent> ReadAsync(HttpResponseMessage res, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -466,7 +355,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
     private static double? Number(JsonNode? n) =>
         n is JsonValue v && v.TryGetValue<double>(out var d) && double.IsFinite(d) ? d : null;
 
-    /// <summary>What LiteLLM says, as a sentence for the person. Credit is the common one.</summary>
+    /// <summary>What the engine or the gateway says, as a sentence for the person. Credit is the common one.</summary>
     public static string Explain(string body, int status) => Explain(body, status, Llm.Core.Chat.ContextOverflow.Parse(body));
 
     internal static string Explain(string body, int status, Llm.Core.Chat.ContextOverflow overflow)
@@ -506,13 +395,13 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             return $"{failed.Groups[1].Value} could not be loaded: most often it needs more GPU memory than is free beside the models kept loaded. "
                 + "Try again in a minute or choose another model; an admin can change its placement (Auto fits what is free) or what stays loaded, under Admin → Models.";
         }
-        // The gateway's classes, which say nothing to the person ("litellm.InternalServerError: InternalServerError: OpenAIException - ").
+        // Error classes, which say nothing to the person ("InternalServerError: OpenAIException - ").
         return "The model could not answer: " + GatewayClasses().Replace(message, "").Trim();
     }
 
     [System.Text.RegularExpressions.GeneratedRegex(@"model name=(\S+) failed to load")]
     private static partial System.Text.RegularExpressions.Regex FailedLoad();
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"(?:\blitellm\.)?\b\w*(?:Error|Exception)\b\s*[:-]\s*")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"\b\w*(?:Error|Exception)\b\s*[:-]\s*")]
     private static partial System.Text.RegularExpressions.Regex GatewayClasses();
 }

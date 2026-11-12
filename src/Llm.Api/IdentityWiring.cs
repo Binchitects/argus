@@ -30,7 +30,6 @@ public static class IdentityWiring
         services.Configure<AuthOptions>(config.GetSection("Auth"));
         services.Configure<LdapOptions>(config.GetSection("Ldap"));
         services.Configure<OidcOptions>(config.GetSection("Oidc"));
-        services.Configure<LiteLlmOptions>(config.GetSection("Gateway"));
         services.AddHttpContextAccessor();
         services.TryAddSingleton(TimeProvider.System);
         // First of the background services: a lone replica leads before the others start.
@@ -201,19 +200,6 @@ public static class IdentityWiring
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 300, Window = TimeSpan.FromMinutes(1) }));
         });
 
-        services.AddExceptionHandler<GatewayExceptionHandler>();
-        services.AddHttpClient<ILiteLlm, LiteLlmClient>((sp, c) =>
-        {
-            var o = sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value;
-            c.BaseAddress = new Uri(o.Url);
-            // Admin calls are small; a gateway that needs longer is down for our purposes.
-            c.Timeout = TimeSpan.FromSeconds(10);
-            if (!string.IsNullOrEmpty(o.MasterKey))
-            {
-                c.DefaultRequestHeaders.Authorization = new("Bearer", o.MasterKey);
-            }
-        });
-
         services.AddAnswerCache(config);
         Chat.VoiceEndpoints.AddVoices(services, config);
 
@@ -255,7 +241,6 @@ public static class IdentityWiring
 
         services.Configure<Dashboards.DashboardOptions>(config.GetSection("Dashboards"));
         services.AddSingleton<Dashboards.DashboardStore>();
-        services.AddSingleton<Dashboards.SqlDatasource>();
         services.AddSingleton<Dashboards.GatewayDatasource>();
         services.AddScoped<Dashboards.DashboardBook>();
         services.AddScoped<Gateway.Ledger>();
@@ -284,28 +269,15 @@ public static class IdentityWiring
         services.Configure<Safeguards.SafeguardOptions>(config.GetSection("Safeguards"));
         services.AddScoped<Safeguards.Safeguards>();
         services.AddGovernance(config);
-        services.PostConfigure<Chat.ChatOptions>(o =>
-        {
-            if (config["Gateway:Url"] is { Length: > 0 } url && config["Chat:GatewayUrl"] is null)
-            {
-                o.GatewayUrl = url;
-            }
-        });
         services.AddSingleton<Chat.AnswerGate>();
         services.AddSingleton<Chat.SlotTable>();
         services.AddSingleton<Chat.EngineRoute>();
-        services.AddHttpClient<Chat.GatewayChat>((sp, c) =>
-        {
-            var o = sp.GetRequiredService<IOptions<Chat.ChatOptions>>().Value;
-            c.BaseAddress = new Uri(o.GatewayUrl);
-            // A long answer, with thinking, can take minutes; the stream itself is the progress.
-            c.Timeout = o.RequestTimeout;
-        });
-        services.AddSingleton<Chat.ChatKey>();
-        // The app's own gateway (Gateway:Mode): its clients to the engines, one that checks certificates and one that does not
+        services.AddSingleton<Chat.GatewayChat>();
+        // The app's own gateway: its clients to the engines, one that checks certificates and one that does not
         // (a server whose VerifyTls is off), as the remote servers' clients are.
         services.AddSingleton<Gateway.GatewayMetrics>();
         services.AddSingleton<Gateway.ModelGateway>();
+        services.Configure<Gateway.GatewayTimeoutOptions>(config.GetSection("Gateway"));
         services.AddHttpClient(Gateway.ModelGateway.Upstream, c => c.Timeout = Timeout.InfiniteTimeSpan);
 #pragma warning disable CA5359 // A server the admin chose not to check (Admin → Servers: Check the certificate off), as RemoteServerClient.Unchecked.
         services.AddHttpClient(Gateway.ModelGateway.UpstreamUnchecked, c => c.Timeout = Timeout.InfiniteTimeSpan).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -547,7 +519,7 @@ public static class IdentityWiring
         services.AddSingleton<Models.RemoteServerClient>();
         services.AddSingleton<Models.RemoteHealth>();
         services.AddScoped<Gateway.GatewayRoutes>();
-        // LiteLLM's request log brought into the app's own ledger while LiteLLM still answers (off: a test calls it itself).
+        // An upgrade from 7.x: LiteLLM's keys and request log brought into the app's own ledger once (off: a test calls it itself).
         services.AddSingleton<Gateway.LedgerImport>();
         if (config.GetValue("Gateway:LedgerImport", true))
         {
@@ -557,10 +529,8 @@ public static class IdentityWiring
         services.AddScoped<Models.ModelMoves>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.ToolModeBook>();
-        services.AddSingleton<Gateway.KeyWriters>();
         services.AddScoped<Models.KeyAccess>();
         services.AddSingleton<Models.KeyAccessWatcher>();
-        services.AddHostedService(sp => sp.GetRequiredService<Models.KeyAccessWatcher>());
         services.AddSingleton<Models.EngineWatcher>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.EngineWatcher>());
         // Admin → Monitoring's Reload, Restart and Reset of the engines and sandboxes, through files they follow.

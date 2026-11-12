@@ -134,14 +134,7 @@ public sealed class PriceBook(AppDbContext db, IOptionsMonitor<PriceOptions> opt
     /// <summary>New default prices reach the gateway at once; one it cannot reach now is brought in step within a minute (EngineWatcher).</summary>
     public static async Task RegisterAsync(IServiceProvider services, CancellationToken ct)
     {
-        try
-        {
-            await services.GetRequiredService<ModelCatalog>().SyncGatewayAsync(ct);
-        }
-        catch (GatewayException)
-        {
-            // Saved all the same: the replica that leads registers them again within a minute.
-        }
+        await services.GetRequiredService<ModelCatalog>().SyncGatewayAsync(ct);
     }
 
 }

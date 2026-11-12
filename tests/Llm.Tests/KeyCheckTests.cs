@@ -130,8 +130,7 @@ public sealed class KeyCheckTests(AppFixture app)
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var res = await admin.Http.PatchAsJsonAsync(new Uri($"/api/admin/people/{id}", UriKind.Relative), new { disabled = true });
         Assert.Equal(HttpStatusCode.NoContent, res.StatusCode);
-        // Disabling blocks the key at the gateway; were that to fail, the person is still refused.
-        app.Gateway.KeysOf($"{name}@example.test").Single().Blocked = false;
+        // Disabled: the person's key is refused.
         Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key })).Status);
     }
 

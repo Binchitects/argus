@@ -147,26 +147,17 @@ public sealed class SecretScanningTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_guardrail_needs_the_gateway_key_lets_the_chats_own_requests_pass_and_can_be_turned_off()
+    public async Task The_checks_of_API_requests_can_be_turned_off()
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (_, _, email) = await PersonAsync(f, admin);
-        var b = new TestBrowser(f);
-        var anonymous = await b.Http.PostAsJsonAsync(new Uri(GuardrailEndpoints.Path, UriKind.Relative), new { input_type = "request", texts = new[] { Pem } });
-        await StatusAssert.Is(HttpStatusCode.Unauthorized, anonymous);
-
-        using var chatOwn = new HttpRequestMessage(HttpMethod.Post, new Uri(GuardrailEndpoints.Path, UriKind.Relative))
-        {
-            Content = JsonContent.Create(new { input_type = "request", texts = new[] { Pem }, request_data = new { user_api_key_alias = "chat", user_api_key_user_id = email } }),
-        };
-        chatOwn.Headers.Add("x-api-key", "sk-master-for-tests");
-        Assert.Equal("NONE", (await b.JsonAsync(await b.Http.SendAsync(chatOwn))).GetProperty("action").GetString());
-        // A key the app does not know gets the company's checks.
-        Assert.Equal("BLOCKED", (await GroupCreditTests.GuardrailAsync(f, null, Pem)).GetProperty("action").GetString());
+        Assert.Equal("BLOCKED", (await GroupCreditTests.GuardrailAsync(f, email, Pem)).GetProperty("action").GetString());
 
         await using var off = NewApp(new() { ["Safeguards:CheckApi"] = "false" });
-        Assert.Equal("NONE", (await GroupCreditTests.GuardrailAsync(off, email, Pem)).GetProperty("action").GetString());
+        var offAdmin = await new TestBrowser(off).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, _, offEmail) = await PersonAsync(off, offAdmin);
+        Assert.Equal("NONE", (await GroupCreditTests.GuardrailAsync(off, offEmail, Pem)).GetProperty("action").GetString());
     }
 
     [Fact]

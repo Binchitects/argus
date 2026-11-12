@@ -523,7 +523,6 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
         {
             name = "swift", engineKind = "sglang", file = "hf/acme/Flash@abc123", context = 65536, parallel = 48, devices = "0", kvCpuGb = 16, temperature = 0.7,
@@ -547,7 +546,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "swift");
         Assert.Equal("sglang", row.GetProperty("engineKind").GetString());
         // At the gateway: its own port on the sglang engine, never more at once than its people at once.
-        var registered = gateway.Managed.Values.Single(m => m.Name == "swift");
+        var registered = (await app.RoutesOfAsync(f)).Single(m => m.Name == "swift");
         Assert.Equal("http://sglang:8001/v1", registered.Params["api_base"]!.GetValue<string>());
         Assert.Equal(48, registered.Params["max_parallel_requests"]!.GetValue<int>());
         // Loaded, Prometheus scrapes it at its port, labelled with its GPUs for the dashboards' figures by GPU.
@@ -570,7 +569,6 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
-        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
         {
             name = "turbo", engineKind = "lmdeploy", file = "hf/acme/Flash@abc123", context = 32768, parallel = 24, devices = "0",
@@ -583,7 +581,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         // It was saved without sleep: the app puts no LMDeploy model to sleep.
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "turbo");
         Assert.Equal(("lmdeploy", false), (row.GetProperty("engineKind").GetString(), row.GetProperty("sleep").GetBoolean()));
-        Assert.Equal("http://lmdeploy:8001/v1", gateway.Managed.Values.Single(m => m.Name == "turbo").Params["api_base"]!.GetValue<string>());
+        Assert.Equal("http://lmdeploy:8001/v1", (await app.RoutesOfAsync(f)).Single(m => m.Name == "turbo").Params["api_base"]!.GetValue<string>());
 
         // Strata runs the library's GGUF file, not a snapshot; and nothing of what it has none of.
         var snapshot = await admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "strata", file = "hf/acme/Flash@abc123", context = 32768, parallel = 2 });

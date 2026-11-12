@@ -238,20 +238,13 @@ public sealed class ProjectTests(AppFixture app)
         var sent = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "Where is the index built?" });
         await sent.Content.ReadAsStringAsync();
         // (The app's own gateway books the chat in the ledger's row instead, its first tag the row's surface.)
-        if (AppFixture.GatewayMode == GatewayModes.Own)
-        {
-            await app.Factory.Services.GetRequiredService<ModelGateway>().FlushAsync(default);
-            await using var scope = app.Factory.Services.CreateAsyncScope();
-            var booked = await scope.ServiceProvider.GetRequiredService<AppDbContext>().GatewayRequests.AsNoTracking()
-                .Where(r => r.Person == annEmail).OrderByDescending(r => r.StartedAt).FirstAsync();
-            Assert.Equal((chat, "chat"), (booked.ConversationId, booked.Surface));
-            // The rows below stand for the chat's requests, with the numbers the report is checked against.
-            await scope.ServiceProvider.GetRequiredService<AppDbContext>().GatewayRequests.Where(r => r.Id == booked.Id).ExecuteDeleteAsync();
-        }
-        else
-        {
-            Assert.Contains("chat:" + chat, app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == annEmail).Body["metadata"]!["tags"]!.AsArray().Select(t => t!.GetValue<string>()));
-        }
+        await app.Factory.Services.GetRequiredService<ModelGateway>().FlushAsync(default);
+        await using var scope = app.Factory.Services.CreateAsyncScope();
+        var booked = await scope.ServiceProvider.GetRequiredService<AppDbContext>().GatewayRequests.AsNoTracking()
+            .Where(r => r.Person == annEmail).OrderByDescending(r => r.StartedAt).FirstAsync();
+        Assert.Equal((chat, "chat"), (booked.ConversationId, booked.Surface));
+        // The rows below stand for the chat's requests, with the numbers the report is checked against.
+        await scope.ServiceProvider.GetRequiredService<AppDbContext>().GatewayRequests.Where(r => r.Id == booked.Id).ExecuteDeleteAsync();
 
         var now = DateTimeOffset.UtcNow.AddMinutes(-30);
         var tag = Guid.NewGuid().ToString("N")[..6];

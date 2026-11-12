@@ -148,15 +148,7 @@ public static class McpEndpoints
             return;
         }
         McpCaller caller;
-        try
-        {
-            caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } h ? h : null, ct);
-        }
-        catch (GatewayException)
-        {
-            await RefuseAsync(http, StatusCodes.Status503ServiceUnavailable, "The gateway cannot check API keys at the moment. Try again shortly.");
-            return;
-        }
+        caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } h ? h : null, ct);
         if (caller.User is not { } user)
         {
             http.Response.Headers.WWWAuthenticate = "Bearer realm=\"arena\"";

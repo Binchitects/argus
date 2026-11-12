@@ -324,14 +324,7 @@ public sealed partial class SignInService(
                 await access.SetOwnerAsync(PeopleService.DirectorySync, user, true);
             }
             await audit.WriteAsync("person.create", user.UserName, detail: "from the directory" + (admin ? ", admin" : ""));
-            try
-            {
-                await people.ProvisionGatewayAsync(user);
-            }
-            catch (Gateway.GatewayException ex)
-            {
-                await audit.WriteAsync("person.provision_gateway", user.UserName, success: false, detail: ex.Message);
-            }
+            await people.ProvisionGatewayAsync(user);
             await directory.WriteAsync();
             return (user, "");
         }

@@ -68,6 +68,11 @@ if (args is ["reset-admin-password", .. var resetArgs])
 {
     return await Llm.Api.Identity.AdminReset.RunAsync(app.Services, resetArgs, Console.In, Console.Out, Console.Error);
 }
+// The installer, after an upgrade from before 8.0: LiteLLM's database dropped once its keys and log are imported.
+if (args is ["drop-litellm-database", .. var dropArgs])
+{
+    return await Llm.Api.Gateway.ImportDrop.RunAsync(app.Services, dropArgs, Console.Out, Console.Error);
+}
 
 app.UseForwardedHeaders();
 app.UseExceptionHandler();

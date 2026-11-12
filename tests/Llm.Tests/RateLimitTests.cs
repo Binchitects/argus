@@ -15,7 +15,7 @@ namespace Llm.Tests;
 
 /// <summary>
 /// Rate limits for API keys: requests and tokens a minute, the company's, a group's and a
-/// person's own, put on each key at the gateway (LiteLLM counts and answers 429 itself); what
+/// person's own, read by the gateway at each request (it counts and answers 429); what
 /// people see of them, and what admins see of the refusals.
 /// </summary>
 [Collection(nameof(AppCollection))]
@@ -57,7 +57,15 @@ public sealed class RateLimitTests(AppFixture app)
             },
         });
 
-    private static KeyRate RateOf(FakeGateway gateway, string email) => gateway.KeysOf(email).Single().Rate;
+    /// <summary>The limits a person's keys are held to now: the gateway reads them at each request.</summary>
+    private static async Task<KeyRate> RateOfAsync(WebApplicationFactory<Program> f, string email)
+    {
+        var normalized = email.ToUpperInvariant();
+        await using var scope = f.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var user = await db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == normalized);
+        return (await scope.ServiceProvider.GetRequiredService<RateLimits>().ForAsync(user)).Key;
+    }
 
     [Fact]
     public async Task Sub_agents_at_once_come_from_the_person_else_their_most_generous_group_else_the_company_and_reach_Code_Arena()
@@ -89,16 +97,6 @@ public sealed class RateLimitTests(AppFixture app)
         Assert.Equal(1, config.GetProperty("subAgentsAtOnce").GetInt32());
     }
 
-    /// <summary>Waits (up to 15 seconds) for the key sync to give the person's key this rate.</summary>
-    private static async Task KeyHasAsync(FakeGateway gateway, string email, KeyRate want)
-    {
-        for (var i = 0; i < 150 && RateOf(gateway, email) != want; i++)
-        {
-            await Task.Delay(100);
-        }
-        Assert.Equal(want, RateOf(gateway, email));
-    }
-
     [Fact]
     public void One_limit_is_the_persons_own_else_the_most_generous_group_else_the_companys()
     {
@@ -118,7 +116,7 @@ public sealed class RateLimitTests(AppFixture app)
     {
         var admin = await AdminAsync(app.Factory);
         var p = await PersonAsync(admin);
-        Assert.Equal(KeyRate.None, RateOf(app.Gateway, p.Email));
+        Assert.Equal(KeyRate.None, await RateOfAsync(app.Factory, p.Email));
         var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
         var limits = await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"));
         foreach (var name in new[] { "requestsPerMinute", "tokensPerMinute" })
@@ -139,21 +137,20 @@ public sealed class RateLimitTests(AppFixture app)
         await using var f = NewApp(gateway);
         var admin = await AdminAsync(f);
         var p = await PersonAsync(admin);
-        Assert.Equal(KeyRate.None, RateOf(gateway, p.Email));
+        Assert.Equal(KeyRate.None, await RateOfAsync(f, p.Email));
 
         await StatusAssert.Is(HttpStatusCode.OK, await CompanyAsync(admin, 30, 50_000));
-        await KeyHasAsync(gateway, p.Email, new KeyRate(30, 50_000));
+        Assert.Equal(new KeyRate(30, 50_000), await RateOfAsync(f, p.Email));
         var view = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{p.Id}"))).GetProperty("limits");
         Assert.Equal((30, "company"), (view.GetProperty("requestsPerMinute").GetProperty("value").GetInt32(), view.GetProperty("requestsPerMinute").GetProperty("from").GetString()));
 
         // Someone added now has their key made with them: no moment without.
         var q = await PersonAsync(admin);
-        Assert.Equal(new KeyRate(30, 50_000), RateOf(gateway, q.Email));
-        Assert.DoesNotContain(gateway.RateChanges, c => c.Token == gateway.KeysOf(q.Email).Single().Token);
+        Assert.Equal(new KeyRate(30, 50_000), await RateOfAsync(f, q.Email));
 
         await StatusAssert.Is(HttpStatusCode.OK, await CompanyAsync(admin, 0, 0));
-        await KeyHasAsync(gateway, p.Email, KeyRate.None);
-        await KeyHasAsync(gateway, q.Email, KeyRate.None);
+        Assert.Equal(KeyRate.None, await RateOfAsync(f, p.Email));
+        Assert.Equal(KeyRate.None, await RateOfAsync(f, q.Email));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await CompanyAsync(admin, -1, 0));
     }
 
@@ -165,16 +162,16 @@ public sealed class RateLimitTests(AppFixture app)
         var admin = await AdminAsync(f);
         await StatusAssert.Is(HttpStatusCode.OK, await CompanyAsync(admin, 10, 0));
         var p = await PersonAsync(admin);
-        Assert.Equal(new KeyRate(10, null), RateOf(gateway, p.Email));
+        Assert.Equal(new KeyRate(10, null), await RateOfAsync(f, p.Email));
 
         await GroupAsync(admin, new { requestsPerMinute = 20 }, p.Id);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(20, null));
+        Assert.Equal(new KeyRate(20, null), await RateOfAsync(f, p.Email));
         var b = await GroupAsync(admin, new { requestsPerMinute = 40, tokensPerMinute = 1000 }, p.Id);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(40, 1000));
+        Assert.Equal(new KeyRate(40, 1000), await RateOfAsync(f, p.Email));
         var unlimited = await GroupAsync(admin, new { requestsPerMinute = 0 }, p.Id);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(null, 1000));
+        Assert.Equal(new KeyRate(null, 1000), await RateOfAsync(f, p.Email));
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/groups/{unlimited}/members/{p.Id}", UriKind.Relative)));
-        await KeyHasAsync(gateway, p.Email, new KeyRate(40, 1000));
+        Assert.Equal(new KeyRate(40, 1000), await RateOfAsync(f, p.Email));
         var group = await admin.JsonAsync(await admin.GetAsync($"/api/admin/groups/{b}"));
         Assert.Equal((40, 1000), (group.GetProperty("policies").GetProperty("requestsPerMinute").GetInt32(), group.GetProperty("policies").GetProperty("tokensPerMinute").GetInt32()));
         var view = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{p.Id}"))).GetProperty("limits").GetProperty("requestsPerMinute");
@@ -182,13 +179,13 @@ public sealed class RateLimitTests(AppFixture app)
 
         // Their own: on their key at once, no sync needed.
         Assert.Equal(JsonValueKind.Null, (await admin.JsonAsync(await LimitsAsync(admin, p.Id, 5, null))).GetProperty("warning").ValueKind);
-        Assert.Equal(new KeyRate(5, 1000), RateOf(gateway, p.Email));
+        Assert.Equal(new KeyRate(5, 1000), await RateOfAsync(f, p.Email));
         await LimitsAsync(admin, p.Id, 0, 0);
-        Assert.Equal(KeyRate.None, RateOf(gateway, p.Email));
+        Assert.Equal(KeyRate.None, await RateOfAsync(f, p.Email));
         var own = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{p.Id}"))).GetProperty("limits");
         Assert.Equal((0, "person"), (own.GetProperty("own").GetProperty("requestsPerMinute").GetInt32(), own.GetProperty("requestsPerMinute").GetProperty("from").GetString()));
         await LimitsAsync(admin, p.Id, null, null);
-        Assert.Equal(new KeyRate(40, 1000), RateOf(gateway, p.Email));
+        Assert.Equal(new KeyRate(40, 1000), await RateOfAsync(f, p.Email));
 
         await StatusAssert.Is(HttpStatusCode.BadRequest, await LimitsAsync(admin, p.Id, -1, null));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await LimitsAsync(admin, p.Id, null, RateLimits.MaxTokens + 1));
@@ -217,117 +214,25 @@ public sealed class RateLimitTests(AppFixture app)
             await Task.Delay(100);
         }
         Assert.True(Of(a).IsLeader != Of(b).IsLeader, "one replica leads");
-        // The admin works on the replica that does not lead: the one that leads puts the limits on the keys.
+        // The admin works on the replica that does not lead: the other one holds the keys to the same limits.
         var (follower, other) = Of(a).IsLeader ? (b, a) : (a, b);
         var admin = await AdminAsync(follower);
         var p = await PersonAsync(admin);
         await StatusAssert.Is(HttpStatusCode.OK, await CompanyAsync(admin, 25, 0));
-        await KeyHasAsync(gateway, p.Email, new KeyRate(25, null));
+        // The company's limit is a setting: the other replica reads it when it is told of the change.
+        for (var i = 0; i < 150 && await RateOfAsync(other, p.Email) != new KeyRate(25, null); i++)
+        {
+            await Task.Delay(100);
+        }
+        Assert.Equal(new KeyRate(25, null), await RateOfAsync(other, p.Email));
         await GroupAsync(admin, new { requestsPerMinute = 50 }, p.Id);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(50, null));
+        Assert.Equal(new KeyRate(50, null), await RateOfAsync(other, p.Email));
         foreach (var f in new[] { follower, other })
         {
             var me = await new TestBrowser(f).SignedInAsync(p.Name, p.Password);
             var limit = (await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"))).GetProperty("requestsPerMinute");
             Assert.Equal((50, "group"), (limit.GetProperty("value").GetInt32(), limit.GetProperty("from").GetString()));
         }
-    }
-
-    [Fact]
-    public async Task A_new_key_keeps_its_persons_limits_and_a_gateway_that_is_down_gets_them_later()
-    {
-        var gateway = new FakeGateway();
-        await using var f = NewApp(gateway);
-        var admin = await AdminAsync(f);
-        var p = await PersonAsync(admin);
-        await LimitsAsync(admin, p.Id, 7, 7000);
-        var old = gateway.KeysOf(p.Email).Single().Token;
-        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/people/{p.Id}/key"));
-        var made = gateway.KeysOf(p.Email).Single();
-        Assert.NotEqual(old, made.Token);
-        Assert.Equal(new KeyRate(7, 7000), made.Rate);
-
-        // Saved while the gateway is down: said so, and the key gets it at the next check.
-        gateway.Down = true;
-        var res = await LimitsAsync(admin, p.Id, 9, null);
-        gateway.Down = false;
-        await StatusAssert.Is(HttpStatusCode.OK, res);
-        Assert.Contains("next check", (await admin.JsonAsync(res)).GetProperty("warning").GetString(), StringComparison.Ordinal);
-        Assert.Equal(new KeyRate(7, 7000), made.Rate);
-        await CompanyAsync(admin, 0, 1); // any change of the company's wakes the check
-        await KeyHasAsync(gateway, p.Email, new KeyRate(9, 1));
-    }
-
-    [Fact]
-    public async Task A_persons_own_limit_set_while_a_key_sync_runs_wins_over_what_the_sync_read()
-    {
-        var gateway = new FakeGateway();
-        await using var f = NewApp(gateway);
-        var admin = await AdminAsync(f);
-        // A sync goes through people in their names' order, each in their turn: the first's, and the person's after.
-        var first = await PersonAsync(admin, "rl0");
-        var p = await PersonAsync(admin, "rlz");
-        await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, first.Id, 7, null));
-        var firstKey = gateway.KeysOf(first.Email).Single();
-        var hold = new Hold();
-        gateway.BeforeRate = hold.For(firstKey.Token);
-        firstKey.Rate = KeyRate.None;
-        await using var scope = f.Services.CreateAsyncScope();
-        // A sync reads everyone (the person has no limit of their own yet) and is held as it puts the first's key right (the
-        // gateway lost its limits)...
-        var sync = scope.ServiceProvider.GetRequiredService<RateLimits>().SyncAsync();
-        try
-        {
-            await hold.Held;
-            // ...while an admin sets the person's own, which is on their key at once (their turn is free).
-            await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, p.Id, 5, 500));
-            Assert.Equal(new KeyRate(5, 500), RateOf(gateway, p.Email));
-        }
-        finally
-        {
-            hold.Release();
-        }
-        await sync;
-        // The sync read their own again before it changed their key: what the admin set stays.
-        Assert.Equal(new KeyRate(5, 500), RateOf(gateway, p.Email));
-        Assert.DoesNotContain(gateway.RateChanges, c => c.Rate == KeyRate.None);
-    }
-
-    [Fact]
-    public async Task A_persons_own_limit_set_while_a_sync_writes_their_key_waits_for_it_and_stays()
-    {
-        var gateway = new FakeGateway();
-        await using var f = NewApp(gateway);
-        var admin = await AdminAsync(f);
-        var p = await PersonAsync(admin);
-        var token = gateway.KeysOf(p.Email).Single().Token;
-        var group = await GroupAsync(admin, new { requestsPerMinute = 20 }, p.Id);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(20, null));
-        // The syncs those changes woke are done.
-        await Task.Delay(500);
-        var hold = new Hold();
-        gateway.BeforeRate = hold.For(token);
-        Task<HttpResponseMessage> limits;
-        try
-        {
-            // A new limit for the group starts one sync, held just as it gives the key the group's 30...
-            await StatusAssert.Is(HttpStatusCode.NoContent,
-                await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{group}/policies", UriKind.Relative), new { requestsPerMinute = 30 }));
-            await hold.Held;
-            // ...while an admin sets the person's own: saved, it waits for the sync's turn to go on their key (before, the
-            // sync went on to write the 30 over it, until the next sync).
-            limits = LimitsAsync(admin, p.Id, 5, null);
-            await Task.WhenAny(limits, Task.Delay(TimeSpan.FromSeconds(1)));
-            Assert.False(limits.IsCompleted);
-        }
-        finally
-        {
-            hold.Release();
-        }
-        await StatusAssert.Is(HttpStatusCode.OK, await limits);
-        // The held sync gave the key the 30 it decided before; their own went on after it, and stays.
-        Assert.Equal([(token, new KeyRate(30, null)), (token, new KeyRate(5, null))], gateway.RateChanges.TakeLast(2));
-        Assert.Equal(new KeyRate(5, null), RateOf(gateway, p.Email));
     }
 
     [Fact]
@@ -341,8 +246,8 @@ public sealed class RateLimitTests(AppFixture app)
         {
             await StatusAssert.Is(HttpStatusCode.OK, await me.PostAsync("/api/account/keys/rotate"));
         }
-        var key = app.Gateway.KeysOf(p.Email).Single();
-        Assert.Equal(new KeyRate(10, null), key.Rate);
+        var key = (await app.KeysOfAsync(p.Email)).Single();
+        Assert.Equal(new KeyRate(10, null), await RateOfAsync(app.Factory, p.Email));
 
         // One more within the hour: refused, said why and how long to wait, audited; the key stays.
         var res = await me.PostAsync("/api/account/keys/rotate");
@@ -350,14 +255,14 @@ public sealed class RateLimitTests(AppFixture app)
         var wait = int.Parse(res.Headers.GetValues("Retry-After").Single(), CultureInfo.InvariantCulture);
         Assert.InRange(wait, 3000, 3600);
         Assert.StartsWith($"You made {Llm.Api.Identity.PeopleService.OwnKeysPerHour} new keys in the last hour", (await me.JsonAsync(res)).GetProperty("error").GetString(), StringComparison.Ordinal);
-        Assert.Equal(key.Token, app.Gateway.KeysOf(p.Email).Single().Token);
+        Assert.Equal(key.Token, (await app.KeysOfAsync(p.Email)).Single().Token);
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().ToList();
         Assert.Contains(audit, e => e.GetProperty("action").GetString() == "person.rotate_key" && e.GetProperty("target").GetString() == p.Name
             && !e.GetProperty("success").GetBoolean());
 
         // An admin still makes one for them, and it does not count against theirs.
         await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/people/{p.Id}/key"));
-        Assert.NotEqual(key.Token, app.Gateway.KeysOf(p.Email).Single().Token);
+        Assert.NotEqual(key.Token, (await app.KeysOfAsync(p.Email)).Single().Token);
         await StatusAssert.Is(HttpStatusCode.TooManyRequests, await me.PostAsync("/api/account/keys/rotate"));
     }
 
@@ -416,7 +321,7 @@ public sealed class RateLimitTests(AppFixture app)
         var run = "rl-" + Guid.NewGuid().ToString("N")[..8] + "-";
         try
         {
-            await LogAsync(run + "1", gateway.KeysOf(q.Email).Single().Token, q.Email, DateTimeOffset.UtcNow.AddSeconds(-5), total: 10);
+            await LogAsync(run + "1", (await app.KeysOfAsync(q.Email, f)).Single().Token, q.Email, DateTimeOffset.UtcNow.AddSeconds(-5), total: 10);
             var (one, refused) = await McpCallAsync(f, q.Key, "generate_image", picture);
             Assert.True(refused);
             // One request, not "1 requests".
@@ -533,7 +438,7 @@ public sealed class RateLimitTests(AppFixture app)
         var admin = await AdminAsync(app.Factory);
         var p = await PersonAsync(admin);
         await LimitsAsync(admin, p.Id, 1, 1);
-        Assert.Equal(new KeyRate(1, 1), RateOf(app.Gateway, p.Email));
+        Assert.Equal(new KeyRate(1, 1), await RateOfAsync(app.Factory, p.Email));
         var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
         var before = app.Model.Requests.Count;
         for (var i = 0; i < 2; i++)
@@ -542,15 +447,10 @@ public sealed class RateLimitTests(AppFixture app)
             var stream = await (await me.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "hello" })).Content.ReadAsStringAsync();
             Assert.Contains("\"done\"", stream, StringComparison.Ordinal);
         }
-        // The person's key is not used. With LiteLLM the chat's requests go with the chat's own key, which carries no
-        // limit; the app's own gateway sends them to the engine itself, with no key of LiteLLM's.
+        // The person's key is not used: the gateway sends the chat's requests to the engine itself.
         var keys = app.Model.Requests.Skip(before).Select(r => r.Headers.GetValueOrDefault("Authorization", "")).Distinct().ToList();
         Assert.NotEmpty(keys);
-        if (AppFixture.GatewayMode != GatewayModes.Own)
-        {
-            Assert.All(keys, k => Assert.Contains(k.Replace("Bearer ", "", StringComparison.Ordinal), app.Gateway.ServiceKeys));
-        }
-        Assert.All(keys, k => Assert.DoesNotContain(app.Gateway.Keys.Values, g => "Bearer " + g.Secret == k));
+        Assert.DoesNotContain("Bearer " + p.Key, keys);
     }
 
     /// <summary>A request in the gateway's log for this key, as LiteLLM writes it: answered, or refused with this error.</summary>
@@ -604,7 +504,7 @@ public sealed class RateLimitTests(AppFixture app)
     {
         var admin = await AdminAsync(app.Factory);
         var p = await PersonAsync(admin);
-        var token = app.Gateway.KeysOf(p.Email).Single().Token;
+        var token = (await app.KeysOfAsync(p.Email)).Single().Token;
         // A second of its own, long ago: no other test's rows are in it.
         var at = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero).AddSeconds(Random.Shared.Next(86_000));
         var run = "rl-" + Guid.NewGuid().ToString("N")[..8] + "-";
@@ -645,7 +545,7 @@ public sealed class RateLimitTests(AppFixture app)
         var p = await PersonAsync(admin);
         var other = await PersonAsync(admin);
         await LimitsAsync(admin, p.Id, 60, null);
-        var token = app.Gateway.KeysOf(p.Email).Single().Token;
+        var token = (await app.KeysOfAsync(p.Email)).Single().Token;
         var now = DateTimeOffset.UtcNow;
         var run = "rl-" + Guid.NewGuid().ToString("N")[..8] + "-";
         try
@@ -661,7 +561,7 @@ public sealed class RateLimitTests(AppFixture app)
             // Not a rate limit: refused for credit. Nor this one: two days ago. Nor another person's.
             await LogAsync(run + "7", token, p.Email, now.AddSeconds(-20), error: ("BudgetExceededError", "Budget has been exceeded!"));
             await LogAsync(run + "8", token, p.Email, now.AddDays(-2), error: Over(token, "requests"));
-            await LogAsync(run + "9", app.Gateway.KeysOf(other.Email).Single().Token, other.Email, now.AddSeconds(-10), error: Over("x", "requests"));
+            await LogAsync(run + "9", (await app.KeysOfAsync(other.Email)).Single().Token, other.Email, now.AddSeconds(-10), error: Over("x", "requests"));
             await app.MirrorAsync();
 
             var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
@@ -740,7 +640,6 @@ public sealed class RateLimitTests(AppFixture app)
             INSERT INTO groups ("Id","Name","Scim","Priority","CreatedAt","CreditPerMember","Credit")
               VALUES ('00000000-0000-0000-0000-0000000000b2','Old group',false,0,now(),false,5);
             """);
-        var upgraded = DateTimeOffset.UtcNow;
         await db.GetService<IMigrator>().MigrateAsync();
 
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "old");
@@ -752,72 +651,6 @@ public sealed class RateLimitTests(AppFixture app)
         // Nothing set anywhere, and the company's default is none: no limit.
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.RequestsPerMinute, [(group.Name, group.RequestsPerMinute)], new RateLimitOptions().RequestsPerMinute));
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.TokensPerMinute, [(group.Name, group.TokensPerMinute)], new RateLimitOptions().TokensPerMinute));
-        // The upgrade says when it ran, so the first key check keeps the limits keys made before it carry.
-        var keep = await db.Settings.AsNoTracking().SingleAsync(x => x.Key == RateLimits.KeepRow);
-        Assert.InRange(keep.UpdatedAt, upgraded.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
     }
 
-    [Fact]
-    public async Task An_upgrade_keeps_a_limit_a_key_carried_from_the_gateways_own_pages_as_its_persons_own()
-    {
-        var cs = app.ConnectionStringFor("ratesup_" + Guid.NewGuid().ToString("N")[..8]);
-        await (await V520Async(cs, OldPerson(0xc1, "held") + OldPerson(0xc2, "two") + OldPerson(0xc3, "free") + OldPerson(0xc4, "renewed"))).DisposeAsync();
-        var gateway = new FakeGateway();
-        FakeGateway.Key Made(string name, KeyRate rate)
-        {
-            // Made on v5.2.0, a month before the upgrade.
-            var key = new FakeGateway.Key
-            {
-                Secret = "sk-" + Guid.NewGuid().ToString("N"), Token = Guid.NewGuid().ToString("N"), Email = $"{name}@example.test", Alias = "app-" + name, Rate = rate,
-                CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
-            };
-            gateway.Keys[key.Token] = key;
-            return key;
-        }
-        // On v5.2.0 an admin held back a runaway script in LiteLLM's own pages: 10 requests a minute on its owner's key.
-        var held = Made("held", new KeyRate(10, null));
-        // Two keys, limited each its own way: the strictest of each kind is kept.
-        FakeGateway.Key[] two = [Made("two", new KeyRate(null, 5000)), Made("two", new KeyRate(20, 9000))];
-        var free = Made("free", KeyRate.None);
-        var renewed = Made("renewed", new KeyRate(7, null));
-
-        // The upgrade: the app starts on the database and migrates it (no admin is made: it has people).
-        await using var f = app.Create(cs, gateway);
-        _ = f.Server;
-        await using var scope = f.Services.CreateAsyncScope();
-        var services = scope.ServiceProvider;
-        var db = services.GetRequiredService<AppDbContext>();
-        var people = services.GetRequiredService<Llm.Api.Identity.PeopleService>();
-        // A new key made before the first key check gets the limit the old one carried, not none.
-        await people.RotateKeyAsync((await people.FindAsync(Guid.Parse("00000000-0000-0000-0000-0000000000c4")))!);
-        Assert.Equal(new KeyRate(7, null), gateway.KeysOf("renewed@example.test").Single().Rate);
-
-        // The first key check after the upgrade (the replica that leads runs it soon after it starts).
-        var rates = services.GetRequiredService<RateLimits>();
-        await rates.SyncAsync();
-        // Nothing lifted: the held key never carried less.
-        Assert.Equal(new KeyRate(10, null), held.Rate);
-        Assert.DoesNotContain(gateway.RateChanges, c => c.Token == held.Token);
-        Assert.All(two, k => Assert.Equal(new KeyRate(20, 5000), k.Rate));
-        Assert.Equal(KeyRate.None, free.Rate);
-        // The limits are their own now (the admin's page shows them and can change them), and each was audited.
-        var mine = await rates.ForAsync(await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "held"));
-        Assert.Equal((new RateLimit(10, "person"), new RateLimit(null, "none")), (mine.RequestsPerMinute, mine.TokensPerMinute));
-        var audit = await db.AuditEvents.AsNoTracking().Where(e => e.Action == "person.set_limits").ToDictionaryAsync(e => e.Target!, e => e.Detail);
-        Assert.Equal(new Dictionary<string, string?>
-        {
-            ["held"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 10",
-            ["two"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 20; tokens a minute 5,000",
-            ["renewed"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 7",
-        }, audit);
-        Assert.False(await db.Settings.AnyAsync(x => x.Key == RateLimits.KeepRow));
-        var unlimited = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "free");
-        Assert.Equal(((int?)null, (int?)null), (unlimited.RequestsPerMinute, unlimited.TokensPerMinute));
-
-        // Once done, a key carries the app's limits: one set in the gateway's own pages now is replaced, not kept.
-        free.Rate = new KeyRate(3, null);
-        await rates.SyncAsync();
-        Assert.Equal(KeyRate.None, free.Rate);
-        Assert.Null(await db.Users.Where(u => u.UserName == "free").Select(u => u.RequestsPerMinute).SingleAsync());
-    }
 }

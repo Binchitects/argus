@@ -8,8 +8,9 @@ using Npgsql;
 namespace Llm.Tests;
 
 /// <summary>
-/// LiteLLM's request log mirrored into the app's own ledger: each row once, attributed as the usage pages attribute it, a
-/// refusal told from a failure, and the same totals per person as LiteLLM's log gives. People's keys come over too.
+/// An upgrade from before 8.0: LiteLLM's request log brought into the app's own ledger, each row once, attributed as the
+/// usage pages attribute it, a refusal told from a failure, and the same totals per person as LiteLLM's log gave. People's
+/// keys come over too. Then LiteLLM's database is dropped, only once the import is marked done.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class LedgerImportTests(AppFixture app)
@@ -32,6 +33,71 @@ public sealed class LedgerImportTests(AppFixture app)
         }
         // Once more: what is read again (the last minute) is not brought over twice.
         await import.ImportAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task LiteLLMs_database_is_dropped_only_once_its_import_is_marked_done_and_never_the_apps_own()
+    {
+        var old = "oldgw_" + Guid.NewGuid().ToString("N")[..8];
+        await using (var admin = new NpgsqlConnection(app.LitellmConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var create = new NpgsqlCommand($"create database {old}", admin);
+            await create.ExecuteNonQueryAsync();
+        }
+        async Task<bool> ThereAsync()
+        {
+            await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand("select 1 from pg_database where datname = @n", conn);
+            cmd.Parameters.AddWithValue("n", old);
+            return await cmd.ExecuteScalarAsync() is not null;
+        }
+        // An app whose importer does not run by itself here: the mark is set by the test.
+        var database = app.ConnectionStringFor("drop_" + Guid.NewGuid().ToString("N")[..8]);
+        await using var f = app.Create(database, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:ImportDatabase"] = old });
+        async Task<(int Code, string Said)> DropAsync(params string[] args)
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var code = await ImportDrop.RunAsync(f.Services, args, output, error);
+            return (code, output.ToString() + error.ToString());
+        }
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Settings.RemoveRange(db.Settings.Where(x => x.Key == LedgerImport.DoneRow));
+            await db.SaveChangesAsync();
+        }
+
+        // Not imported yet: kept, however long it waited.
+        var (code, said) = await DropAsync("--wait", "0");
+        Assert.Equal(3, code);
+        Assert.Contains("not brought over yet", said, StringComparison.Ordinal);
+        Assert.True(await ThereAsync());
+        Assert.Equal(2, (await DropAsync("--now")).Code);
+
+        // Marked done: dropped and audited; a second time finds none.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Settings.Add(new Setting { Key = LedgerImport.DoneRow, Value = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), UpdatedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(0, (await DropAsync()).Code);
+        Assert.False(await ThereAsync());
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().AuditEvents.AnyAsync(e => e.Action == "gateway.litellm_dropped" && e.Target == old));
+        }
+        (code, said) = await DropAsync();
+        Assert.Equal((0, true), (code, said.Contains("nothing to drop", StringComparison.Ordinal)));
+
+        // The app's own database named as LiteLLM's: refused.
+        var mine = new NpgsqlConnectionStringBuilder(database).Database!;
+        await using var same = app.Create(database, new FakeGateway(), new Dictionary<string, string?> { ["Gateway:ImportDatabase"] = mine });
+        using var none = new StringWriter();
+        Assert.Equal(4, await ImportDrop.RunAsync(same.Services, [], none, none));
     }
 
     [Fact]
@@ -125,7 +191,7 @@ public sealed class LedgerImportTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Keys_LiteLLM_holds_come_over_keep_what_the_app_set_and_go_when_LiteLLM_drops_them()
+    public async Task Keys_LiteLLM_holds_come_over_and_keep_what_the_app_set_and_none_of_the_apps_is_taken_away()
     {
         // An app of its own: its people are this test's alone (LiteLLM's database is every app's).
         await using var f = app.Create(app.ConnectionStringFor("keys_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
@@ -174,8 +240,8 @@ public sealed class LedgerImportTests(AppFixture app)
             // A workspace the app no longer has: the key is still its kind, tied to none.
             Assert.Equal((ApiKey.Studio, (Guid?)null), (keys[studio].Kind, keys[studio].WorkspaceId));
 
-            // The app's own (a name and limits set here) stays; LiteLLM's spend comes over; a key revoked there goes, and so
-            // does one the app made a while ago that LiteLLM no longer holds.
+            // Imported again: the app's own (a name and limits set here) stays and LiteLLM's spend comes over; a key LiteLLM
+            // no longer holds stays the app's, as does one the app made that LiteLLM never held.
             await using (var scope = f.Services.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -194,7 +260,7 @@ public sealed class LedgerImportTests(AppFixture app)
                 await change.ExecuteNonQueryAsync();
             }
             keys = await KeysAsync();
-            Assert.Equal(new[] { main, studio }.Order(), keys.Keys.Order());
+            Assert.Equal(new[] { main, own, studio, made2 }.Order(), keys.Keys.Order());
             Assert.Equal((ApiKey.Own, "CI", (int?)5, 0.75m), (keys[main].Kind, keys[main].Name, keys[main].RequestsPerMinute, keys[main].Spend));
         }
         finally
