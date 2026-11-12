@@ -86,3 +86,6 @@ config/app/applied-*
 
 # The stack's data, when DATA_DIR is the deploy folder's own data/.
 data/
+
+# The installer's record and rollback copies when this checkout's deploy/ is the installation (they hold .env)
+.arena-install/
