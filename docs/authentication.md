@@ -12,7 +12,7 @@ SAML 2.0, with SCIM provisioning), side by side.
 
 **A static API key cannot "be" single sign-on.** Sign-on is a browser flow: a
 redirect, a form, a session cookie. A Python `openai` client, a cron job, or
-LiteLLM calling the engine has no browser and cannot complete it.
+the gateway calling the engine has no browser and cannot complete it.
 
 So browsers and programs get different credentials from the same issuer:
 
@@ -21,8 +21,8 @@ So browsers and programs get different credentials from the same issuer:
 | A person, in a browser | the app's session | session cookie: 1 h idle, 12 h at most |
 | A person's tools (Claude Code, Qwen Code, editors, scripts) | their API key at the gateway, from **Connect your tools** | `sk-...` key, spend tracked per person |
 
-The static keys (`ENGINE_KEY`, `GATEWAY_KEY`) are internal details: the app
-and the gateway use them inside the stack's network, and they never leave it.
+The static key `ENGINE_KEY` is an internal detail: the app's gateway uses it
+inside the stack's network to reach the engines, and it never leaves it.
 
 ---
 
@@ -58,10 +58,10 @@ network; the app shows their data, to admins. Traefik routes three names:
 
 ### 4. The gateway authenticates itself
 
-`gateway.DOMAIN` (LiteLLM) is deliberately **not** behind forwardAuth and
-gets no credential injection. LiteLLM checks each person's own key, which is
-what ties spend to the person; injecting the master key would put every
-request under one identity. It is still reachable only through Traefik over TLS.
+`gateway.DOMAIN` (the app's model gateway) is deliberately **not** behind
+forwardAuth and gets no credential injection. The gateway checks each person's
+own key, which is what ties spend to the person; injecting one credential would
+put every request under one identity. It is still reachable only through Traefik over TLS.
 
 ### 5. Farzan Graph takes the same API key
 
@@ -541,8 +541,8 @@ other secrets.
 
 ## What is deliberately NOT behind sign-in
 
-**Internal service-to-service traffic.** Prometheus scraping, LiteLLM calling
-the engine, Promtail shipping to Loki: these travel over the Docker network and
+**Internal service-to-service traffic.** Prometheus scraping, the app's gateway
+calling the engine, Promtail shipping to Loki: these travel over the Docker network and
 never touch Traefik. The network is already isolated.
 
 **Nothing else is published.** Only Traefik's :80 and :443 exist. There is no

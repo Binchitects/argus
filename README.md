@@ -219,8 +219,8 @@ A .NET 10 app and API with a React web app. Traefik is the only way in: the
 pages go to the web app, coding agents' Farzan Graph to Farzan Graph, and the API to the
 app, an API key's model requests too. The app checks the key, keeps its own
 ledger of every model request, and sends the call on to llama.cpp, vLLM or
-SGLang on your GPUs, or to another server, through a LiteLLM gateway that its
-own gateway is replacing step by step. Farzan Graph mirrors your GitLab with a
+SGLang on your GPUs, or to another server, itself: the app is the model
+gateway. Farzan Graph mirrors your GitLab with a
 read-only token. Prometheus, Loki and Alertmanager watch it all.
 [The architecture →](docs/architecture.md)
 

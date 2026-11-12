@@ -12,9 +12,8 @@ and no setup scripts.
 | service | what it is |
 |---|---|
 | `traefik` | the only way in, and TLS |
-| `web`, `app` | the React app and the .NET API: sign-in, chat, admin, dashboards |
-| `postgres` | the app's and the gateway's databases |
-| `litellm` | the gateway: a key and a credit per person, every request's cost |
+| `web`, `app` | the React app and the .NET API: sign-in, chat, admin, dashboards, and the model gateway (API keys, credit, every request's cost) |
+| `postgres` | the app's database |
 | `llamacpp` | the chat models (Admin → Models), loaded and unloaded live, on the GPUs |
 | `embed` | embeddings for Farzan Graph, on the CPU |
 | `code-intel` | the code index (GitLab, a read-only token) and knowledge packs, over MCP |
@@ -198,7 +197,7 @@ tests ([scripts.md](scripts.md)).
 
 ## Features
 
-`traefik`, `web`, `app`, `postgres` and `litellm` always run. Everything else is
+`traefik`, `web`, `app` and `postgres` always run. Everything else is
 a feature, listed in [`deploy/features`](../deploy/features) with the services it
 runs, whether a new installation has it on, what the host needs for it and the
 features it requires. Each optional service runs under its feature's compose
@@ -325,8 +324,7 @@ the volumes as Podman runs them, and the backup keeps `podman.yml`.
 
 ## External Postgres
 
-The stack's `postgres` holds the app's database (`llmapp`, made by the app) and
-the gateway's (`litellm`). To use your own server (16 or newer) instead, set in
+The stack's `postgres` holds the app's database (`llmapp`). To use your own server (16 or newer) instead, set in
 `.env`:
 
 ```bash
@@ -344,8 +342,7 @@ services:
 ```
 
 `DB_PASSWORD` is that role's password. The role creates the app's database at
-the first start (or have `llmapp` made for it, owned by it), and the gateway's
-`litellm` must exist. The app connects to the server's `postgres` database at
+the first start (or have `llmapp` made for it, owned by it). The app connects to the server's `postgres` database at
 start, to make its own and to start replicas one at a time. With a CA of your
 own, the app also takes `Database__SslMode: verify-full` and
 `Database__RootCertificate` (a file mounted into it) in the override. Connect
@@ -389,8 +386,8 @@ What to know:
 
 **More GPU servers**: add them under **Admin → Models → Other GPU servers**
 with the same model name. The gateway sends each request to the least busy
-copy (`routing_strategy: least-busy` in `config/litellm.yaml`), never past a
-copy's **At once**.
+copy by its weight, never past a copy's **At once**, and passes over a copy
+that is down for 10 seconds.
 
 ## Helm
 
@@ -471,10 +468,8 @@ shared by several pods: on more than one node they need ReadWriteMany storage
 NGINX and a sticky cookie for Traefik; another controller needs its own.
 `gateway.DOMAIN` goes to the app alone, as in compose: the app answers the
 requests that ask a model (each key's line, the fair line, the answer cache,
-the prompt log, the person's voice and language) and passes on only the model
-API's own paths (models, model info, embeddings, moderations, rerank, token
-counts) with the caller's key; LiteLLM's management API and pages are not
-reachable from outside. While no app pod is ready, the API is down too (502 or
+the prompt log, the person's voice and language) and sends each on to its
+engine itself; no engine is reachable from outside. While no app pod is ready, the API is down too (502 or
 503): nothing goes around the app.
 External Postgres: `postgresql.enabled=false` and `externalDatabase`. Logs reach
 Loki only with a log agent of the cluster's (promtail, or another). The host's
@@ -529,7 +524,6 @@ how). **no**: missing, with the reason.
 | `traefik` | yes | yes (ports 8080 and 8443) | differs: the cluster's ingress controller and the chart's Ingress |
 | `web`, `app` | yes | differs: the app runs as the container's root, which is you | yes, two replicas by default |
 | `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
-| `litellm` | yes | yes | yes |
 | `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
 | `vllm` | off (the `vllm` feature: arena-vllm, built on `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `sglang` | off (the `sglang` feature, `SGLANG_IMAGE`), every GPU; `fake-gpu.yml`: the fake SGLang, no GPU | the same, CDI; no locked-memory limit | off (`sglang.enabled`); a Deployment per `sglang.instances` entry with its GPUs and node; `sglang.fake` |
@@ -541,7 +535,7 @@ how). **no**: missing, with the reason.
 | `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
 | `laya` | off (the `laya` feature) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
 | `prometheus`, `alertmanager`, `loki` | yes | yes | yes |
-| `valkey` (the gateway's shared counts, LMCache's shared store) | off (the `ha` feature; `ha.yml` runs `LITELLM_REPLICAS` gateway replicas on it) | the same | off (`valkey.enabled`, with `litellm.replicas`) |
+| `valkey` (LMCache's shared store) | off (the `valkey` feature) | the same | off (`valkey.enabled`) |
 | `dcgm-exporter` | off (the `dcgm` feature) | the same, CDI | no: the cluster's (GPU Operator) |
 | `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
 | `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
@@ -558,19 +552,19 @@ how). **no**: missing, with the reason.
 | the pack library | `packs/` or `CODE_INTEL_PACK_LIBRARY_DIR` | the same | `code-intel.packLibraryClaim` (empty: none) |
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
-| `litellm.yaml` (its 960 s timeouts), `code-intel.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
+| `code-intel.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
 | `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/sglang/serve.py` (the key by `SGLANG_API_KEY`, handed to SGLang inside its process), `services/lmdeploy/serve.py` and `services/strata/serve.py` (the key by `VLLM_API_KEY`, handed over inside the process or by Strata's `--api-key-env`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
-| **Health checks** | the images' (app, web, Farzan Graph, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, LiteLLM, Laya, Farzan Graph |
+| **Health checks** | the images' (app, web, Farzan Graph, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, Laya, Farzan Graph |
 | **Backup and restore** | `./arenactl backup`, `./arenactl restore` | `./arenactl backup --podman`, `./arenactl restore --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
 | **Install and upgrade** | `./arenactl install` and `upgrade`, `./arenactl check upgrade` | `./arenactl install --podman` | `./arenactl kube install` / `upgrade`, or `helm install` / `helm upgrade`; the app and Farzan Graph migrate as they start; no upgrade test |
 | **Features** | | | |
 | media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing (a vLLM model put to sleep frees its memory only for pods that share its GPU) |
 | AMD GPUs (ROCm) | `rocm.yml`: `/dev/kfd` and `/dev/dri`, ROCm images | `rocm.yml` after `podman.yml` | `gpuResource: amd.com/gpu`, ROCm images, `engines.backend: rocm` |
 | Farzan Graph checks agents' API keys with the app | yes | yes | yes |
-| answer cache for API keys, speech and pictures by the app | yes, with fallback to LiteLLM while the app is down | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
+| answer cache for API keys, speech and pictures by the app | yes | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
 | TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
 | app replicas | `scale.yml`, `APP_REPLICAS` | the same | `app.replicas` |
 
@@ -734,7 +728,7 @@ In this order, on the new server (each step's details in
 6. **Measure**: `./arenactl check bench --scenarios ramp,prefixshare,returnafter
    --ramp 1..64 --json run.json`, then again with another setting (TP=2×2 against
    TP=4, a CPU or LMCache tier) and `--compare run.json`. Keep the JSON of each.
-7. **Durability**: the `ha` feature with `ha.yml` for gateway replicas,
+7. **Durability**: `scale.yml` for app replicas (the gateway with them),
    `pitr.yml` for Postgres with point-in-time recovery, the `dcgm` feature for
    per-GPU errors and PCIe throughput.
 
@@ -977,10 +971,10 @@ docker compose up -d                                  # in deploy/
 `./arenactl check restore` proves a backup restores, without touching the live
 stack. It restores the newest backup (or `--from DIR`) into a throwaway project
 beside it, with its own name, volumes, network and port (127.0.0.1:18443), and
-only `postgres`, `app`, `web`, `traefik` and `litellm`. Its network has no way
+only `postgres`, `app`, `web` and `traefik`. Its network has no way
 out, so the restored copy sends no mail and calls no webhook. It checks through
 the API that the backup's people, chats and saved settings are there and that
-spend reads from the restored gateway, then removes the project and its
+spend reads from the restored ledger, then removes the project and its
 volumes.
 
 - It signs in as `admin` with the backup's `ADMIN_PASSWORD`;
@@ -1269,8 +1263,8 @@ back the list there was.
 4. **The new files.** `.env`, `docker-compose.override.yml`, the certificates,
    the backups and the models are never touched. Each shipped file is compared
    three ways: as the old release shipped it, as the new one does, and as it is
-   on the host. A file the host changed (an Alertmanager receiver, the budgets
-   in `config/litellm.yaml`) stays as the host has it when the release ships it
+   on the host. A file the host changed (an Alertmanager receiver, the
+   retention in `config/loki.yml`) stays as the host has it when the release ships it
    unchanged. When the release changed it too, the host's still stays in
    effect, and the release's is written beside it as `FILE.new-VERSION`; the
    summary at the end lists each one under TO MERGE. Only the compose files
@@ -1287,7 +1281,18 @@ back the list there was.
    upgrade is named and not waited for, and the embedding server without its
    model is waiting for models), and the app, Farzan Graph and every container must
    run the new release.
-6. **On a failure it rolls back by itself**: the old images, the files the
+6. **From before 8.0, LiteLLM's database goes.** 8.0 has no LiteLLM: the app's
+   own gateway takes its place. At its first start the app brings LiteLLM's
+   people's keys (so every API key, Code Arena machine and Code Studio
+   workspace keeps working) and its whole request log (so the month's credit
+   carries on) into its own tables, then marks it done. The installer then has
+   the app drop the `litellm` database (`drop-litellm-database`, waiting up to
+   10 minutes for the mark); the backup of step 3 still holds it, so a rollback
+   brings it back. A long log still being read is kept and said so, and the next
+   `repair` drops it. With an external Postgres whose role may not drop it, the
+   database's owner drops it once the backup is kept. `GATEWAY_KEY` stays in
+   `.env`, named as not read, for a rollback.
+7. **On a failure it rolls back by itself**: the old images, the files the
    upgrade changed, and, once the new release had started, the data from the
    backup. The data as it is, with the files and `.env` that open it, goes into
    a backup of its own first; if that backup fails (a full disk), nothing is put
@@ -1310,8 +1315,8 @@ it replaced or removed, what it added taken out, and `.env` without the keys it
 added. What was changed here since the upgrade is asked about first, while the
 stack still runs (`--yes` takes the defaults): a file the upgrade had changed
 goes back to the old release's, one it had left as it was stays as it is now;
-in `.env` a key changed since stays, but for `DB_PASSWORD`, `APP_KEY` and
-`GATEWAY_KEY`, which the restored data opens with, and which go back. The
+in `.env` a key changed since stays, but for `DB_PASSWORD` and `APP_KEY`,
+which the restored data opens with, and which go back. The
 certificates and the override stay as they are. The `.env` there was, and each
 file changed since the upgrade that is replaced or taken out, are kept in
 `.arena-install/rollback/VERSION/files-before-rollback/`; `--dry-run` lists all

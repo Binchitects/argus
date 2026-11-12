@@ -285,7 +285,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     the answer says so, with **Compact now** and the models with a larger
     context.
   - **When the model still refuses.** A request the model refuses as longer
-    than its context (llama.cpp's and LiteLLM's refusal, which say by how much)
+    than its context (the engine's refusal, which says by how much)
     is compacted and asked once more; a second refusal ends the answer with
     the same actions. When the engine's cache, shared by the chats it answers
     at once, is full, the request is asked again after two seconds. A summary
@@ -2404,8 +2404,8 @@ off by default) disables an account after that many in a day.
 instructions hidden in a page (prompt injection).
 
 **On the API path too** (Check API requests too, on by default): before each
-request with an API key, the gateway asks the app (its guardrail,
-`config/litellm.yaml`). The rules that look at API requests read all of the
+request with an API key, the gateway checks it with the safeguards
+([admin.md](admin.md#the-model-gateway)). The rules that look at API requests read all of the
 request's text; the model's checks read its last question; a warning cannot be
 answered there, so it is taken as said. A refused request gets the gateway's error
 with the same sentence the chat shows. The chat's limits per person (length, messages a
@@ -2534,8 +2534,8 @@ their turn:
 
 ## Cost and credit
 
-The chat talks to LiteLLM with its own service key (alias `chat`). Each request
-names the person, so spend is theirs (surface **Chat** under Usage & cost), and
+The chat sends its requests through the app's own gateway, with no key (they
+are booked under the alias `chat`). Each request names the person, so spend is theirs (surface **Chat** under Usage & cost), and
 their credit applies.
 
 Under each answer: its tokens in, cached and out, and what it cost. The cost is
@@ -2682,7 +2682,7 @@ use and edit one); a new chat takes `assistantId`.
 
 | The page says | Why | What to do |
 |---|---|---|
-| "The model gateway is not reachable right now" or "The model could not answer: …" | LiteLLM or the engine is down or still loading | Admin → Overview shows which; loading a model takes minutes |
+| "The model gateway is not reachable right now" or "The model could not answer: …" | the engine (or the GPU server) is down or still loading | Admin → Overview shows which; loading a model takes minutes |
 | "You have used all your chat credit for this month (…)" (or API, picture, video, speech) | the person's credit of that kind is spent; the other kinds go on | an admin raises it under People, or wait for the first of the month |
 | "You have no picture credit: an admin sets it under People" (or chat, API, video, speech; "under Groups" for a group's) | an admin set that credit to $0 and nothing was spent | an admin sets a credit, or no limit, under People (or Groups) |
 | "… has used its chat credit for this month" or "You have used your chat credit as a member of …" | a group's credit of that kind is spent | an admin raises it under Admin → Groups → the group → Policies |

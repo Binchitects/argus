@@ -454,14 +454,12 @@ full the models kept loaded would make it.
   model new chats use, making room for another, working hours.
   The app never leaves the choice to the engine, which would unload the model
   used least recently, whichever it is. An API key's request (a coding agent,
-  an IDE) gets room the same way: the gateway asks the app before sending it
-  (its guardrail), and the app makes room, or the request waits, or it is
-  refused with the reason. A place made for a model is its own until the
+  an IDE) gets room the same way: the gateway makes room before sending it, or
+  the request waits, or it is refused with the reason. A place made for a model is its own until the
   engine loads it, so two requests at once for two models take two places.
   The app's own loads (a kept model back, the one new chats use, the model for
   small steps) make room the same way. Should the engine still unload a model
-  by its own choice (a request let through while the app is down, with the
-  guardrail's `fail_open`), a kept one comes back, and so does the one new chats
+  by its own choice (a request sent to it from outside the app), a kept one comes back, and so does the one new chats
   use, once a model that may make room has been idle for a minute (so an agent
   pausing between its requests is not pushed out for it). One the engine pushes
   out twice within ten minutes waits before it comes back (1, 2, 4… minutes),
@@ -881,11 +879,11 @@ full the models kept loaded would make it.
   request holds, its prompt and its answer together), longest answer (at most
   three quarters of the context, so a prompt keeps a quarter, 1,024 tokens at
   least; empty: half the context), tools, thinking and images; the dialog says
-  each bound beside its field. The app registers them in LiteLLM with the
-  server's address and key; people use them from the chat, their API keys and
+  each bound beside its field. The app's gateway routes them to the
+  server's address with its key; people use them from the chat, their API keys and
   agents, with the same access rules and spend as any model.
   - A name the gateway has already (a model here, or on another server) makes
-    it **a second copy** of that model, and the copies are a pool: LiteLLM sends
+    it **a second copy** of that model, and the copies are a pool: the gateway sends
     each request to the least busy copy, and the chat can use the model while
     this machine's copy is not loaded. **At once** (a server model's parallel
     slots; this machine's are its model's **People at once**) caps what one copy is
@@ -983,7 +981,7 @@ full the models kept loaded would make it.
   and, on vLLM and SGLang, the people its cache holds with all of it each. The
   gateway advertises the context per person as the model's window
   (`max_input_tokens`), and the longest answer in it (`max_output_tokens`, and
-  `max_tokens`, LiteLLM's older name for it), so the chat and Code Arena compact
+  `max_tokens`, its older name), so the chat and Code Arena compact
   before they reach it, and the card says it ("262,144 tokens a person, 15 at
   once, answers up to 32,768"). A longest answer saved for a bigger conversation
   (before the context per person was lowered) is not cut to the most that fits:
@@ -1005,7 +1003,7 @@ full the models kept loaded would make it.
   one before it reaches llama.cpp, however a request asks it: `max_tokens`
   (chat and text completions, Anthropic's `/v1/messages`),
   `max_completion_tokens`, or the Responses API's `max_output_tokens`
-  (`deploy/config/arena_limits.py`, which `litellm.yaml` names; llama.cpp
+  (`ModelGateway.Shape`; llama.cpp
   would write as long as asked, up to the end of its slot). Anthropic's
   `/v1/messages` (Claude Code) is answered through chat completions, so an
   answer cut at its longest says `stop_reason` `max_tokens`, not `end_turn`.
@@ -1517,7 +1515,7 @@ it is full. Then what takes room:
 
 | What | Measured from |
 |---|---|
-| Each database on the stack's Postgres (`llmapp`, `litellm`, `code-intel`, `langfuse` where they are) and the largest tables of the app's and the gateway's | Postgres itself |
+| Each database on the stack's Postgres (`llmapp`, `code-intel`, `langfuse` where they are; `litellm` until an upgrade from before 8.0 drops it) and the largest tables of the app's | Postgres itself |
 | The chat's files (uploads, and the pictures, videos, speech and other files the tools made), by where they came from, whether a chat still has them, and by person | the app's database: the files are kept there, inside `llmapp` |
 | The model library (`MODELS_DIR`): each model file, which model of Admin → Models uses it (loaded or kept loaded), or which server reads it, and downloads not finished | the folder |
 | Farzan Graph: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Farzan Graph measures its own data folder (`GET /admin/storage`), at most every ten minutes |
@@ -1612,14 +1610,14 @@ Credits are one per kind, so each can be held on its own:
 | **Video** | videos made |
 | **Speech** | read aloud, Talk, voice messages and sound files turned into text, and speech with a key |
 
-Each is a calendar month's spend (UTC) as the gateway's request log puts it to
+Each is a calendar month's spend (UTC) as the ledger puts it to
 the person, by the same rule as the usage dashboards. A person has a credit of
 each kind (Admin → People → a person → **Credits this month**; empty: no limit
 of their own), and so may each of their groups (Admin → Groups → a group →
 Policies), **shared** by the members or **each member's**. Before each chat
 answer the app checks the chat credit, and before each picture, video or speech
-it makes, that kind's; for an API key's request the gateway asks the app first
-(its guardrail, below), which checks the kind of the request's model (a picture
+it makes, that kind's; for an API key's request the gateway checks
+([The model gateway](#the-model-gateway), below) the kind of the request's model (a picture
 model's request is a picture). Past any credit of that kind, the person's or a
 group's, it is refused with the reason ("You have used all your API credit for
 this month ($20.00)"). The other kinds go on. A person hears once a month at 80%
@@ -1639,69 +1637,53 @@ The gateway holds no budget: the credits are the app's. On the first start of
 v5.5, each person's credit at the gateway (one over the chat and API keys)
 became their credit of every kind (unless they had credits already), a group's
 one credit its credit of every kind, and the gateway's budgets and the teams
-older versions made for groups (`group-...`) were cleared. The gateway is kept
-holding none (every ten minutes): a `config/litellm.yaml` changed here that
-still has `max_internal_user_budget` would otherwise give new people a budget of
-its own; take that line out on upgrade.
+older versions made for groups (`group-...`) were cleared.
 
 **API access** is on for everyone; an admin takes it on the person's page (the
 **API access** switch, after a confirmation: the person's own deny of
-`feature.api_keys`, [Access](#access-roles-and-rules)). Off, their keys are blocked at the
-gateway and refused by the guardrail, none is shown to them or made (by them or
+`feature.api_keys`, [Access](#access-roles-and-rules)). Off, their keys are refused by the
+gateway, none is shown to them or made (by them or
 an admin), and Arena's MCP endpoint, Farzan Graph and speech with a key refuse them;
 the chat stays theirs. Given back, their keys work again (one is made if they had
-none). A block the gateway could not take at once is taken at the next check,
-within ten minutes, and so is a disabled person's.
+none). The gateway reads it again within 10 seconds on every replica, and so a
+disabled person's too.
 
 **Cost centre** is a label per group. **Chargeback** (below the groups list):
 spend per group and per cost centre, month by month, and the people in no group;
 **CSV** downloads it. A person in several groups counts in each group, and once
 in a cost centre.
 
-**The gateway's guardrail.** `config/litellm.yaml` has LiteLLM's generic
-guardrail API call the app (`http://app:8080/internal/guardrail`, with the
-gateway's master key) before each request. The app answers in milliseconds:
-API access and the credit of the request's kind, and the safeguards ([chat.md](chat.md#safeguards)) for API keys,
-then room in the engine for a model that is not loaded (see **Loaded on
-request** above: at the limit, the request may wait up to a minute for an idle
-model to make room, or is refused with the reason); the chat's own requests
-pass at once (the chat checked them, and made room). The path is not
-routed by Traefik: only the gateway, inside the network, reaches it. With
-`unreachable_fallback: fail_closed`, API requests are refused while the app is
-down (a restart); `fail_open` lets them through unchecked instead.
+### The model gateway
 
-### The model gateway: LiteLLM or the app's own
+The app is the model gateway: every model request goes through it, and it
+sends each to the models itself ([architecture.md](architecture.md#the-model-gateway);
+measured against LiteLLM, the gateway before 8.0, in
+[measurements/gateway.md](measurements/gateway.md)). It answers API keys'
+chat completions, Anthropic's Messages API (Claude Code, with `x-api-key`) and
+`count_tokens`, OpenAI's Responses API (Codex), the legacy completions,
+pictures, speech and transcriptions (any format: json, text, srt, vtt,
+verbose_json), the model list and `/v1/model/info`, and embeddings (the
+embeddings server, while it runs). It checks each key itself, in order: the
+key, its expiry, the person, API access, the model, the requests and tokens a
+minute (counted in `gateway.rate_windows`, shared by every replica: a 429 says
+when to ask again, with `Retry-After` and the `x-ratelimit-*` headers), the
+key's own budget, the credit of the request's kind, the safeguards
+([chat.md](chat.md#safeguards); a masked text goes masked), then room in the
+engine for a model that is not loaded (see **Loaded on request** above: at the
+limit, the request may wait up to a minute for an idle model to make room, or
+is refused with the reason). The chat's own requests were checked by the chat,
+which made room. A model of several copies goes to the least busy one; its
+fallback answers when its server cannot be reached. Every request is a row in
+the ledger, a refusal too (counted as no request), so credit and usage count
+it at once. Rerank, moderations, translations and picture edits answer 404:
+no server here serves them.
 
-**Settings → API keys → Model gateway** chooses who sends the requests to
-the models, from the next request on:
-
-- **litellm**: LiteLLM, as before 8.0, with the checks above. LiteLLM is still
-  deployed in 8.0, so this is the way back if the app's own gateway misbehaves.
-- **chat**: the app sends its own chat, pictures and speech to the engines
-  itself; API keys still go by LiteLLM.
-- **own** (the default from 8.0, an upgrade too; measured in
-  [measurements/gateway.md](measurements/gateway.md)): the app answers everything it serves: API keys' chat completions,
-  Anthropic's Messages API (Claude Code, with `x-api-key`) and
-  `count_tokens`, OpenAI's Responses API (Codex), the legacy completions,
-  pictures, speech and transcriptions (any format: json, text, srt, vtt,
-  verbose_json), the model list and `/v1/model/info`, and embeddings (the
-  embeddings server, while it runs). It checks each key itself in the order
-  above: the key, its expiry, the person, API access, the model, the requests
-  and tokens a minute (counted in `gateway.rate_windows`, shared by every
-  replica: a 429 says when to ask again, with `Retry-After` and the
-  `x-ratelimit-*` headers), the key's own budget, credit, the safeguards (a
-  masked text goes masked), and room for the model. A model of several copies
-  goes to the least busy one; its fallback answers when its server cannot be
-  reached. Every request is a row in the ledger, a refusal too (counted as
-  no request), so credit and usage count it at once. Rerank, moderations,
-  translations and picture edits answer 404: no server here serves them.
-
-With **own**, Admin → Overview's **Model gateway** is the app's own health
+Admin → Overview's **Model gateway** is the app's own health
 (each model's server asked), the app's `/metrics` carries
 `arena_gateway_*` (requests, times, first tokens, tokens, errors, refusals,
 fallbacks), and the alert rules GatewayUpstreamErrors, GatewayLedgerBehind
-and GatewaySlowFirstToken watch them. `deploy/scripts/gateway-compare.py`
-measures the two side by side on a stack.
+and GatewaySlowFirstToken watch them. `deploy/scripts/gateway-soak.py` keeps
+it busy for a day on a stack and checks its errors, times and memory.
 
 ### The answer cache for API keys
 
@@ -1760,9 +1742,9 @@ a group that needs more is not held back by a broader one with less, and a
 person's own holds back anyone who needs it. (Credit and safeguards are the
 other way: the strictest group applies.) Out of the box nothing is set, so
 nothing is limited, and an upgrade from v5.2.0 sets nothing either, with one
-exception: a limit an admin already put on a key in the gateway's own pages
-(LiteLLM's `/ui`, the only way to limit a key before) is kept. The first key
-check after the upgrade makes it its person's own, the strictest of their
+exception: a limit an admin already put on a key in LiteLLM's own pages (its
+`/ui`, the only way to limit a key before) is kept. The first key
+check after the upgrade made it its person's own, the strictest of their
 keys' for each of the two, where it is stricter than what they would get and
 they have none of their own; it is audited (`person.set_limits`, "kept from
 their API key") and logged, and shows on their page, where you can change it.
@@ -1774,8 +1756,7 @@ and **New key** makes the next with the same limits, so they are the person's.
 People also make keys of their own on **Account → API keys** (up to 20): each
 named, each with limits of its own (requests and tokens a minute, requests at
 once, a budget in 30 days) that hold under the person's, as the gateway holds
-the key to the tighter of the two, and the key sync keeps it so when the
-person's limits change. Each is revoked on its own (`person.key_revoked`);
+the key to the tighter of the two whenever the person's limits change. Each is revoked on its own (`person.key_revoked`);
 making one is audited (`person.key_made`) and counts with **New key** in the
 five an hour. **New key** replaces the main key only: keys of their own and a
 Code Studio workspace's keep working.
@@ -1787,35 +1768,31 @@ refused is the person's, whichever of their keys met the limit.
 **API requests at once, per key** (Settings → Chat) stays as it was, beside
 them.
 
-- **Where it is counted.** The app puts the limits on each key at the gateway
-  (LiteLLM's `rpm_limit` and `tpm_limit`), and LiteLLM counts every request of
-  the key in windows of a minute: one count, whichever app replica a change
-  came from. A request past a limit gets **HTTP 429** with `Retry-After: 60`,
-  and says which limit: `Rate limit exceeded for api_key: <the key's hash>.
-  Limit type: requests. Current limit: 60, Remaining: 0. Limit resets at: …`
-  (`tokens` for tokens a minute, `max_parallel_requests` for requests at once).
+- **Where it is counted.** The gateway counts every request of a key and its
+  tokens in windows of a minute (`gateway.rate_windows`, in the database): one
+  count, whichever app replica took the request. A request past a limit gets
+  **HTTP 429** with `Retry-After` (the seconds left of the minute) and the
+  `x-ratelimit-limit-*`, `-remaining-*` and `-reset-*` headers, and says which
+  limit: `Rate limit reached for this key: too many requests this minute.
+  Limit type: requests. Current limit: 60` (`tokens` for tokens a minute).
   Most clients wait that long and send again on their own (the OpenAI and
   Anthropic libraries do); a script of your own should too.
-- **Tokens are checked before the model runs.** A request goes ahead only if
-  its prompt (a quarter of its characters, as tokens) and its `max_tokens`
-  (when it sets none, as much as its prompt and at least 1,024) fit what is
-  left of the minute; the real count replaces the guess when it ends. Keep
-  the limit well above the largest request a tool sends: a coding agent's
-  prompt is often 30,000 tokens or more. Below 4,096 tokens a minute, the
-  gateway also cuts answers that set no `max_tokens` to a quarter of the limit.
+- **Tokens are counted as they are used.** A request goes ahead while the
+  key's tokens this minute are under the limit, and its tokens count when it
+  ends: one large request can take the minute past the limit, and the next
+  waits for the next minute. Keep the limit well above the largest request a
+  tool sends: a coding agent's prompt is often 30,000 tokens or more.
 - **When a change applies**: a person's own at once; a group's, a change of
   members and the company's within seconds (the same check that keeps each
   key's models in step, on the replica that leads), and every ten minutes
-  (directory groups change on their own). A limit set in the gateway's own
-  pages is replaced by the app's (one set there before the upgrade is kept, as
-  above).
-- **The chat is not limited by these.** Its requests go with the chat's own
-  key, which carries none: the chat has its fair line (Settings → Chat).
+  (directory groups change on their own).
+- **The chat is not limited by these.** Its requests are the app's own and
+  carry no key: the chat has its fair line (Settings → Chat).
   Answers from the [answer cache](#the-answer-cache-for-api-keys) do not count
   either: they never reach the gateway.
 - **Arena MCP.** An agent signs in to Arena MCP with the person's key, but the
   tools that reach a model (pictures, speech, video, and deep research) make
-  their requests with the chat's own key, so the gateway cannot count them.
+  their requests as the app's own calls, with no key, so the gateway cannot count them.
   The app counts each call instead, as one request against the person's
   requests a minute: what their keys sent in the last minute, and their Arena
   MCP calls of these tools that started in it (those that ended from the audit
@@ -1829,28 +1806,28 @@ them.
   these tools: pictures, speech and video have no tokens, and the chat's own
   limits for pictures and videos hold. A deep research run started there
   (`deep_research`) is a chat of the person's own: the many requests it makes
-  go with the chat's key and are held by the deep research a day and the
+  are the app's own and are held by the deep research a day and the
   messages per minute (Settings → Safeguards) and the fair line, not by the
   key's limits; only its start counts here. Arena MCP's other built-in tools
   (Farzan Graph, Python, the web, the calculator, the time) reach no model.
 - **What people see**: their key's card (Your account, and Connect your tools)
   shows each limit and where it comes from, what the key used in the last
   minute, and what was refused in the last day. The minute is read from the
-  gateway's request log, which LiteLLM writes every few seconds (a streamed
-  answer when it ends): close, not exact.
+  ledger, which books a request as it ends (a streamed answer when it ends):
+  close, not exact.
 - **What admins see**: the same on the person's page, and **Refused by rate
   limits** on the Usage by person dashboard: who, with which key, which limit,
-  how often and when last. A refusal is in the gateway's request log as a
-  failed request with its reason and no prompt or answer; refusals for credit
-  are not counted there. A refused request never reached a model, so it is not
+  how often and when last. A refusal is in the ledger as a
+  refused request with its reason and no prompt or answer; the panel counts
+  those for the rate limits. A refused request never reached a model, so it is not
   counted as a request anywhere else (a person's own usage, the dashboards'
   requests, the LLM overview's failures and times): a script that retries
   every second shows as the requests that were answered, plus its refusals
   apart. Each change of a limit is audited
   (`person.set_limits`, `group.policies` and `settings.change`).
-- **Several gateways.** LiteLLM counts in its own memory. Compose runs one,
-  and so does the Helm chart unless `litellm.replicas` is raised: with several,
-  each counts on its own, and a key can send up to that many times its limit.
+- **Several app replicas** count together: the minute's count is in the
+  database, so a key gets its limit once, whichever replicas its requests
+  reach.
 
 ### What the admin area deliberately does not do
 
@@ -1889,20 +1866,18 @@ Every model has a price, so every request has a cost:
   video ($0.05), a minute of sound turned into text ($0.006), 1,000
   characters read aloud ($0.015).
 
-The app gives the gateway every model's prices when it registers it
-(`input_cost_per_token`, `cache_read_input_token_cost`,
-`output_cost_per_token`; per picture, per second of sound, per character for
-the picture and speech models), again within a minute of any change, and at
-once when the defaults are saved. LiteLLM prices a request's cached tokens at
-nothing when a model has no cache read price, so every model has one. The chat
-asks the speech server for a transcription's length (`verbose_json`), which is
-what LiteLLM prices it by. The video server is not behind the gateway: the app
-books each clip in the gateway's request log itself, as the chat's request,
-with its length.
+The gateway prices each request by its route's prices (per token of input,
+of cached input and of output; per picture, per second of sound, per character
+for the picture and speech models), read again within a minute of any change,
+and at once when the defaults are saved. Every model has a cached input price
+(its own, else the default, never above its input), so cached tokens are never
+free by mistake. A transcription is asked as `verbose_json`, which gives its
+length, and priced by it. The video server is not behind the gateway: the app
+books each clip in the ledger itself, as the chat's request, with its length.
 
 **Recalculate past costs** (Settings → Prices): requests booked before a model
 had a price (or before cached input had one) cost nothing, or too little. Pick
-the days, count, then **Recalculate**: requests in the gateway's request log
+the days, count, then **Recalculate**: requests in the ledger
 (what usage, credit, chargeback and the dashboards count) and the parts of chat
 answers (what each answer shows) are worked out again at today's prices.
 **Only costs booked as free** (on by default) leaves the others as they are; off,
@@ -1912,8 +1887,7 @@ not say how many pictures it made (an API key can ask for several at once).
 Speech and transcriptions in the log cannot be priced again
 (their length is not kept), nor pictures, video and speech whose files were
 deleted since. Each recalculation is audited (`usage.recalculate`, with the
-counts and totals); the gateway's own running totals (a key's spend in LiteLLM's
-own pages) are left as they are. It never runs by itself, not on upgrade either.
+counts and totals). It never runs by itself, not on upgrade either.
 
 ## Usage & cost
 
@@ -1938,7 +1912,7 @@ answer linked to its chat.
 
 A prompt is a chat answer, with its rounds, tool calls (pictures, video,
 speech) and sub-agents added up at the prices when each ran, or one request of
-an API key (from the gateway's request log). The chat's own small steps around
+an API key (from the ledger). The chat's own small steps around
 the answers (titles, summaries, the safeguards' check, transcribing a file) are
 in the totals above, not in the list. An answer from before costs were kept is
 marked with `*`: its cost leaves those parts out until an admin recalculates.

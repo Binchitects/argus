@@ -719,7 +719,7 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/IdentityTests.State_changes_without_the_csrf_header_are_refused`
 - `Llm.Tests/ForwardAuthTests.Hosts_without_a_rule_are_denied_even_to_admins`
 - `Llm.Tests/FileSealingTests.With_HSTS_set_the_app_sends_it_as_Traefik_does_and_without_it_clears_any_kept_before`
-- `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
+- `Llm.Tests/ApiPassageTests.A_key_the_gateway_does_not_know_gets_no_model_list_nor_embeddings_and_nothing_is_passed_on`
 - `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
 - `Llm.Tests/CompanyCaTests.A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_CodeIntel_gets_it_too`
 

@@ -21,11 +21,10 @@ Three places, each with one job:
 | `MODEL` | the first chat model: `owner/repo:QUANT` on Hugging Face, or a file in `MODELS_DIR`, added (and kept loaded) once its files are in `MODELS_DIR`. Empty: none |
 | `DEFAULT_MODELS` | `download`: the app downloads the default models (`MODEL`, pictures, video, embedding, speech) once, at its first start. Empty: it downloads nothing on its own (an admin does under Admin → Models → Default models, or the files are copied in) |
 | `ADMIN_PASSWORD` | the first admin's password; only used while nobody exists |
-| `DB_PASSWORD` | Postgres (the app and the gateway) |
+| `DB_PASSWORD` | Postgres (the app) |
 | `APP_KEY` | encrypts the app's key ring and saved secrets. **Never change it**: sessions, two-factor and saved secrets are lost |
-| `ENGINE_KEY` | the engine's key (the gateway and Prometheus use it) |
+| `ENGINE_KEY` | the engines' key (the app's model gateway and Prometheus use it) |
 | `CODE_INTEL_KEY` | Farzan Graph's admin and chat credential, the app's only |
-| `GATEWAY_KEY` | the gateway's master key (`sk-...`). Changing it invalidates nothing stored, but the app and the gateway must agree |
 | `HF_TOKEN` | optional: gated Hugging Face models |
 | `ACME_EMAIL` | optional: certificates from Let's Encrypt |
 | `HSTS_SECONDS` | optional: Strict-Transport-Security's max-age, sent by Traefik and the app; empty: a year with `ACME_EMAIL`, none with your own CA (set it once every browser trusts your CA) |
@@ -55,7 +54,6 @@ each v3 option maps: [deployment.md](deployment.md#where-the-v3-env-options-went
 |---|---|
 | `traefik/routes.yml` | Traefik's routes (with `APP_REPLICAS` above 1, the app's replicas and the sticky cookie); `traefik/README.md` for a certificate of your own |
 | `traefik/certificate.yml` | written by `scripts/make-cert.sh`: the certificate Traefik serves, from `deploy/certs/` (not committed) |
-| `litellm.yaml` | the gateway: retries, how long it waits for an answer (16 minutes, longer than Code Arena's 15 for an answer to start), and how a model on several servers is shared (the least busy copy). The models are registered by the app |
 | `code-intel.yaml` | Farzan Graph's paths; the GitLab comes from `.env` |
 | `prometheus/` | what is scraped, and the alert rules |
 | `alertmanager.yml` | where alerts go (nowhere by default: the app shows them) |

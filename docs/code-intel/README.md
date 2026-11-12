@@ -120,7 +120,7 @@ their GitLab username, so Farzan Graph then answers exactly as for the chat: wit
 that person's GitLab membership, read with the service token. Nobody hands out
 a GitLab token for Farzan Graph. The Traefik route applies `default-chain@file` and
 passes the `Authorization` header through untouched, the same reasoning as the
-LiteLLM gateway route.
+model gateway's route.
 
 ```
 anonymous                       ->  401

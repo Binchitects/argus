@@ -29,33 +29,33 @@ and nothing reaches `power-limits`.
                                ┌───────▼───────┐        │              │
                                │ app           ├───────▶│              │
                                │ postgres      │        │              │
-                               │ valkey [ha]   │◀───────┤              │
+                               │ valkey [v]    │◀───────┤              │
                                └──┬────┬────┬──┘        └─────────┬────┘
                                   │    │    │                     │
          ┌────────────────────────┘    │    └────────┐            │ read only
 ┌────────▼──────────┐ ┌────────────────▼──┐ ┌────────▼──────────┐ ▼
-│ litellm           │ │ sandbox [n]       │ │ prometheus        │ your GitLab
-│   │               │ │ blender [n]       │ │ alertmanager      │
-│   ▼               │ │ lean [n]          │ │ loki, promtail    │
-│ llamacpp          │ │ browser [b]       │ │ node-exporter     │
-│ vllm, sglang,     │ │ searxng           │ │ gpu-exporter      │
-│ lmdeploy, strata  │ │                   │ │                   │
-│ imagegen          │ │ laya [l]          │ │ dcgm-exporter     │
-│ videogen, audio   │ │ studio [t]        │ │ cpu-temp-exporter │
-│ embed             │ │ workspaces [w]    │ │ power-limits [n]  │
-│ other GPU servers │ │                   │ │                   │
+│ llamacpp          │ │ sandbox [n]       │ │ prometheus        │ your GitLab
+│ vllm, sglang,     │ │ blender [n]       │ │ alertmanager      │
+│ lmdeploy, strata  │ │ lean [n]          │ │ loki, promtail    │
+│ imagegen          │ │ browser [b]       │ │ node-exporter     │
+│ videogen, audio   │ │ searxng           │ │ gpu-exporter      │
+│ embed             │ │                   │ │                   │
+│ other GPU servers │ │ laya [l]          │ │ dcgm-exporter     │
+│                   │ │ studio [t]        │ │ cpu-temp-exporter │
+│                   │ │ workspaces [w]    │ │ power-limits [n]  │
+│                   │ │                   │ │                   │
 └───────────────────┘ └───────────────────┘ └───────────────────┘
- the gateway and       the tools' sandboxes  monitoring
- the engines           and studio servers
+ the engines, behind   the tools' sandboxes  monitoring
+ the app's gateway     and studio servers
 
  [n]  no network at all                [b]  out only through the app's proxy
  [l] [t]  a network with the app only  [s]  a network with Farzan Graph only
- [w]  the app, Farzan Graph and the internet  [ha] only with the ha feature or ha.yml
+ [w]  the app, Farzan Graph and the internet  [v]  only with the valkey feature
 ```
 
 The app calls Farzan Graph as the chat's MCP server, and Farzan Graph asks the app whose an
 API key is. Farzan Graph also embeds through `embed`. The app's chat calls, and the
-chat's pictures, speech and transcripts, go through the gateway. The app
+chat's pictures, speech and transcripts, go through its own model gateway. The app
 calls `embed` directly for embeddings, the picture, video and studio servers
 directly for the media studio, the chat's video and the meetings' speakers,
 and the engines directly only to manage them (load, unload, slots, health).
@@ -63,52 +63,52 @@ and the engines directly only to manage them (load, unload, slots, health).
 | group | services | what it does |
 |---|---|---|
 | the way in | `traefik` | TLS (Let's Encrypt, a certificate of its own, or yours), routes by host and path, security headers and compression |
-| the web and the app | `web`, `app` | the React app; the .NET app and API: sign-in, chat, tools, admin, dashboards, and the way in for every model request |
-| the stores | `postgres`, `valkey` | the app's database (`llmapp`: people, chats, settings, the ledger, the keys) and the gateway's (`litellm`); Valkey only with the `ha` feature or `ha.yml` |
-| the gateway and the engines | `litellm`; `llamacpp`, `vllm`, `sglang`, `lmdeploy`, `strata`; `imagegen`, `videogen`, `audio`, `embed` | the models: chat models on llama.cpp, vLLM or SGLang, pictures and video on stable-diffusion.cpp, speech on speaches, embeddings on the CPU; other GPU servers the app does not run are reached the same way |
+| the web and the app | `web`, `app` | the React app; the .NET app and API: sign-in, chat, tools, admin, dashboards, and the model gateway every model request goes through |
+| the stores | `postgres`, `valkey` | the app's database (`llmapp`: people, chats, settings, the ledger of model requests, the API keys and their rate counts); Valkey, LMCache's shared store, only with the `valkey` feature |
+| the engines | `llamacpp`, `vllm`, `sglang`, `lmdeploy`, `strata`; `imagegen`, `videogen`, `audio`, `embed` | the models: chat models on llama.cpp, vLLM or SGLang, pictures and video on stable-diffusion.cpp, speech on speaches, embeddings on the CPU; other GPU servers the app does not run are reached the same way, through the app's gateway |
 | Farzan Graph | `code-intel`, `scanners` | the code index of your GitLab (read only), knowledge packs and security advisories, over MCP; the scanners for its security reviews |
 | the tools | `sandbox`, `blender`, `lean`, `browser`, `searxng`, `laya`, `studio`, `workspaces` | Python and commands, 3D, proofs, the browser agent, web search, typed decisions, the media studio's own models, Code Studio's workspaces |
 | monitoring | `prometheus`, `alertmanager`, `loki`, `promtail`, the exporters, `power-limits` | what the app's dashboards, logs and alerts read; power caps kept applied |
-| off the host | Code Arena, your GitLab, GitHub and Gitea, other GPU servers, Hugging Face, the company's knowledge sources | reached by the app or Farzan Graph, by LiteLLM (other GPU servers), by the speech server (Hugging Face) and by Code Studio's workspaces (the code hosts, package registries), or reaching in through Traefik |
+| off the host | Code Arena, your GitLab, GitHub and Gitea, other GPU servers, Hugging Face, the company's knowledge sources | reached by the app or Farzan Graph (the app's gateway reaches other GPU servers), by the speech server (Hugging Face) and by Code Studio's workspaces (the code hosts, package registries), or reaching in through Traefik |
 
 A broken Traefik is a total outage. A broken Prometheus is not. Farzan Graph alone,
 without the platform, is a compose of its own in `deploy/code-intel-standalone`
 ([code-intel/standalone/architecture.md](code-intel/standalone/architecture.md)): a
 host runs one or the other.
 
-### Where LiteLLM sits today
+### The model gateway
 
-Every request to LiteLLM reaches the app first, an API key's too. Only
-Farzan Graph's embeddings go past the app, straight to `embed`. Behind the app,
-LiteLLM is still the model gateway (`litellm`, port 4000 inside, its own
-database `litellm`, its settings in `config/litellm.yaml`). Today it:
+Every model request reaches the app, an API key's too, and the app's own
+gateway sends it on: straight to the engine or the GPU server that answers the
+model. Only Farzan Graph's embeddings go past the app, straight to `embed`. The
+gateway is part of the app (`src/Llm.Api/Gateway`, its design in
+[design/own-gateway.md](design/own-gateway.md)), so it runs as many replicas as
+the app and keeps its state in the app's database. It:
 
-- holds the route table: the app registers its chat, picture and speech
-  models at it (not video models or the embedder), each with where it is
-  answered and its price;
-- checks every API key, its models and its rate limits, and an own key's
-  budget;
-- asks the app's guardrail before each call (safeguards, API access, credit,
-  room in the engine), and refuses when the app does not answer;
-- picks the least busy copy of a model, retries, and sends the call on;
+- holds the route table: each model the app knows (Admin → Models, other GPU
+  servers), where each copy of it is answered, and its price;
+- admits each request: the key (unknown, blocked, expired, API access off), the
+  models it may call, its rate limits (counted in the database, so they hold
+  across replicas), its budget and the person's credit, the safeguards, and
+  room in the engine for a model that is not loaded;
+- picks the least busy copy of a model by its weight, retries one that fails
+  before the first byte reaches the caller, passes over a copy that is down,
+  then asks the model's fallback;
 - turns Anthropic's messages and OpenAI's Responses into the chat
-  completions the engines speak;
-- writes its own request log, which the app copies into its ledger.
+  completions the engines speak, and the answer back;
+- books every request in the app's ledger (`gateway.requests`) as it ends:
+  tokens, cost, time to the first token, the copy that answered.
 
-The app's own gateway is replacing it step by step
-([design/own-gateway.md](design/own-gateway.md)). Done so far: the app keeps
-its own ledger of every model request, the usage pages and dashboards read
-it, and the app makes and keeps the API keys. Next come the app's own calls,
-then API keys' requests, the media, the model list and the other protocols.
-LiteLLM leaves the stack last. Until then some things are kept in both
-places (the keys, the request log), and this page says which part does what
-today.
+LiteLLM was the gateway before 8.0. An upgrade from 7.x brings its people's
+keys and its request log into the app's tables once, at the first start
+(`LedgerImport`), and the installer then drops its database; the backup taken
+before the upgrade still holds it.
 
 ## 2. Hostnames and paths
 
 `DOMAIN` in `.env` names three addresses. Traefik sends each where this table
 says. Nothing else is published: Prometheus, Alertmanager, Loki, the
-exporters, LiteLLM and the engines are reached only inside the stack, and the
+exporters and the engines are reached only inside the stack, and the
 app shows their data to admins.
 
 | address | goes to | what |
@@ -119,24 +119,19 @@ app shows their data to admins.
 | `https://gateway.DOMAIN`, every path | `app:8080` | the model API for API keys (OpenAI and Anthropic protocols) |
 | `https://code-intel.DOMAIN` | `code-intel:7700` | Farzan Graph's MCP (`/mcp`) for coding agents |
 
-`gateway.DOMAIN` goes to the app alone, never straight to LiteLLM. While the
-app is down, it is down too. The app answers these paths there (each also
+`gateway.DOMAIN` goes to the app alone, never straight to an engine. While
+the app is down, it is down too. The app answers these paths there (each also
 without `/v1`):
 
 | paths | what the app does | then |
 |---|---|---|
-| `/v1/chat/completions` | the key's line, the answer cache (when on), the prompt log, the model's line with the chat's answers, the session's engine slot | LiteLLM, with the caller's key |
-| `/v1/messages`, `/v1/responses`, `/v1/completions` | the key's line; not cached | LiteLLM, which translates Anthropic's and the Responses protocol |
-| `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations` | the person's voice and language; the picture credit, the picture model loaded first | LiteLLM, with the caller's key |
-| `/v1/models`, `/v1/models/{id}`, `/v1/model/info`, `/v1/embeddings`, `/v1/moderations`, `/v1/rerank`, `/v2/rerank`, `/v1/messages/count_tokens`, `/v1/audio/translations`, `/v1/images/edits`, `/v1/images/variations` | passed on as they came | LiteLLM, with the caller's key |
-| anything else | the app's other paths answer here too: those it answers on `DOMAIN` (`/api`, `/connect`, `/.well-known`, `/scim`, `/mcp`), and `/healthz`, `/readyz` and `/internal`, which `DOMAIN` sends to the web. Every other path is a plain 404, so LiteLLM's management API and admin pages are not found | |
-
-The app's one `/internal` path is LiteLLM's guardrail callback,
-`/internal/guardrail/beta/litellm_basic_guardrail_api`: LiteLLM is given
-`http://app:8080/internal/guardrail` and adds the rest (`/internal/guardrail`
-itself is a plain 404). The callback answers only to the master key
-(`GATEWAY_KEY`). Inside the stack it is reached at `app:8080`. From outside, `gateway.DOMAIN`
-reaches it too, because it sends every path to the app (`DOMAIN` does not).
+| `/v1/chat/completions` | the key's line, the answer cache (when on), the prompt log, the model's line with the chat's answers, the session's engine slot | the model's engine or GPU server |
+| `/v1/messages`, `/v1/responses`, `/v1/completions` | the key's line; Anthropic's messages and the Responses protocol turned into a chat completion and back; not cached | the model's engine or GPU server |
+| `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/images/generations` | the person's voice and language; the picture credit, the picture model loaded first; booked per character, second and picture | the speech or picture server |
+| `/v1/models`, `/v1/models/{id}`, `/v1/model/info` | the models the key may call, and what each is (its window, its longest answer, its prices) | answered by the app |
+| `/v1/embeddings`, `/v1/messages/count_tokens` | the key's line; embeddings booked by their tokens; tokens counted by the engine's own tokenizer | the embeddings server; the engine |
+| `/v1/moderations`, `/v1/rerank`, `/v2/rerank`, `/v1/audio/translations`, `/v1/images/edits`, `/v1/images/variations` | no server here serves them | a 404 `model_not_found` that says so |
+| anything else | the app's other paths answer here too: those it answers on `DOMAIN` (`/api`, `/connect`, `/.well-known`, `/scim`, `/mcp`), and `/healthz` and `/readyz`. Every other path is a plain 404 | |
 
 The default models have no internal path. An admin starts their download in
 Admin → Models → Default models. The installer's `--default-models download`
@@ -154,7 +149,7 @@ certificate.
 
 ## 3. Features
 
-The core always runs: `traefik`, `web`, `app`, `postgres` and `litellm`.
+The core always runs: `traefik`, `web`, `app` (with its model gateway) and `postgres`.
 Everything else is a feature, listed in `deploy/features` with the services it
 runs, whether a new installation has it on, what the host needs for it and the
 features it requires.
@@ -196,7 +191,7 @@ features it requires.
 | `monitoring` | yes | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `cpu-temp-exporter` | dashboards, logs and alerts |
 | `gpu-monitoring`, `dcgm` | yes, no | `gpu-exporter`, `dcgm-exporter` | the GPUs' metrics; data-centre GPU detail on bare metal |
 | `power-limits` | yes | `power-limits` | GPU and CPU power caps kept applied |
-| `ha` | no | `valkey` | the store for the shared counts of LiteLLM's replicas under `ha.yml`, and for LMCache when `LMCACHE_REMOTE` names it |
+| `valkey` | no | `valkey` | LMCache's shared store for the vLLM models' token cache, when `LMCACHE_REMOTE` names it |
 | `meetings`, `lab`, `apps`, `data`, `decks`, `media`, `agents`, `code-studio` | yes | nothing: parts of the app | meetings, the science lab, apps, ask your data, decks, the media studio, Agent Studio, Code Studio |
 
 `--cpu-only` turns the GPU features off. Farzan Graph cannot start without a GitLab.
@@ -209,7 +204,6 @@ on later, put `GITLAB_URL` and `GITLAB_TOKEN` in `.env` and run
 | file | what it changes |
 |---|---|
 | `scale.yml` | the app as `APP_REPLICAS` replicas ([section 9](#9-several-app-replicas)) |
-| `ha.yml` | Valkey on, and LiteLLM as `LITELLM_REPLICAS` replicas sharing their counts in it |
 | `podman.yml` | rootless Podman: GPUs through CDI, Promtail on the Podman socket, no power limits |
 | `rocm.yml` | AMD GPUs (`/dev/kfd`, `/dev/dri`): llama.cpp's and SGLang's ROCm images, stable-diffusion.cpp's Vulkan image for the picture and video servers, and vLLM's own ROCm image in `VLLM_ROCM_IMAGE` (snapshots only); the app's backend set to `rocm`; no `nvidia-smi` exporter |
 | `fake-gpu.yml` | the real supervisor and launchers of vLLM, SGLang, LMDeploy and Strata over a fake engine, with no GPU |
@@ -358,7 +352,7 @@ One issuer, the app. More in [authentication.md](authentication.md).
 
 - **The app makes every person's key**: `sk-` and 32 random bytes, shown
   once, kept as its SHA-256 in `gateway.api_keys` in the app's database. (The
-  chat's own key is made by LiteLLM and kept encrypted in the app's settings.)
+  app's own calls carry no key: the gateway takes them from the app itself.)
   A person's main key (`app-USERNAME`) is made with them, and for someone with
   none who arrives through LDAP, company sign-in or SCIM, or whom SCIM turns
   back on. It is made again when it is rotated, and when their API access is
@@ -367,26 +361,18 @@ One issuer, the app. More in [authentication.md](authentication.md).
   from Account → API keys, each with its own limits (requests and tokens a
   minute, at once) and, if wanted, a 30-day budget. Each Code Studio
   workspace gets a key of its own.
-- **Mirrored to LiteLLM** while LiteLLM still answers: the app writes the row
-  first, then registers the same secret at LiteLLM with the models the key may
-  use, how many at once and its rate limits, and takes the row out if
-  LiteLLM refuses. Revoking deletes it at LiteLLM, then the row. The leader
-  pushes access, rate limits and blocks (disabled people, API access off) to
-  LiteLLM when they change and every 10 minutes. The ledger's import brings
-  over any person's key LiteLLM holds that the app does not.
 - **Whose key is it?** `KeyBook` is the one answer, for every part that takes
   a key: the key's line, the answer cache, Arena MCP, Code Arena's sync,
   speech, and Farzan Graph's key check. It reads `gateway.api_keys` with the
   person's state, believes an answer for 10 seconds, and forgets it on every
   replica when a key changes.
-- **On each call LiteLLM still checks** the key (unknown, blocked, expired),
-  the model, the rate limits it counts, and an own key's budget. Then it asks
-  the app's guardrail: a disabled person or API access off is refused, then
-  the credit of the request's kind, then the safeguards (which may mask
-  texts), then room in the engine. People's and groups' credit is the app's,
-  not LiteLLM's.
-- **Not moved yet**: the key lists on Account → API keys and Admin → People
-  still read LiteLLM's, for its spend and block state.
+- **On each call the gateway checks**, in order: the key (unknown, blocked,
+  expired), a disabled person or API access off, the model (the key's and the
+  person's), the rate limits (the tighter of the person's and the key's own,
+  counted a minute at a time in `gateway.rate_windows`, so every replica counts
+  the same), the key's budget and the credit of the request's kind, the
+  safeguards (which may mask texts), then room in the engine. People's and
+  groups' credit reads the ledger.
 
 ### Farzan Graph's key check
 
@@ -404,12 +390,10 @@ Farzan Graph for up to 5 minutes.
 
 | credential | held by | used for |
 |---|---|---|
-| `GATEWAY_KEY` | the app, LiteLLM (its master key) | the app's management calls to LiteLLM (models, keys, blocks); LiteLLM's guardrail calls to the app |
-| the chat key | the app (made at LiteLLM on the first model call that needs it, and again if LiteLLM loses it; kept encrypted in its settings) | the app's own model calls; the guardrail lets them pass |
-| `ENGINE_KEY` | the app, LiteLLM, `llamacpp`, `vllm`, `sglang`, Prometheus | the engines' API |
+| `ENGINE_KEY` | the app (its model gateway), `llamacpp`, `vllm`, `sglang`, Prometheus | the engines' API |
 | `CODE_INTEL_KEY` | the app, Farzan Graph, Prometheus | the chat's calls to Farzan Graph (naming the person), the app's admin calls, Farzan Graph's key and repository checks, Farzan Graph's metrics |
 | `WORKSPACES_KEY` | the app, `workspaces` | starting and stopping workspaces; each workspace's engine has a key of its own, kept encrypted |
-| `DB_PASSWORD` | the app, LiteLLM, Postgres | the databases |
+| `DB_PASSWORD` | the app, Postgres | the database |
 | `APP_KEY` | the app | the key ring is encrypted under it, so it never changes |
 | `ADMIN_PASSWORD` | the app | the first admin, made only while there are no people |
 
@@ -428,12 +412,10 @@ of their own, and the whole chat may have one. A free place goes by the
 group's priority, then to whoever has the fewest answers running, then to
 whoever was served longest ago.
 
-The app then streams from LiteLLM directly (`http://litellm:4000`), not
-through its own `/v1` paths. It sends the chat's own key and names the person
-(`user` and `X-LLM-User-Email`), so the spend is theirs. LiteLLM's guardrail
-lets the chat key's requests pass, because the app checked them, and LiteLLM
-sends the call to the engine. The app streams the answer back, runs the tools,
-and keeps every message.
+The app then sends the turn through its own gateway (`ModelGateway`), not
+through its `/v1` paths: straight to the engine, booked in the ledger for the
+person, the chat and its project, so the spend is theirs. The app streams the
+answer back, runs the tools, and keeps every message.
 
 - **The engine slot.** Each turn goes to the llama.cpp slot that holds its
   conversation's start (`SlotTable`, sent as `id_slot`), so the engine reads
@@ -458,11 +440,11 @@ and keeps every message.
   made, so its first bytes alone sent every conversation begun in the same
   minute to one copy). The model's own
   fallback, when it has one, answers if that copy cannot. Side requests go to
-  the model's name, and LiteLLM picks the least busy copy.
-- **When it goes wrong**: a refused chat key is made again; a model still
-  loading is waited for, 5 seconds at a time, up to two minutes; a model
-  LiteLLM does not know makes the app register its models again and try once
-  more. A gateway that cannot be reached is tried again for 30 seconds.
+  the model's name, and the gateway picks the least busy copy.
+- **When it goes wrong**: a model still loading is waited for, 5 seconds at a
+  time, up to two minutes. A copy that fails before its first byte is tried
+  again on another copy, then the model's fallback; a copy
+  that is down is passed over for 10 seconds.
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an
 MP3 of a sound, and a video's frames and sound track. A model that hears gets
@@ -470,8 +452,8 @@ the sound (an `input_audio` part); one that does not gets a transcript from
 the gateway's speech to text, made once. Frames go as pictures to a model that
 sees.
 
-**The chat's tools.** Pictures, speech and transcripts go through LiteLLM
-with the chat key. Video goes straight to `videogen`, and its cost is booked
+**The chat's tools.** Pictures, speech and transcripts go through the app's
+gateway, booked for the person. Video goes straight to `videogen`, and its cost is booked
 into the ledger by the app. Python runs in `sandbox`, 3D in `blender`, proofs
 in `lean`, each job handed over through its volume, each run its own user with
 nothing left behind. The browser agent drives Chromium over DevTools
@@ -505,16 +487,22 @@ or `x-api-key` from Anthropic's clients) → app. For `/v1/chat/completions`:
 5. **The engine slot.** The agent's session (its key, model and first
    messages) goes back to the slot that holds its start. A model that cannot
    be made ready answers 503 `model_not_ready`.
-6. **On to LiteLLM** with the caller's own key, which checks it and asks the
-   guardrail. For an agent's session, step 5 already chose where it goes: one
-   copy of a model with several (`NAME@i`), or the model's fallback when the
-   model cannot answer. LiteLLM picks the copy for any other request. The
-   answer streams back piece by piece.
-   A LiteLLM that cannot be reached gives 502 `gateway_unreachable`.
+6. **Admission** (section 6): the key, the model, the rate limits, the budget
+   and the credit, the safeguards, room in the engine. A refusal answers in
+   the caller's protocol (OpenAI's or Anthropic's error shape) and is booked
+   as refused.
+7. **On to the engine.** For an agent's session, step 5 already chose where
+   it goes: one copy of a model with several (`NAME@i`), or the model's
+   fallback when the model cannot answer. The gateway picks the copy for any
+   other request. The answer streams back piece by piece, and the request is
+   booked in the ledger as it ends. A model none of whose copies answers gives
+   502 `gateway_unreachable`.
 
-`/v1/messages`, `/v1/responses` and `/v1/completions` take only step 3, then
-go on to LiteLLM. Claude Code, Codex and Code Arena's editor completion use
-them. The other model paths are passed on as they came (section 2).
+`/v1/messages`, `/v1/responses` and `/v1/completions` take the same steps but
+the answer cache: Anthropic's messages and the Responses API become one chat
+completion and their answer is given back in their own shape. Claude Code,
+Codex and Code Arena's editor completion use them. The other model paths are
+answered by the app (section 2).
 
 ### Speech and pictures by API key
 
@@ -523,8 +511,8 @@ The app takes `/v1/audio/speech`, `/v1/audio/transcriptions` and
 key's person's voice, model and speed. Speech to text that names no language
 gets the language they speak ([chat.md](chat.md#your-voice)). A picture from
 this stack's own model checks the person's picture credit, holds the GPU and
-loads the model first. Each then goes on to LiteLLM with the same key, the
-sound streamed through.
+loads the model first. Each is admitted as any request, sent to its server and
+booked per character, second heard or picture.
 
 ### Arena MCP
 
@@ -532,7 +520,7 @@ sound streamed through.
 server: a person's chat tools for their own agent, signed in with their API
 key through `KeyBook`. `/.well-known/mcp` is its discovery. Its model tools
 (pictures, speech, video, research) do not use the person's key: pictures,
-speech and research call the models with the chat key, and video goes
+speech and research call the models as the app's own calls, and video goes
 straight to `videogen`. So the app counts each such call against the
 person's requests a minute itself ([mcp.md](mcp.md)).
 
@@ -588,35 +576,32 @@ tables the person may ask.
 
 ### The ledger of every model request
 
-`gateway.requests`, in the app's database, holds the model requests LiteLLM
-logged (done, failed, or refused by LiteLLM or the guardrail, with the
-reason) and the media the app makes itself. Requests the app answers or
-refuses before LiteLLM (answer cache hits, the key's and the model's lines, a
-model not ready, a gateway not reached) are not in it yet, and no row is
-stopped or cached yet. Each row names the surface (chat, app, api, studio,
-media), the protocol, the kind of credit, the person, the key's hash, the
-model, where it was answered (`llamacpp`, a vLLM copy, a remote server,
-`imagegen`), the tokens, the time and the cost. It has a column for the
-fallback that answered, which nothing fills yet.
+`gateway.requests`, in the app's database, holds every model request the
+gateway sent on or refused (done, failed, stopped by the caller or an admin,
+refused with the reason) and the media the app makes itself. Answer cache hits
+are in the prompt log, not here: no model answered them. Each row names the
+surface (chat, app, api, studio, media), the protocol, the kind of credit, the
+person, the key's hash, the model, where it was answered (`llamacpp`, a vLLM
+copy, a remote server, `imagegen`), the fallback it came from and the tries it
+took, the tokens, the time to the first token, the time and the cost.
 
-- **Written** today by the ledger's import, on the leader: every 5 seconds it
-  copies LiteLLM's new log rows (each once, by LiteLLM's id) and tells
-  refusals from failures; at first it brings over all LiteLLM keeps. Media the
-  app makes without the gateway (video clips, the media studio's pictures,
-  the studio server's speech and music) is booked by the app into both
-  LiteLLM's log and the ledger.
+- **Written** by the gateway as each request ends, a second's worth at a time
+, and at once by the app for the media it makes without
+  the gateway (video clips, the media studio's pictures, the studio server's
+  speech and music). An upgrade from before 8.0 brought LiteLLM's log in once
+  (`LedgerImport`, each row by its id).
 - **Read** by credit (the month's spend by person and kind), the usage pages
   (a person's, a group's, chargeback by month), the prompt list's API part,
   rate limits' "used this minute", the storage page, and the dashboards.
 - **The dashboards** read it through the datasource `gateway-db`: the app's
   database, as a read-only role that may read only the schema `gateway`, with
-  a time limit and a row cap. One panel ("Which key belongs to whom") still
-  reads LiteLLM's keys through the old `litellm-db` datasource.
-- **Kept** for `Retention:GatewayLogDays`, LiteLLM's log too. Erasing a person
-  clears their name from both. Repricing changes both.
-- `gateway.rate_windows` and the views `gateway.key_owners` and
-  `gateway.month_spend` are there for the steps to come. Rate limits are still
-  counted by LiteLLM.
+  a time limit and a row cap.
+- **Kept** for `Retention:GatewayLogDays`. Erasing a person clears their name
+  from it; repricing changes it.
+- `gateway.rate_windows` counts each key's and person's requests and tokens a
+  minute, for the rate limits every replica shares; the views
+  `gateway.key_owners` and `gateway.month_spend` are what the dashboards read
+  of keys and credit.
 
 ### Metrics and logs
 
@@ -647,9 +632,8 @@ installer prepares the host.
 | who | prepares |
 |---|---|
 | the installer | `.env` with its secrets; `DATA_DIR`'s folders with their owners; the first `docker-compose.override.yml`; the certificate (`make-cert.sh`); Code Arena's signature (`sign-code-arena.sh`); the images of the features that are on, loaded into Docker or Podman. On an upgrade, a backup first, and a rollback if it fails |
-| `postgres` | the gateway's database (`POSTGRES_DB`, `litellm`) |
-| `litellm` | its tables: about 160 migrations on a first start, a minute or more. The app's first chat waits up to 90 seconds for it |
-| `app` | its own database (`llmapp`) and its migrations, one replica at a time; the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; the directory Farzan Graph reads; the OIDC clients; the chat key; the engines' presets and desired state; the media servers' on and off; Prometheus's targets; the models registered at LiteLLM; the keys at LiteLLM; the downloads, when asked (`DEFAULT_MODELS=download`, or an admin), and `MODEL` added once its files are in the library |
+| `postgres` | the app's database (`POSTGRES_DB`, `llmapp`), empty |
+| `app` | its own database (`llmapp`) and its migrations, one replica at a time; the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; the directory Farzan Graph reads; the OIDC clients; the engines' presets and desired state; the media servers' on and off; Prometheus's targets; the gateway's routes (each model's copies and prices); on an upgrade from before 8.0, LiteLLM's keys and log brought over once; the downloads, when asked (`DEFAULT_MODELS=download`, or an admin), and `MODEL` added once its files are in the library |
 | `llamacpp` | nothing: `router.sh` waits for the app's model list, starts llama-server in router mode, restarts it when the list changes or an admin asks, and prunes old caches |
 | `vllm`, `sglang` | nothing: the supervisor follows the app's desired state, and writes what it sees of the GPUs |
 | `imagegen`, `videogen`, `embed` | nothing: they wait for their files (`sd-serve.sh` also follows the app's on and off) |
@@ -667,9 +651,9 @@ or the Helm chart's `app.replicas`). What must happen once runs on one of them:
 - **The lead.** Each replica holds a Postgres connection of its own, outside
   any pool, and tries for an advisory lock on it every 5 seconds. The one
   holding it leads. It runs the scheduled tasks' clock, the engine watcher
-  (the models kept loaded, the presets, the models at LiteLLM, Prometheus's
+  (the models kept loaded, the presets, the gateway's routes, Prometheus's
   targets), the media servers' on and off, the downloads, the first model,
-  the key access sync to LiteLLM, the ledger's import, the LDAP sync,
+  the ledger's import once after an upgrade from before 8.0, the LDAP sync,
   Farzan Graph's schedule, the storage watch, the alerts for the bell, the chat
   digests, meeting reminders, the memory's upkeep, idle Code Studio
   workspaces, and the answers queued before a restart. A replica that stops
@@ -701,8 +685,8 @@ or the Helm chart's `app.replicas`). What must happen once runs on one of them:
   keys, settings, chats, task claims, the keys and the ledger. **Per replica**:
   the sign-in throttle, the chat's model list (a minute), `KeyBook`'s answers
   (10 seconds), and the key's line, so a key's at-once limit holds on each
-  replica. API keys' rate limits are counted by LiteLLM: once for every app
-  replica while one LiteLLM runs; with several (`ha.yml`), shared in Valkey.
+  replica. API keys' rate limits are counted in the database
+  (`gateway.rate_windows`): one count for every replica.
 - **Settings → Replicas**: **Replicas work together** off is for one replica
   behind a pooler with no sessions: it always leads and hears no other. A
   transaction pooler breaks the lead and the signals. How often the lead is
@@ -721,11 +705,11 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 ([deployment.md](deployment.md#helm)).
 
 - **The way in** is an Ingress instead of Traefik, with the same three names:
-  `gateway.DOMAIN` goes to the app, never to LiteLLM, and the sticky cookie
+  `gateway.DOMAIN` goes to the app, never straight to an engine, and the sticky cookie
   keeps a browser on one app replica.
 - **Features**: each service's `enabled` in `values.yaml` stands for its
   feature, and `app.features` lists the app's own.
-- **Availability**: the app (2 replicas by default), the web and LiteLLM can
+- **Availability**: the app (2 replicas by default, its gateway with it) and the web can
   spread over nodes, roll one at a time, and have a disruption budget and an
   autoscaler each. Their shared volumes (the model library, `engine`, the
   sandboxes', the status folders) must be ReadWriteMany across nodes.
@@ -747,9 +731,9 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 |---|---|
 | every address fails | Traefik is down, or its routes file does not parse (`docker compose logs traefik`) |
 | the web loads, but sign-in and `gateway.DOMAIN` fail | the app is down: nothing else answers for them |
-| a request the app had already passed on is refused while the app restarts | LiteLLM's guardrail fails closed when it cannot ask the app. New requests to `gateway.DOMAIN` fail until the app is back: only the app is behind it |
-| an API call answers 502 `gateway_unreachable`, or the chat says the gateway is unreachable | LiteLLM is starting (its migrations) or down |
-| an API call answers 429 after a long wait | it waited too long for its turn: in the key's line (its places at once were taken for 10 minutes) or in the model's line. A 429 at once is LiteLLM's rate limit |
+| a request cut short while an app replica restarts | the replica that held it stopped: its stream ends, and the ledger books it as stopped. New requests go to the other replicas; with one replica, `gateway.DOMAIN` fails until the app is back |
+| an API call answers 502 `gateway_unreachable`, or the chat says the gateway is unreachable | no copy of the model answered, nor its fallback: its engine or GPU server is down or still starting (Admin → Overview → Model gateway shows each route's health) |
+| an API call answers 429 after a long wait | it waited too long for its turn: in the key's line (its places at once were taken for 10 minutes) or in the model's line. A 429 at once is the rate limit of the person or the key, with `Retry-After` |
 | 503 `service_busy` | the line of waiting requests is as long as `Chat:QueueLength` allows: try again in a while. The line holds every model's chat answers and API requests together, each replica its share; it has no limit unless an admin sets one |
 | 403 `removed_by_admin`, or "Stopped by an admin: …" | an admin took the request out of the line or stopped it (Admin → Line); the message has their reason, and the audit log has `line.remove` or `line.stop` |
 | 503 `model_not_ready`, or "… is not loaded right now" | the model could not be loaded: the engine is full and no model is idle, or it failed to load and waits to try again (Admin → Models) |

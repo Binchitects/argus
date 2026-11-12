@@ -176,7 +176,7 @@ needs no cloud key and exercises both halves at once:
 ```bash
 qwen --auth-type openai \
      --openai-base-url https://gateway.<domain>/v1 \
-     --openai-api-key "$LITELLM_MASTER_KEY" \
+     --openai-api-key "$LLM_SERVICE_API_KEY" \
      -m "$MODEL_NAME" --approval-mode yolo "<task>"
 ```
 

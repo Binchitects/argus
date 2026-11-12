@@ -2840,7 +2840,7 @@ A long session never gets stuck on the window:
 - **A request that would not fit is compacted first**, whatever the
   threshold (and with it off): "Compacting: the next request (~N tokens) would
   not fit the window (M) with room for the answer."
-- **A request the window refuses** (the engine's or LiteLLM's "exceeds the
+- **A request the window refuses** (the engine's "exceeds the
   context size", `ContextWindowExceededError`, "maximum context length") is
   compacted at once and asked again, once. If it still does not fit, the turn
   ends with that, and the message is taken out of the conversation so it does
@@ -3652,8 +3652,8 @@ message is sent as usual. Once the engine's reading speed is measured (the
 time to the first word of answers whose prompt it had not cached), a request
 with much it has not cached says first about how long the answer may take to
 start, and waits half as long again as that before giving up (an hour at
-most). The gateway waits 16 minutes (`timeout` and `stream_timeout` in
-`config/litellm.yaml`), so Code Arena, not the gateway, gives up on a long
+most). The gateway waits 16 minutes for the first byte and between bytes
+(`Gateway:FirstByteTimeout` and `Gateway:IdleTimeout`), so Code Arena, not the gateway, gives up on a long
 prompt being read within its first 15 minutes. Its window is the model's at
 the gateway: what one of the engine's slots holds (Admin → Models, "65,536 a
 conversation"), so it compacts before a slot overflows. When

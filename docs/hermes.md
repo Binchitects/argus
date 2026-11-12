@@ -22,10 +22,9 @@ model:
   context_length: 131072          # see "How much context you can have" below
 ```
 
-**Use your own key, not `GATEWAY_KEY`.** The master key is a superuser
-credential with no budget: usage through it is attributed to nobody and
-bounded by nothing, which quietly defeats the per-person accounting the whole
-gateway exists for. Mint yours with:
+**Use your own key.** The gateway knows no other: each request is checked
+against your access, limits and credit, and its usage is yours, which is the
+per-person accounting the whole gateway exists for. Mint yours with:
 
 ```bash
 # create the person under Admin → People: it shows their key once
@@ -144,8 +143,8 @@ error names a limit no live component has.**
 
 Two fixes, and both belong in place:
 
-* The gateway now **advertises** the window (`model_info.max_input_tokens` in
-  `config/litellm/config.yaml`). That is what stops any client — Hermes,
+* The gateway now **advertises** the window (`max_input_tokens` in
+  `/v1/model/info`, from each model's context in Admin → Models). That is what stops any client — Hermes,
   the chat, an SDK — from having to guess and then cache the guess.
 * `model.context_length: 131072` in Hermes' own config, as belt and braces.
 
@@ -187,8 +186,8 @@ Error: Extra data: line 1 column 73 (char 72)
 Arguments: {"pattern": "*.c", ...}{"pattern": "*.inf", ...}
 ```
 
-Two tool calls, concatenated into one arguments string. LiteLLM cannot parse
-it, so it **drops the call**. Hermes sees no result and retries — re-prefilling
+Two tool calls, concatenated into one arguments string. The gateway of the
+time (LiteLLM, before 8.0) could not parse it, so it **dropped the call**. Hermes sees no result and retries — re-prefilling
 the entire conversation every time.
 
 It was a **streaming** bug in a gateway transform, not in any engine. Measured
@@ -204,9 +203,8 @@ The transform emitted every parallel tool call under the same `index`, so the
 client glued their arguments together. `parallel_tool_calls: false` and
 `tool_choice: required` do **not** help — the model still emits two.
 
-**The fix is the route.** `config/litellm/config.yaml` speaks plain
-`openai/...` to the engine's own OpenAI-compatible endpoint, bypassing any
-native-protocol transform. `./arenactl check clients` asserts a tool call's
+**The fix is the route.** The gateway sends a chat completion to the engine's
+own OpenAI-compatible endpoint as it came, with no native-protocol transform. `./arenactl check clients` asserts a tool call's
 arguments still parse, through the gateway, on whichever engine is running.
 
 **A second, unrelated time sink worth knowing.** Feeding a preprocessed C file

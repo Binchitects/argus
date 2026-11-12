@@ -11,7 +11,7 @@ company are in **bold**: each is one [Company] turns on and answers for.
 ```
  browser ──TLS 1.2+──▶ traefik ──▶ web / app ──▶ postgres (people, chats, files sealed, audit log)
                                     │   │  └───▶ audit volume (the chain's daily anchors)
-                                    │   ├──────▶ litellm (the gateway) ──▶ llamacpp / vllm, imagegen,
+                                    │   ├──────▶ the app's gateway ──────▶ llamacpp / vllm, imagegen,
                                     │   │                                  videogen, audio (the company's models)
                                     │   ├──────▶ embed (passages to vectors)
                                     │   ├──────▶ sandbox (no network: code, ffmpeg)

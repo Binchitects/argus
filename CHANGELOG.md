@@ -41,19 +41,22 @@ owl for the wise one, and Code Arena installed as an application everywhere.
   uninstaller and "Open in Code Arena" on folders on Windows, Code Arena.app
   on macOS, a desktop entry offered for folders on Linux.
   `code-arena uninstall` takes it off.
-- **The app's own model gateway** (Settings → API keys → Model gateway:
-  litellm, chat or own). With own, the app answers what LiteLLM answered:
-  API keys' chat completions, Anthropic's Messages API (Claude Code), OpenAI's
-  Responses API (Codex), the legacy completions, pictures, speech and
-  transcriptions, the model list and info, embeddings; with its own key checks
-  and per-minute limits shared by every replica, a pool balanced by what each
-  copy is busy with, fallbacks, a ledger row for every request (refusals
-  too), metrics and alert rules, and the Overview's health. **own is the
-  default**, an upgrade from 7.x too: measured against LiteLLM
-  (`deploy/scripts/gateway-compare.py`, docs/measurements/gateway.md) it adds
-  6 ms at p95 over the engine against LiteLLM's 17, moves the same tokens a
-  second, books every answer and uses half the CPU. LiteLLM is still deployed:
-  set litellm to go back.
+- **The app is the model gateway; LiteLLM is gone.** The app answers what
+  LiteLLM answered: API keys' chat completions, Anthropic's Messages API
+  (Claude Code), OpenAI's Responses API (Codex), the legacy completions,
+  pictures, speech and transcriptions, the model list and info, embeddings;
+  with its own key checks and per-minute limits shared by every replica, a
+  pool balanced by what each copy is busy with, a copy that fails passed over
+  for the next, fallbacks, a wait for an answer to start and a pause in it
+  that are each held (Settings → API keys), a ledger row for every request
+  (refusals too), metrics and alert rules, and the Overview's health.
+  Measured against LiteLLM (docs/measurements/gateway.md) it adds 6 ms at p95
+  over the engine against LiteLLM's 17, moves the same tokens a second, books
+  every answer and uses half the CPU. An upgrade from 7.x brings LiteLLM's
+  people's keys and its whole request log into the app's tables once, so
+  every key, Code Arena and Code Studio workspace keeps working and the
+  month's credit carries on; the installer then drops LiteLLM's database (the
+  backup before the upgrade holds it).
 - **Chats in step as it happens**: every change to a chat reaches its
   owner's pages and Code Arenas at once, on every replica.
 - **Code Arena without signing in**: with a provider of your own, or as an
@@ -155,6 +158,15 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 ### :boom: Breaking changes & Deprecations
 
+- No LiteLLM: its service, image, `config/litellm.yaml`, `config/arena_limits.py`,
+  `deploy/ha.yml` and `LITELLM_REPLICAS` are gone, and so are `GATEWAY_KEY`
+  (an upgraded `.env` keeps it, named as not read, for a rollback), the Helm
+  chart's `litellm` values, `images.litellm` and `secrets.gatewayKey`, and the
+  settings `Gateway:Mode` and `Chat:RequestTimeout` (`Gateway:FirstByteTimeout`
+  and `Gateway:IdleTimeout` instead, 16 minutes each). The stack's Postgres
+  makes the app's database (`POSTGRES_DB=llmapp`). The feature `ha` is
+  `valkey`, LMCache's shared store only (an upgrade renames it). An external
+  Postgres needs no `litellm` database.
 - Inside names: the service, container, image, feature and data folder are
   `code-intel`; its environment `CODE_INTEL_*` (`CODE_INTEL_KEY`,
   `CODE_INTEL_PACK_LIBRARY_DIR`); the app's settings section `CodeIntel`;

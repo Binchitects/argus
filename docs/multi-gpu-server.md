@@ -25,12 +25,12 @@
    - The app drives vLLM the way it drives llama.cpp and the media servers: it writes a desired-state file, and a supervisor script reconciles it. That keeps the rule of no Docker socket.
 4. **KV cache.** Start with vLLM's built-in prefix caching plus its in-tree CPU `OffloadingConnector`.
    - Add **LMCache** (CPU plus local NVMe, later Redis/Valkey) only when you need a warm cache that survives engine restarts, or sharing across replicas or servers.
-   - Cache-aware routing only matters once a model has two or more replicas. On one box, the app routes by conversation affinity. On Kubernetes across servers, use **llm-d** (or the vLLM production-stack router). I don't recommend Dynamo here: it duplicates LiteLLM plus the app.
+   - Cache-aware routing only matters once a model has two or more replicas. On one box, the app routes by conversation affinity. On Kubernetes across servers, use **llm-d** (or the vLLM production-stack router). I don't recommend Dynamo here: it duplicates the app and its gateway.
 5. **Durability.**
-   - Run LiteLLM as several replicas with Redis/Valkey for shared router state.
+   - The app's gateway runs with the app's replicas, its shared state (rate counts, the ledger) in Postgres.
    - Postgres gets WAL archiving and point-in-time recovery (PITR): pgBackRest on compose, CloudNativePG on Kubernetes.
    - The app's fair queue extends to API keys, with vLLM priority scheduling behind it.
-   - Engine drains are graceful, and LiteLLM falls back to a smaller model while the big one restarts.
+   - Engine drains are graceful, and the gateway falls back to a smaller model while the big one restarts.
    - DCGM and vLLM metrics feed the existing Prometheus.
    - Load tests run in CI against a fake vLLM.
 
@@ -86,7 +86,7 @@
   - At least 4 × 7.68 TB Gen5: about 4 TB for the model library (several 150–300 GB checkpoints), 2–4 TB for the LMCache disk tier.
   - Put Postgres on its own mirrored pair.
   - Add a separate disk or NAS for backups and WAL.
-- **CPU.** At least 32–64 cores (EPYC 9004/9005 or Xeon 6). That covers tokenisation and detokenisation, LiteLLM, the app, Postgres and the CPU embedder, plus enough PCIe lanes: 4 × x16 GPUs plus NVMe.
+- **CPU.** At least 32–64 cores (EPYC 9004/9005 or Xeon 6). That covers tokenisation and detokenisation, the app and its gateway, Postgres and the CPU embedder, plus enough PCIe lanes: 4 × x16 GPUs plus NVMe.
 
 ---
 
@@ -171,7 +171,7 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
   - **Sleep/wake** uses vLLM's sleep mode (`--enable-sleep-mode`, the `/sleep` and `/wake_up` dev endpoints). Weights move to CPU RAM and come back in seconds. That is how `GpuShare` lends memory without losing a several-minute reload.
   - Verify sleep mode with TP on sm_120 during bring-up; if it fails, fall back to unload.
 - **Health and metrics** come from each process's `/health`, `/v1/models` and `/metrics`. The app adds each port to Prometheus `file_sd`, as it already does for `engine-sd/targets.json`.
-- **Gateway:** `ModelCatalog` registers the model with LiteLLM as `api_base: http://vllm:<port>/v1`. `max_parallel_requests` equals `--max-num-seqs`, shared among replicas as today.
+- **Gateway:** the app's gateway routes the model to `http://vllm:<port>/v1`, at most `--max-num-seqs` at once, shared among replicas as today.
 
 ### 3.3 Generalising the model code (file by file)
 - **`EngineOptions` / `EngineClient` (`Models/Engine.cs`)**
@@ -224,10 +224,10 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 | **vLLM `OffloadingConnector`** (in-tree) | GPU → pinned CPU RAM tier: `--kv-transfer-config '{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"block_size":64,"cpu_bytes_to_use":…}}'`. A multi-tier CPU plus filesystem mode is documented; v0.31 adds back-pressure detection. | **Step 1.** No extra package, version-locked with vLLM. 200–400 GB of RAM per big model holds millions of tokens, so returning conversations skip re-prefill. |
 | **LMCache** (`LMCacheConnectorV1`; latest v0.5.6 on 15 Oct, nightly 0.5.7.dev) | CPU plus local disk plus remote (Redis/Valkey, Mooncake, …) tiers; **survives engine restarts** (disk); **shares** KV across instances and servers; a controller for cache-aware routing (production-stack router) | **Step 2**, for: (a) a restart or upgrade without a cold cache, (b) two or more replicas of a model, (c) several servers. Cost: must be built against the exact vLLM/torch version, and sm_120 is unproven. Ship it as an option, not the default. |
 | SGLang HiCache | GPU → host → L3 (Mooncake, 3FS, NIXL, file) | Only if SGLang is adopted. |
-| NVIDIA Dynamo (v1.2 GA Jun 2026, later versions exist) | KV-aware router, KVBM, disaggregated prefill/decode, NATS+etcd | Overlaps the app plus LiteLLM. Disaggregation needs fast interconnects. **Not now.** |
+| NVIDIA Dynamo (v1.2 GA Jun 2026, later versions exist) | KV-aware router, KVBM, disaggregated prefill/decode, NATS+etcd | Overlaps the app and its gateway. Disaggregation needs fast interconnects. **Not now.** |
 | llm-d (CNCF Sandbox, 2026) | Kubernetes Gateway API inference scheduler with KV-event-aware scoring, for vLLM | **Pick this for multi-server Kubernetes.** |
 | vLLM production-stack router | Session- and prefix-aware routing; works with the LMCache controller | Alternative to llm-d on Kubernetes. |
-| LiteLLM routing | `least-busy` and similar; no KV awareness | Keep as the gateway. Let the app or llm-d choose replicas. |
+| The app's gateway | least busy by weight, a conversation kept on its copy; no KV awareness | Keep as the gateway. Let the app or llm-d choose replicas. |
 
 **How it plugs in**
 
@@ -239,13 +239,13 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
     - optional `remote_url: redis://valkey:6379`
   - That file is passed with `LMCACHE_CONFIG_FILE`, and `/kvcache` is a bind mount on the NVMe tier.
   - Routing: one replica per model, or for two TP=2 replicas the app pins conversations by **conversation-id affinity**.
-    - The two replicas register in LiteLLM under internal names `model@0` and `model@1`.
-    - The chat chooses the replica itself; API keys go to LiteLLM `least-busy` over the pool.
+    - The two replicas are routes of their own under internal names `model@0` and `model@1`.
+    - The chat chooses the replica itself; API keys go to the least busy of the pool.
     - This mirrors what `SlotTable` does for llama.cpp slots today.
 - **Helm / Kubernetes.**
   - An `lmcache` ConfigMap per model; `/kvcache` from a local PV (an NVMe hostPath via local-path provisioner).
   - Valkey as a StatefulSet. A KV cache is disposable, so no HA is needed for it.
-  - Across servers: llm-d's inference scheduler (or the production-stack router) in front of the per-node vLLM Services. LiteLLM points at that one endpoint per model.
+  - Across servers: llm-d's inference scheduler (or the production-stack router) in front of the per-node vLLM Services. The app's gateway points at that one endpoint per model.
 
 ---
 
@@ -258,11 +258,11 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
   - On replica death, the page shows "interrupted, retry", or the new leader re-issues the request (APC/LMCache makes the re-prefill cheap).
 - **Gap 2: PgBouncer must use session mode for the app.** It relies on advisory locks and LISTEN; transaction mode would break both.
 
-### 5.2 LiteLLM
-- Run 2–3 replicas behind Traefik.
-- Shared router state (least-busy counts, `max_parallel_requests`, rate and token limits) needs **Redis/Valkey** (`router_settings.redis_host`). Without it each replica counts alone and can overload a vLLM model.
-- Add `fallbacks` per model group: big model, then gpt-oss-120b, then Qwen3.8-27B. This covers engine restarts and failures.
-- Keep `fail_closed` on the guardrail.
+### 5.2 The model gateway
+- From 8.0 it is the app's own (`src/Llm.Api/Gateway`, [design/own-gateway.md](design/own-gateway.md)), so it runs as many replicas as the app, behind Traefik.
+- Its shared state is in Postgres: rate and token limits (`gateway.rate_windows`) and the ledger. Each replica counts the copies' requests at once by the engines' own metrics, so no replica overloads a vLLM model.
+- A fallback per model: big model, then gpt-oss-120b, then Qwen3.8-27B. This covers engine restarts and failures; a copy that is down is passed over for 10 seconds.
+- Admission refuses when it cannot check: no request goes on unchecked.
 
 ### 5.3 Postgres
 - **Compose:**
@@ -274,8 +274,8 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
   - 3 instances, synchronous quorum.
   - Barman-cloud backups to S3 with PITR.
   - A pgvector-enabled image (CNPG's ghcr images; confirm pgvector is included, or build FROM it).
-  - Its read-write Service feeds both the app and LiteLLM.
-- **Valkey/Redis:** a single instance with AOF on compose; Sentinel or replicas on Kubernetes. It is a cache and router state, so losing it is survivable.
+  - Its read-write Service feeds the app.
+- **Valkey:** only LMCache's shared store; a single instance with AOF on compose. It is a cache, so losing it is survivable.
 
 ### 5.4 Queueing, backpressure, fair scheduling
 - **People at once decides the GPUs' load.** A vLLM model answers at most its *people at once* a copy
@@ -287,16 +287,16 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
   a quarter or less of what its cache holds ("the others wait in its line while the GPUs have room to spare");
   the recommended settings use the full count, up to 256 a copy.
 - The chat already has a fair queue (`AnswerGate`: priority, then fewest-running, then served longest ago).
-- **Extend the same gate to API keys** through the existing pre-call guardrail (`/internal/guardrail`). The gate:
+- **Extend the same gate to API keys** (done: the gateway's admission, `Admission`, before each request). The gate:
   - holds a request until a place is free, up to a limit;
   - answers **429 with Retry-After** when the line is too long;
   - counts places per model from `max-num-seqs`.
 - Pass the group priority to vLLM (`--scheduling-policy priority`, request `priority` field). Inside the engine, admins and interactive chat then go ahead of batch API traffic.
 - **Admission control on engine signals.** When `vllm:num_requests_waiting > 0` for a while, or KV usage stays above 95%, shrink the gate's places for that model. Queue in the app, where it is fair and visible, not inside vLLM.
-- Per-person and per-group token-rate limits stay in LiteLLM, which uses Redis for them.
+- Per-person and per-key token-rate limits are the gateway's, counted in Postgres.
 
 ### 5.5 Engines: health and graceful restarts
-- The supervisor drains on SIGTERM; the app marks the model "draining" so `EngineRoute` stops sending to it; LiteLLM's fallback takes new requests.
+- The supervisor drains on SIGTERM; the app marks the model "draining" so `EngineRoute` stops sending to it; the model's fallback takes new requests.
 - Fast reload:
   - weights kept in page cache (enough RAM);
   - `--load-format` options for faster loading, where they work on sm_120;
@@ -312,7 +312,7 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 - **One Deployment per engine group** (`nvidia.com/gpu: 2|4`) with node affinity to a server that has the weights on local NVMe.
   - Weights are pre-staged by a DaemonSet or by the app's downloads per node. Never load 250 GB over a network filesystem.
 - **Autoscaling:** KEDA or HPA on `vllm:num_requests_waiting` and KV usage. Scale-up takes minutes, so keep a minimum of one replica for each kept model.
-- **Routing:** llm-d inference scheduler (KV-aware), with LiteLLM in front of it.
+- **Routing:** llm-d inference scheduler (KV-aware), with the app's gateway in front of it.
 - **Postgres:** CloudNativePG. **Valkey:** replicated. **App:** a Deployment with N replicas behind an ingress with a sticky cookie.
 - **Multi-node TP is not needed:** every model in §2 fits in one node.
 
@@ -349,13 +349,13 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 ### 5.9 Failure modes and recovery
 | Failure | Effect | Recovery |
 |---|---|---|
-| vLLM process crash or hang | That model is down | Supervisor restarts it; LiteLLM falls back; app shows "loading"; alert on loops. |
+| vLLM process crash or hang | That model is down | Supervisor restarts it; the gateway falls back; app shows "loading"; alert on loops. |
 | One GPU fails (Xid, ECC) | Its TP group is down | Fence the GPU in `GpuPlan`; re-place onto the remaining GPUs (for example TP=2 flagship on NVFP4); fallback model meanwhile. |
 | P2P unavailable after a BIOS or driver change | TP slow | `gpu-check` script at boot; supervisor adds `NCCL_P2P_DISABLE` and alerts. |
 | Out of memory at load | Load refused | `GpuPlan` and the advisor refuse before load; status file carries the vLLM error. |
 | KV pressure | Preemption, slow answers | Fair gate shrinks admission; CPU or LMCache tier; alert. |
 | App replica dies | Its in-flight answers stop | Other replicas take the lead; partial answers persisted; retry. |
-| LiteLLM replica dies | None (other replicas) | Traefik health check. |
+| An app replica dies | Its answers in flight stop; the rest none (other replicas) | Traefik health check. |
 | Valkey lost | Router counts reset, KV tier lost | Recreated; degraded, not down. |
 | Postgres disk lost | Outage | Restore with pgBackRest PITR (RPO is seconds to minutes), or promote the standby / CNPG failover. |
 | Power or cooling event | Throttling | DCGM alerts; power caps (`power-limits.sh`). |
@@ -386,7 +386,7 @@ PyPI (option 2 below, `services/vllm-pypi.Dockerfile`). The registry probe (`/v2
 | LMCache | `pip install lmcache==0.5.6` into the same image (Docker Hub `lmcache/vllm-openai` blocked) | about 0.2–0.5 GB | Must match the torch/vLLM ABI; build and smoke-test together. |
 | SGLang (optional, later) | `pip install "sglang[all]"` (Docker Hub `lmsysorg/sglang` blocked) | about 5–8 GB | Not in the first phase. |
 | DCGM exporter | `nvcr.io/nvidia/k8s/dcgm-exporter:<pinned>` | about 0.5–1 GB | Replaces or joins `nvidia_gpu_exporter`. |
-| Valkey/Redis | `public.ecr.aws/valkey/valkey:8.1-alpine` (Valkey's own registry on ECR; the Docker-library mirror has none) | about 15–40 MB | For LiteLLM shared state and the optional LMCache remote tier. |
+| Valkey/Redis | `public.ecr.aws/valkey/valkey:8.1-alpine` (Valkey's own registry on ECR; the Docker-library mirror has none) | about 15–40 MB | For the optional LMCache remote tier. |
 | pgBackRest | apt inside a Postgres image FROM `pgvector/pgvector:0.8.0-pg16` (cached) | about 50 MB | Compose PITR. |
 | Kubernetes later | GPU Operator (nvcr.io), CloudNativePG `ghcr.io/cloudnative-pg/*`, llm-d images (ghcr/quay, verify), KEDA (ghcr) | about 1–3 GB together | Only when going multi-server. |
 | NCCL tests (bring-up) | build `nccl-tests` from GitHub source in the vLLM image | small | For `all_reduce_perf`. |
@@ -498,7 +498,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
     - The guardrail admits through the gate; 429 with Retry-After; group priority passed to vLLM `priority`; shrink admission on waiting or KV pressure.
     - Tests: `scale-test.py` scenarios against fake-vllm.
     - **Done**, within what LiteLLM allows: its generic guardrail can only block, which LiteLLM answers with HTTP 400 (no 429 or Retry-After of the app's own; LiteLLM's per-key limits keep their 429), so the refusal's text says to try again in 30 seconds. An API key's request is refused while more chat answers wait for a llama.cpp model than it has places (the chat's fair line is not jumped), or while requests wait inside a vLLM model beyond a quarter of its places or its cache is full. vLLM runs with `--scheduling-policy priority` and the chat's requests carry `priority: -1`, ahead of API keys' (0). Tests: `VllmGatewayTests`, `VllmBackendTests`; the `scale-test.py` scenarios belong with item 18.
-16. **LiteLLM HA.**
+16. **LiteLLM HA** (8.0: LiteLLM, `ha.yml` and the `ha` feature are gone; the app's gateway keeps its shared state in Postgres, and Valkey stays only for LMCache under the `valkey` feature).
     - Valkey service (ECR mirror image); `router_settings.redis_*`; LiteLLM replicas in `scale.yml`; Traefik health checks.
     - Tests: `scale-test.py` with 2 LiteLLM replicas; the limits stay global.
     - **Done**: `valkey` (compose profile `ha`, image from ECR's mirror, not pulled; Helm `valkey.enabled`), `deploy/ha.yml` (`LITELLM_REPLICAS` gateway replicas behind the service's name, `REDIS_HOST`/`REDIS_PORT`), `router_settings.redis_host/redis_port` read from the environment (unset: each replica counts alone, as before). Traefik reaches the replicas through Docker's DNS, so no health check is added. Tests: `tests/deploy/test_ha.py`, the parity test with the profile and `valkey.enabled`; the 2-replica `scale-test.py` run needs a running stack.
@@ -650,7 +650,7 @@ What the code handles, how it was checked, and what still needs the real hardwar
   - **One engine URL**: `Models/Engine.cs` `EngineOptions.Url`.
   - **One GPU lent for media**: `Models/GpuShare.cs`.
 - Engine and gateway control is done through files, with no Docker socket: `deploy/services/llamacpp/router.sh`, and `EngineOptions.ConfigDir` holding the presets, keep list, max and Prometheus targets.
-- Fair queue: `src/Llm.Api/Chat/AnswerGate.cs`. Replicas: `src/Llm.Api/Operations/Replicas.cs` (advisory lock and LISTEN/NOTIFY). Gateway: `deploy/config/litellm.yaml` (`least-busy`, guardrail `fail_closed`, no Redis today).
+- Fair queue: `src/Llm.Api/Chat/AnswerGate.cs`. Replicas: `src/Llm.Api/Operations/Replicas.cs` (advisory lock and LISTEN/NOTIFY). Gateway: `src/Llm.Api/Gateway` (`ModelGateway`, `Admission`, `GatewayRoutes`; its design in [design/own-gateway.md](design/own-gateway.md)).
 - Compose: `deploy/docker-compose.yml` (no Redis, `nvidia_gpu_exporter`, `pgvector:0.8.0-pg16`), `deploy/scale.yml`. Helm: `deploy/helm/arena/templates/engines.yaml` and `values.yaml`.
 - Load tests: `deploy/scripts/scale-test.py` and `deploy/scripts/multiuser-bench.py`.
 - Live host: RTX 3090 24 GB, driver 595.99.02, 61 GB RAM, 24 threads, 1.3 TB free on NVMe.

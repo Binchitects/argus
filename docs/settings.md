@@ -153,11 +153,9 @@ until it is offered again.
 They apply to read aloud, Talk, the Speech tool, and API keys' speech at
 `gateway.DOMAIN`: `/v1/audio/speech` that names no voice and
 `/v1/audio/transcriptions` that names no language. Those requests go by the
-app, which fills in the key's person's voice or language and passes them on to
-LiteLLM with the same key. The app reads nothing of a request before its key
-says whose it is, and holds no sound: the person's language goes first in the
-form and the sound streams on behind it (a language the request names comes
-later, and LiteLLM keeps it).
+app's gateway, which checks the key, fills in its person's voice or language
+(a voice or language the request names is kept) and sends them to the speech
+server. The app reads nothing of a request before its key says whose it is.
 
 Compose's Traefik and the Helm chart's ingress send all of `gateway.DOMAIN` to
 the app, with no way around it: while the app is down, these fail (502 or 503)
@@ -221,7 +219,7 @@ Every option the app reads has a place on this page, in one of three ways:
   The command starts again the services they touch and waits until each is
   healthy. Search finds them too.
 - **The stack's own wiring**: where its services, volumes and files are inside
-  its containers (`Engine:Url`, `Gateway:Url`, `Sandbox:Dir`, …), the secrets
+  its containers (`Engine:Url`, `Sandbox:Dir`, …), the secrets
   between them, how a Helm release or several machines are laid out, and the
   switches only tests turn off. These are no settings: a change breaks the
   stack, so they are not shown; the installation's settings move what needs

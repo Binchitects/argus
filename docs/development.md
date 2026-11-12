@@ -17,7 +17,7 @@ src/
   web/                  the platform's web: React, its own image (nginx)
   code-intel-web/            Farzan Graph's own web, for Farzan Graph alone; built into the Farzan Graph image
 tests/
-  Llm.Tests/            xUnit; real Postgres, OpenLDAP and LiteLLM's schema via Testcontainers
+  Llm.Tests/            xUnit; real Postgres and OpenLDAP via Testcontainers (and LiteLLM's schema, for the 7.x import)
   CodeIntel.Tests/          xUnit
   CodeArena.Tests/      xUnit; a fake gateway and fake MCP servers on real sockets
   fixtures/code-intel/       a ctags corpus and documentation fixtures for Farzan Graph's tests
@@ -104,7 +104,7 @@ Farzan Graph against a local config:
 
 ```bash
 CODE_INTEL_ADMIN_EMAIL=you@example.com CODE_INTEL_ADMIN_PASSWORD=a-long-password \
-CODE_INTEL_GATEWAY_URL=http://localhost:4000 GATEWAY_KEY=sk-... \
+CODE_INTEL_GATEWAY_URL=http://localhost:4000 LITELLM_MASTER_KEY=sk-... \
 CODE_INTEL_EMBED_URL=http://localhost:8081 \
   dotnet run --project src/CodeIntel -c Release -- serve --config config.yaml --port 7700
 ```
