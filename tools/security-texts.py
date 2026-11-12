@@ -175,7 +175,8 @@ def code(e: ET.Element) -> str:
 
 def cwe(src: Path, pages: Pages) -> str:
     root = ET.parse(src / "mitre" / "cwec.xml").getroot()
-    n = CWE_NS
+    # The schema's namespace as the file names it (cwe-7 until CWE 4.x, cwe-8 from CWE 5.0).
+    n = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else CWE_NS
     top25 = {m.get("CWE_ID") for v in root.iter(n + "View") if v.get("ID") == TOP25 for m in v.iter(n + "Has_Member")}
     count = 0
     for w in root.iter(n + "Weakness"):
@@ -255,13 +256,16 @@ def cwe(src: Path, pages: Pages) -> str:
         pages.add("cwe", f"{'top25' if wid in top25 else 'all'}/CWE-{wid}.md", f"CWE-{wid}: {name}", url, "\n".join(body),
                   [symbol(f"CWE-{wid}", "weakness", "CWE", f"CWE-{wid}: {name} ({w.get('Abstraction')})" + (" — 2025 Top 25" if wid in top25 else ""))])
         count += 1
+    if count == 0:
+        # A catalog read as empty is a change of MITRE's (its schema), never a CWE with no weaknesses.
+        raise SystemExit(f"security-texts: no weakness read from CWE {root.get('Version')} ({root.tag}): has its schema changed?")
     print(f"security-texts: cwe: {count} weaknesses, {len(top25)} in the Top 25")
     return f"cwe={root.get('Version')}"
 
 
 def capec(src: Path, pages: Pages) -> str:
     root = ET.parse(src / "mitre" / "capec_latest.xml").getroot()
-    n = CAPEC_NS
+    n = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else CAPEC_NS
     count = 0
     for a in root.iter(n + "Attack_Pattern"):
         if a.get("Status") == "Deprecated":

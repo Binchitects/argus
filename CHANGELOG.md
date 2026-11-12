@@ -69,6 +69,16 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 ### :sparkles: New features & Enhancements
 
+- **Knowledge packs every week.** `tools/packs-weekly.py` fetches each
+  pack's source again, builds again only the packs whose source changed
+  (the embedding cache embeds only what changed), keeps a pack out that lost
+  pages or changed model, and with `--publish` releases them as
+  `packs-YYYY.MM.DD` with an index for **Update all**; a timer in
+  `tools/systemd/` runs it on Saturdays. A pack loaded from the library moves
+  to the newest of its name when Farzan Graph starts, and a bundle takes only
+  the newest of each. The first run: advisories (36,442), the security pack
+  on CWE 5.0, the React docs for real (the pack was a test fixture), and
+  Python, C++, the debugger, scripting and .NET from this week's sources.
 - Feedback from Code Arena too, with screenshots (pick, paste or capture),
   and answers rated there as in the web chat.
 - Code Arena's sub-agents plan by the limit Arena's admins set for the
@@ -116,6 +126,9 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 ### :bug: Bugs fixed
 
+- The security pack read no weakness of CWE 5.0 (MITRE's new schema): the
+  parser takes the namespace the file names, and stops on a catalog read as
+  empty.
 - Code Arena never scrolls sideways but in its editor: code blocks in the
   chat wrap their lines (their button unwraps them), diffs wrap, a task's
   long call or prompt breaks, and the panel's tabs that do not fit go into a

@@ -248,6 +248,7 @@ the web's need `npm ci` in `src/web` once. [testing.md](testing.md) says more.
 | `dn` | the .NET SDK in its container (`tools/dn build`, `tools/dn test`) |
 | `images-for.py` | the stack's images a change is in: what to build and start again ([development.md](development.md#what-a-change-is-in)) |
 | `build-packs.sh` | Farzan Graph's knowledge packs, one at a time |
+| `packs-weekly.py`, `systemd/arena-packs-weekly.*` | every pack fetched and built again when its source changed, the week's release of them, and a timer that runs it on Saturdays ([knowledge-packs.md](code-intel/knowledge-packs.md#the-weeks-packs)) |
 | `fetch-security-sources.sh`, `security-texts.py` | the security pack's sources and pages |
 | `fetch-sqlite-vec.sh` | the vector extension Farzan Graph loads into SQLite |
 | `compliance-docs.py` | the compliance documents from `docs/compliance/controls.yaml` |

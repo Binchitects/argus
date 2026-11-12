@@ -139,6 +139,37 @@ public class PackTests
     }
 
     [Fact]
+    public void A_pack_loaded_from_the_library_moves_to_the_newest_week_of_its_name_and_a_file_installed_stays()
+    {
+        using var dir = new TempDir();
+        var root = Path.Combine(AppContext.BaseDirectory, "packfixtures", "react");
+        var library = Path.Combine(dir.Path, "library");
+        var packs = Path.Combine(dir.Path, "packs");
+        void Build(string file, string version) =>
+            PackBuilder.BuildPack(new ReactDocs(), root, Path.Combine(library, file), version, FakeEmbedder.Embed, sourceCommit: version, log: TextWriter.Null);
+        Build("react.kpack", "1.0");
+        Build("react-2026.11.5.kpack", "2026.11.5");
+        Registry.Load(library, "react.kpack", packs);
+        Assert.Empty(Registry.FollowNewest(Path.Combine(dir.Path, "nothing"), packs));
+
+        // A newer week came: the loaded pack follows it; a later one again, ordered by number (11.12 after 11.5).
+        Assert.Equal([("react", "1.0", "2026.11.5")], Registry.FollowNewest(library, packs));
+        Build("react-2026.11.12.kpack", "2026.11.12");
+        Assert.Equal([("react", "2026.11.5", "2026.11.12")], Registry.FollowNewest(library, packs));
+        Assert.Equal(Path.Combine(library, "react-2026.11.12.kpack"), Registry.LinkedFrom(Path.Combine(packs, "react.kpack")));
+        // Nothing newer: nothing moves.
+        Assert.Empty(Registry.FollowNewest(library, packs));
+
+        // An older pack loaded on purpose by an admin is moved forward too; a pack installed as a file is never touched.
+        Registry.Load(library, "react.kpack", packs);
+        Assert.Single(Registry.FollowNewest(library, packs));
+        File.Delete(Path.Combine(packs, "react.kpack"));
+        File.Copy(Path.Combine(library, "react.kpack"), Path.Combine(packs, "react.kpack"));
+        Assert.Empty(Registry.FollowNewest(library, packs));
+        Assert.Null(Registry.LinkedFrom(Path.Combine(packs, "react.kpack")));
+    }
+
+    [Fact]
     public void A_pack_in_the_library_loads_as_a_link_and_unloads_without_touching_the_library()
     {
         using var dir = new TempDir();

@@ -206,7 +206,27 @@ ca_files
 # A checkout's bundle carries none: the app's image serves Code Arena's builds already.
 [[ $IN_ENGINE -eq 1 ]] && CA_FILES=()
 CA_MAKE=0; [[ ${#CA_FILES[@]} -eq 0 && -z "$CA_ARG" && $IN_ENGINE -eq 0 && -f "$REPO/arenactl" ]] && CA_MAKE=1
-PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.kpack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
+# The newest pack of each name (packs/ keeps the weeks before too: tools/packs-weekly.py), by the version it records.
+PACKS_NEWEST='
+import re, sqlite3, sys
+best = {}
+for f in sys.argv[1:]:
+    try:
+        con = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+        m = dict(con.execute("select key, value from pack_meta").fetchall()); con.close()
+    except sqlite3.Error:
+        continue
+    key = tuple(int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", m.get("pack_version") or "0"))
+    name = m.get("source_name") or f
+    if name not in best or key > best[name][0]:
+        best[name] = (key, f)
+print("\n".join(sorted(f for _, f in best.values())))
+'
+PACK_FILES=()
+if [[ $PACKS -eq 1 ]]; then
+  shopt -s nullglob; all_packs=("$REPO"/packs/*.kpack); shopt -u nullglob
+  [[ ${#all_packs[@]} -gt 0 ]] && mapfile -t PACK_FILES < <(python3 -I -c "$PACKS_NEWEST" "${all_packs[@]}")
+fi
 # The model library, as airgap.sh finds it.
 MODELS_DIR="${MODELS_ARG:-$(sed -n 's/^MODELS_DIR=//p' "$ROOT/.env" 2>/dev/null | tail -n1 | sed -e 's/^"//' -e 's/"$//')}"
 MODELS_DIR="${MODELS_DIR:-./models}"

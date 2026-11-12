@@ -178,6 +178,36 @@ public static class Registry
             meta.GetValueOrDefault("attribution", ""), meta.GetValueOrDefault("source_commit", ""), true);
     }
 
+    /// <summary>
+    /// Each pack loaded from the library moved to the newest of its name there: the week's packs (tools/packs-weekly.py)
+    /// land in the library beside the ones before, and a pack loaded keeps up with them by itself. Only a pack loaded as a
+    /// link into the library, never one installed as a file; only to a newer version (as the pack records it) that this
+    /// server can search. What moved, as (name, from version, to version).
+    /// </summary>
+    public static List<(string Name, string From, string To)> FollowNewest(string libraryDir, string destDir)
+    {
+        var moved = new List<(string, string, string)>();
+        if (!Directory.Exists(libraryDir) || !Directory.Exists(destDir)) return moved;
+        var newest = ListLibrary(libraryDir, destDir).Where(l => l.Pack.Compatible)
+            .GroupBy(l => l.Pack.Name).ToDictionary(g => g.Key, g => g.MaxBy(l => VersionKey(l.Pack.Version), StringComparer.Ordinal)!);
+        var root = Path.GetFullPath(libraryDir).TrimEnd('/') + "/";
+        foreach (var installed in Directory.EnumerateFiles(destDir, "*" + PackSuffix).ToList())
+        {
+            if (LinkedFrom(installed) is not { } target || !target.StartsWith(root, StringComparison.Ordinal)) continue;
+            var name = Path.GetFileName(installed)[..^PackSuffix.Length];
+            if (!newest.TryGetValue(name, out var best) || best.Pack.Path == target) continue;
+            var now = File.Exists(target) ? ReadPackMeta(target).GetValueOrDefault("pack_version", "") : "";
+            if (File.Exists(target) && string.CompareOrdinal(VersionKey(best.Pack.Version), VersionKey(now)) <= 0) continue;
+            Load(libraryDir, best.File, destDir);
+            moved.Add((name, now, best.Pack.Version));
+        }
+        return moved;
+    }
+
+    /// <summary>A pack's version as it orders: its numbers in turn (a weekly 2026.11.12 after 1.0, and after 2026.11.5).</summary>
+    public static string VersionKey(string version) =>
+        string.Join('.', System.Text.RegularExpressions.Regex.Split(version ?? "", "[.-]").Select(p => int.TryParse(p, out var n) ? n.ToString("D10", System.Globalization.CultureInfo.InvariantCulture) : "0000000000"));
+
     /// <summary>The file a link points to (absolute), or null for a plain file or none.</summary>
     /// <summary>The file name packs had before v8.0, a brand's; only read, to take them under <see cref="PackSuffix"/>.</summary>
     public const string OldPackSuffix = ".arguspack";

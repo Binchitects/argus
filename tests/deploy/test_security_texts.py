@@ -47,6 +47,21 @@ class SecurityTexts(unittest.TestCase):
         self.assertEqual("# B608: Test\n\n**Example:**\n\n```\n>> Issue: SQL\n   Severity: Medium\n```\n",
                          st.rst("============\nB608: Test\n============\n\n:Example:\n\n.. code-block:: none\n\n    >> Issue: SQL\n       Severity: Medium\n\n"))
 
+    def test_CWE_is_read_in_the_namespace_its_file_names_and_an_empty_catalog_stops_the_build(self):
+        for ns in ("cwe-7", "cwe-8"):
+            with tempfile.TemporaryDirectory() as d:
+                (Path(d) / "mitre").mkdir()
+                (Path(d) / "mitre" / "cwec.xml").write_text(
+                    f'<Weakness_Catalog xmlns="http://cwe.mitre.org/{ns}" Version="5.0"><Weaknesses>'
+                    '<Weakness ID="89" Name="SQL Injection" Abstraction="Base" Status="Stable"><Description>Bad SQL.</Description></Weakness>'
+                    '</Weaknesses></Weakness_Catalog>')
+                pages = st.Pages(Path(d) / "out")
+                self.assertEqual("cwe=5.0", st.cwe(Path(d), pages))
+                self.assertEqual(["cwe/all/CWE-89.md"], [p["path"] for p in pages.docs])
+                (Path(d) / "mitre" / "cwec.xml").write_text(f'<Weakness_Catalog xmlns="http://cwe.mitre.org/{ns}" Version="5.0"><Weaknesses/></Weakness_Catalog>')
+                with self.assertRaises(SystemExit):
+                    st.cwe(Path(d), st.Pages(Path(d) / "out2"))
+
     def test_a_heading_loses_its_pictures(self):
         self.assertEqual("A05:2025 Injection", st.heading('# A05:2025 Injection ![icon](../a.png){: style="height:80px"}\n', "x"))
 

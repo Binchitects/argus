@@ -179,6 +179,10 @@ public static partial class CodeIntelServer
         using (var conn = Db.Connect(cfg.Index.DbPath)) Db.Migrate(conn);
         // Packs a release before v8.0 installed under their old file names: taken under the new ones.
         if (Packs.Registry.AdoptOldNames(cfg.PacksDir) is var adopted and > 0) Console.WriteLine($"{adopted} pack(s) installed under their old file names taken as {Packs.Registry.PackSuffix}");
+        // A newer week's pack in the library (an upgrade brought it): each pack loaded from there moves to it.
+        if (cfg.PackLibrary is { Length: > 0 } packLibrary)
+            foreach (var (name, from, to) in Packs.Registry.FollowNewest(packLibrary, cfg.PacksDir))
+                Console.WriteLine($"pack {name}: {(from.Length > 0 ? from : "its file gone")} -> {to}, the newest in the library");
         var appDbPath = AppDb.PathFor(cfg.Index.DataDir);
         if (AppEnabled())
             using (var conn = AppDb.Open(appDbPath))

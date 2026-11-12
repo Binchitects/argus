@@ -378,6 +378,52 @@ machine, where the cause is much harder to see.
 `pack index` also takes a pack name to publish a subset, for a directory that
 holds several versions.
 
+## The week's packs
+
+Each week the packs are built again from their sources and released, so a
+stack's documentation, weaknesses and advisories keep up:
+
+```bash
+tools/packs-weekly.py --dry-run           # what is new upstream; nothing fetched or built
+tools/packs-weekly.py                     # this week's packs in packs/, NAME-YYYY.MM.DD.kpack
+tools/packs-weekly.py --publish           # and the GitHub release packs-YYYY.MM.DD
+```
+
+For each pack in turn it fetches its source again (git repositories as a
+shallow fetch of their branch; SQLite's and cppreference's newest archives;
+the security and GRC sources through their scripts; the advisories through
+`code-intel pack renew`), each swapped in only when whole. A pack whose source
+is the one its newest build came from is kept as it is. The others are built
+by the code-intel image against a temporary embedder on the GPU (the stack's
+model, nomic-embed-text; `--cpu` without a GPU, `--embed-url` for a server of
+your own). The embedding cache beside the packs (`packs/.embcache.db`) holds
+every passage embedded before, so a week embeds only what changed. A new pack
+with another embedding model, or with less than 80% of the pages of the one
+before (an upstream that changed shape), is kept out as `FILE.held` and named;
+`--force` takes it.
+
+`packs/index.json` then lists the newest pack of each name with its checksum
+and where it is served: `--publish` uploads the week's new packs, the index and
+`SHA256SUMS` to the release `packs-YYYY.MM.DD`, and a pack unchanged that week
+stays where it was released (`packs/published.json` remembers). A stack takes
+them with Admin → Packs → **Update all** (`CODE_INTEL_PACK_INDEX_URL` set to
+the release's `index.json`), and an offline one from the next bundle
+(`./arenactl bundle --packs` takes the newest pack of each name). A pack loaded
+from the pack library moves to the newest of its name there when Farzan Graph
+starts, so the packs an upgrade brings are searched at once.
+
+Older weeks stay in `packs/` (an installation may have one loaded);
+`--prune` moves all but the two newest of each name into `packs/superseded/`.
+`--until HH:MM` (UTC) starts no pack after that time, for a run that must not
+overlap something else; `--proxy http://HOST:PORT` sends the downloads through
+a proxy. Qt's pack is not in the weekly run: its offline documentation comes
+from Qt's installer, taken by hand when a Qt release comes (`--packs qt`
+builds it again).
+
+To run it every week, `tools/systemd/` has a user service and timer
+(Saturdays at 02:00): copy both into `~/.config/systemd/user/`, then
+`systemctl --user enable --now arena-packs-weekly.timer`.
+
 ## Building a pack
 
 Requires the embedding server the stack runs (`llamacpp-embed`, nomic-embed-text)

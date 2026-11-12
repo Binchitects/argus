@@ -1,0 +1,17 @@
+# The week's knowledge packs: fetched, built and released (tools/packs-weekly.py). A user unit of the account that
+# checks the repository out, with docker and gh signed in:
+#   cp tools/systemd/arena-packs-weekly.* ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now arena-packs-weekly.timer
+#   loginctl enable-linger "$USER"     # runs while nobody is signed in
+# Its log: journalctl --user -u arena-packs-weekly
+[Unit]
+Description=Knowledge packs of the week, built and released
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# The checkout this unit file is in; change it when the repository is elsewhere.
+WorkingDirectory=%h/llm-service
+ExecStart=/usr/bin/python3 -I tools/packs-weekly.py --publish
+Nice=10
+IOSchedulingClass=idle
