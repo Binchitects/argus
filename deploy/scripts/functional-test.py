@@ -176,7 +176,7 @@ def ledger(sql):
     return [line.split("\t") for line in out.stdout.splitlines() if line.strip()]
 
 
-def quoted(text):
+def sql_text(text):
     return "'" + text.replace("'", "''") + "'"
 
 
@@ -276,8 +276,12 @@ def main():
     # The models everyone may use (Admin -> Models), by their real names, nothing else; every chat model among them.
     everyone = {n for n, a in LOCAL.items() if a == "Everyone"}
     chat_models = {m["name"] for m in rows if m.get("source") in ("local", "env") and (m.get("access") or {}).get("audience") == "Everyone"}
+    # Beside the chat models, the key may also use the pictures, speech and embedding models (their mode says so).
+    code, info = api_key_call(key, "/v1/model/info")
+    modes = {m.get("model_name"): (m.get("model_info") or {}).get("mode") for m in (json.loads(info).get("data", []) if code == 200 else [])}
+    listed_chat = {n for n in listed if modes.get(n, "chat") == "chat"}
     rec("key", "the gateway lists the models the person may use, by their real names",
-        bool(listed) and set(listed) <= everyone and chat_models <= set(listed), f"{listed}")
+        bool(listed) and listed_chat <= everyone and chat_models <= set(listed), f"{listed} (chat: {sorted(listed_chat)})")
     code, body = chat(key)
     content = ""
     if code == 200:
@@ -378,7 +382,7 @@ def main():
     for _ in range(12):
         rows = [dict(zip(("surface", "key", "prompt", "cached", "out", "cost"), r)) for r in ledger(
             "select surface, coalesce(key_hash, ''), prompt_tokens, cached_tokens, completion_tokens, cost from gateway.requests "
-            f"where person = {quoted(email)} and status = 'done'")]
+            f"where person = {sql_text(email)} and status = 'done'")]
         if any(r["surface"] == "chat" for r in rows) and any(r["key"] for r in rows):
             break
         time.sleep(5)
