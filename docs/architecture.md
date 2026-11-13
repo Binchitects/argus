@@ -192,7 +192,7 @@ features it requires.
 | `gpu-monitoring`, `dcgm` | yes, no | `gpu-exporter`, `dcgm-exporter` | the GPUs' metrics; data-centre GPU detail on bare metal |
 | `power-limits` | yes | `power-limits` | GPU and CPU power caps kept applied |
 | `valkey` | no | `valkey` | LMCache's shared store for the vLLM models' token cache, when `LMCACHE_REMOTE` names it |
-| `meetings`, `lab`, `apps`, `data`, `decks`, `media`, `agents`, `code-studio` | yes | nothing: parts of the app | meetings, the science lab, apps, ask your data, decks, the media studio, Agent Studio, Code Studio |
+| `meetings`, `lab`, `apps`, `data`, `decks`, `media`, `agents`, `code-studio`, `plant` | yes | nothing: parts of the app | meetings, the science lab, apps, ask your data, decks, the media studio, Agent Studio, Code Studio, the plant |
 
 `--cpu-only` turns the GPU features off. Without a GitLab, Farzan Graph serves its
 knowledge packs only (it indexes nothing, and says so where a GitLab would be asked);

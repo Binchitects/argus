@@ -235,7 +235,7 @@ on; its API answers 404; and its background work does not run.
 | `ha` | no | `valkey` | |
 | `meetings` | yes | (the app) | speech |
 | `lab` | yes | (the app) | the sandbox |
-| `apps`, `data`, `decks`, `agents`, `code-studio` | yes | (the app) | |
+| `apps`, `data`, `decks`, `agents`, `code-studio`, `plant` | yes | (the app) | |
 | `media` | yes | (the app) | pictures |
 
 The installer chooses them ([below](#the-offline-installer)): `--with A,B` and

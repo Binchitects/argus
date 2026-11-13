@@ -156,6 +156,8 @@ public static class Permissions
     public const string Data = "feature.data";
     public const string Decks = "feature.decks";
     public const string Studio = "feature.studio";
+    public const string Plant = "feature.plant";
+    public const string PlantManage = "plant.manage";
     public const string FixIt = "feature.fixit";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
@@ -227,6 +229,7 @@ public static class Permissions
         new(SharingManage, "Sharing", "Share assistants, skills, apps, chats and reviews with the whole company or any group, and look after the company's skills and assistants.", true),
         new(BusinessManage, "Code", "Remove business maps.", true),
         new(ProjectsManage, "Projects", "See every project and what it used, and change or delete any.", true),
+        new(PlantManage, "Plant", "Set up the plant: its sites, areas, assets and their points, and who sees each site.", true),
 
         new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
         new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),
@@ -318,6 +321,7 @@ public static class Permissions
         new(Data, "Making", "Ask the databases an admin connected, and keep boards of charts.", false),
         new(Decks, "Making", "Make slide decks with the model, and download them.", false),
         new(Studio, "Agents and keys", "Build agent workflows in Agent Studio that run as oneself on a trigger.", false),
+        new(Plant, "Plant", "See the plant: its sites, assets, live values and cameras (the sites their groups are given).", false),
         new(FixIt, "Agents and keys", "Let an agent change code and open merge requests as oneself (Fix it), with one's own GitLab token.", false),
         new(Plans, "Agents and keys", "Make and keep plans.", false),
         new(Research, "Chat and knowledge", "Run deep research.", false),

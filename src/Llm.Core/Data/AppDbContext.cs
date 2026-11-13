@@ -66,6 +66,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<MediaModel> MediaModels => Set<MediaModel>();
     public DbSet<ModelBenchRun> ModelBenchRuns => Set<ModelBenchRun>();
+    public DbSet<Plant.PlantSite> PlantSites => Set<Plant.PlantSite>();
+    public DbSet<Plant.PlantArea> PlantAreas => Set<Plant.PlantArea>();
+    public DbSet<Plant.PlantAsset> PlantAssets => Set<Plant.PlantAsset>();
+    public DbSet<Plant.PlantPoint> PlantPoints => Set<Plant.PlantPoint>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelToolMode> ModelToolModes => Set<ModelToolMode>();
@@ -705,6 +709,53 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
             e.Property(m => m.Left).HasColumnType("jsonb");
             e.OwnsOne(m => m.Move, mv => mv.ToJson());
+        });
+        builder.Entity<Plant.PlantSite>(e =>
+        {
+            e.ToTable("plant_sites");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.TimeZone).HasMaxLength(64);
+            e.Property(x => x.GroupIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => x.Name).IsUnique();
+        });
+        builder.Entity<Plant.PlantArea>(e =>
+        {
+            e.ToTable("plant_areas");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.HasIndex(x => new { x.SiteId, x.ParentId, x.Position });
+            e.HasOne<Plant.PlantSite>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Plant.PlantArea>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<Plant.PlantAsset>(e =>
+        {
+            e.ToTable("plant_assets");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.Vendor).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Serial).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.Tags).HasDefaultValueSql("'{}'::text[]");
+            e.HasIndex(x => new { x.SiteId, x.Name }).IsUnique();
+            e.HasIndex(x => x.AreaId);
+            e.HasOne<Plant.PlantSite>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Plant.PlantArea>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<Plant.PlantPoint>(e =>
+        {
+            e.ToTable("plant_points");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.DataType).HasMaxLength(20);
+            e.Property(x => x.Unit).HasMaxLength(40);
+            e.Property(x => x.Source).HasMaxLength(20);
+            e.Property(x => x.Address).HasMaxLength(500);
+            e.Property(x => x.States).HasMaxLength(2000);
+            e.HasIndex(x => new { x.AssetId, x.Name }).IsUnique();
+            e.HasIndex(x => new { x.Source, x.Address });
+            e.HasOne<Plant.PlantAsset>().WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ModelBenchRun>(e =>
         {

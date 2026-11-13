@@ -47,3 +47,4 @@ decks          | on  | - | - | - | Decks: slides from a chat
 media          | on  | - | - | pictures | The media studio: pictures, video and vectors
 agents         | on  | - | - | - | Agent Studio: workflows the agents run
 code-studio    | on  | - | - | - | Code Studio: the IDE and reviews in the browser
+plant          | on  | - | - | - | The plant (IoT and OT): sites, areas, assets and their points, and who sees each site
