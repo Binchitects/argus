@@ -656,7 +656,7 @@ drop_litellm_db() {   # drop_litellm_db plan|do FROM_VERSION
   local out rc=0
   out="$(dc exec -T app dotnet Llm.Api.dll drop-litellm-database --wait "${LITELLM_DROP_WAIT:-600}" 2>&1)" || rc=$?
   case $rc in
-    0) [[ "$out" == *"is dropped"* ]] && did "LiteLLM's database dropped: its people's keys and its log are in the app's ledger (the backup $(marker_get backup 2>/dev/null)${BACKUP:-} holds it)" ;;
+    0) [[ "$out" == *"is dropped"* ]] && did "LiteLLM's database dropped: its people's keys and its log are in the app's ledger (the backup ${BACKUP:-$(marker_get backup 2>/dev/null)} holds it)" ;;
     3) note "LiteLLM's database is kept for now: the app is still bringing its keys and log over. repair drops it once they are in" ;;
     *) note "LiteLLM's database is kept: ${out:-the app did not answer}" ;;
   esac
@@ -1566,11 +1566,18 @@ is_user_path() {
     .env|.env.*|docker-compose.override.yml|certs/*|config/traefik/certificate.yml|backups/*|models/*|*.before-*|*.new-*|*.changed-*|.airgap-*|*/__pycache__/*|__pycache__/*) return 0 ;;
   esac
   local rel
-  local m="${MODELS_DIR:-}" b="${BACKUP_DIR:-}"
-  for rel in "${m#"$DEPLOY"/}" "${b#"$DEPLOY"/}"; do
-    [[ "$rel" != /* && -n "$rel" && "$1" == "$rel"/* ]] && return 0
-  done
+  while IFS= read -r rel; do [[ "$1" == "$rel"/* ]] && return 0; done < <(host_dirs)
   return 1
+}
+# The host's own folders that may sit inside DEPLOY (a checkout's deploy/ as the installation keeps its data there): the
+# models, the backups, the stack's data, the engines' KV cache and this installer's record, each relative to DEPLOY.
+host_dirs() {
+  local d rel
+  for d in "${MODELS_DIR:-}" "${BACKUP_DIR:-}" "${DATA_DIR:-}" "$(env_get KV_CACHE_DIR 2>/dev/null)" "${STATE:-}"; do
+    [[ -n "$d" ]] || continue
+    case "$d" in ./*) rel="${d#./}" ;; /*) rel="${d#"$DEPLOY"/}"; [[ "$rel" == /* ]] && continue ;; *) rel="$d" ;; esac
+    rel="${rel%/}"; [[ -n "$rel" && "$rel" != . ]] && printf '%s\n' "$rel"
+  done
 }
 # path<TAB>sha of the bundle's deploy files (its SHA256SUMS, without the deploy/ prefix).
 bundle_deploy_sums() { sed -n -E 's|^([0-9a-f]{64}) [ *]deploy/(.*)$|\2\t\1|p' "$BUNDLE/SHA256SUMS" | sort; }
@@ -1587,8 +1594,11 @@ shipped_sums() {   # shipped_sums VERSION
   elif [[ -f "$BUNDLE/known/$1.sha256" ]]; then sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$BUNDLE/known/$1.sha256" | sort
   fi
 }
-installed_files() {   # the files in DEPLOY that are not the host's own
-  (cd "$DEPLOY" 2>/dev/null && find . -type f -printf '%P\n' | sort) | while IFS= read -r f; do is_user_path "$f" || printf '%s\n' "$f"; done
+installed_files() {   # the files in DEPLOY that are not the host's own (its own folders not even walked)
+  local -a prune=()
+  local rel
+  while IFS= read -r rel; do prune+=(-path "./$rel" -prune -o); done < <(host_dirs)
+  (cd "$DEPLOY" 2>/dev/null && find . ${prune[@]+"${prune[@]}"} -type f -printf '%P\n' | sort) | while IFS= read -r f; do is_user_path "$f" || printf '%s\n' "$f"; done
 }
 # The release's compose files and this installer say what runs and how: a host's change to one of
 # them belongs in docker-compose.override.yml (always kept), so the release's copy is the one used.

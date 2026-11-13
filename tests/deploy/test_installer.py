@@ -824,6 +824,19 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("code-intel", profiles[0].split("=", 1)[1].split(","))
         self.assertNotIn("argus", profiles[0].split("=", 1)[1].split(","))
 
+    def test_An_upgrade_never_walks_the_stacks_data_kept_inside_deploy(self):
+        deploy = self.old_install()
+        # A checkout's deploy/ as the installation, its data inside it (DATA_DIR=deploy/data): the stack's, never deploy's files.
+        for i in range(3):
+            (deploy / "data" / "code-intel" / f"page-{i}.md").parent.mkdir(parents=True, exist_ok=True)
+            (deploy / "data" / "code-intel" / f"page-{i}.md").write_text("an indexed page\n")
+        env = (deploy / ".env").read_text()
+        (deploy / ".env").write_text(re.sub(r"(?m)^DATA_DIR=.*$", f"DATA_DIR={deploy}/data", env) if "DATA_DIR=" in env else env + f"DATA_DIR={deploy}/data\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("data/code-intel/page-", r.stdout)
+        self.assertTrue((deploy / "data" / "code-intel" / "page-0.md").exists())
+
     def test_An_upgrade_from_before_8_0_drops_LiteLLMs_database_only_after_its_backup_and_once_the_app_has_its_data(self):
         deploy = self.old_install()
         # LiteLLM's replicas on (7.x's ha.yml in COMPOSE_FILE): 8.0 has no ha.yml, so it goes from COMPOSE_FILE, and back on a rollback.
