@@ -2779,7 +2779,9 @@ keep_old_images() {
 snapshot_deploy() {
   local -a ex=(--exclude=./.airgap-load --exclude='./*.installer-new')
   local rel
-  for rel in "${BACKUP_DIR#"$DEPLOY"/}" "${MODELS_DIR#"$DEPLOY"/}"; do [[ "$rel" != /* ]] && ex+=("--exclude=./$rel"); done
+  # The host's own folders inside DEPLOY (the backups, the models, the stack's data, its KV cache, this record) are not
+  # deploy's: the backup holds the data, and a rollback never puts them back from here.
+  while IFS= read -r rel; do ex+=("--exclude=./$rel"); done < <(host_dirs)
   (umask 077; tar -cpf "$SNAP/deploy.tar" "${ex[@]}" -C "$DEPLOY" .) || die "keeping a copy of $DEPLOY for a rollback failed (disk full?)"
   # VERSION beside deploy/ says which release this is: the upgrade writes the new one there.
   rm -f "$SNAP/VERSION"; [[ -f "$DIR/VERSION" ]] && cp -p "$DIR/VERSION" "$SNAP/VERSION"

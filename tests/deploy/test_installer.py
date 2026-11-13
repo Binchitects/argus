@@ -839,6 +839,12 @@ class InstallerTests(unittest.TestCase):
         for i in range(3):
             (deploy / "data" / "code-intel" / f"page-{i}.md").parent.mkdir(parents=True, exist_ok=True)
             (deploy / "data" / "code-intel" / f"page-{i}.md").write_text("an indexed page\n")
+        # A service's folder only it may read (Postgres's): the rollback copy of deploy/ must not need it.
+        locked = deploy / "data" / "postgres"
+        locked.mkdir(parents=True)
+        (locked / "PG_VERSION").write_text("16\n")
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o755)
         env = (deploy / ".env").read_text()
         (deploy / ".env").write_text(re.sub(r"(?m)^DATA_DIR=.*$", f"DATA_DIR={deploy}/data", env) if "DATA_DIR=" in env else env + f"DATA_DIR={deploy}/data\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
