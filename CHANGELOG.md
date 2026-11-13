@@ -15,7 +15,7 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
-## v8.0.0 (unreleased, branch v8.0)
+## v8.0.0 (2026-11-13)
 
 The names people see are the build's: Farzan Arena, and Farzan Graph for its
 code intelligence, by default; nothing inside is named after a brand. Three
