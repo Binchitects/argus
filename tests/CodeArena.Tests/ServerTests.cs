@@ -54,15 +54,31 @@ public sealed class ServerTests : IDisposable
         _mcp.Hold.SetResult();
         await arena.FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(rt.ArenaConnected);
-        Assert.Equal("Arena: 3 tools", rt.Describe(arena));
-        Assert.Contains("Arena's tools connected: 3.", _output.ToString());
+        Assert.Equal("Arena: 2 tools", rt.Describe(arena));
+        Assert.Contains("Arena's tools connected: 2.", _output.ToString());
 
         // The next request has them, and Arena's instructions.
         _gateway.Answer = _ => Reply.Say("ok");
         Assert.Equal("ok", await rt.Agent.RunAsync("hi", new Spend(), CancellationToken.None));
         Assert.Contains("web_search", FakeGateway.ToolNames(_gateway.Requests[0]));
-        Assert.Contains("arena_read_file", FakeGateway.ToolNames(_gateway.Requests[0]));
+        Assert.DoesNotContain("arena_read_file", FakeGateway.ToolNames(_gateway.Requests[0]));
         Assert.Contains("Arena: search the web with web_search", FakeGateway.System(_gateway.Requests[0]));
+    }
+
+    [Fact]
+    public async Task Arenas_tools_that_Code_Arena_has_its_own_of_or_no_use_for_are_not_offered()
+    {
+        static JsonObject Tool(string name, string arenaTool) => new()
+        {
+            ["name"] = name, ["description"] = name, ["inputSchema"] = new JsonObject { ["type"] = "object" },
+            ["_meta"] = new JsonObject { ["arena/tool"] = arenaTool },
+        };
+        _mcp.ToolList = [Tool("web_search", "web"), Tool("memory_save", "memory"), Tool("run_python", "python"), Tool("speak", "speech"), Tool("make_image", "image")];
+        using var h = new Harness(_gateway, _mcp);
+        await using var rt = await StartAsync(h);
+        await Assert.Single(rt.Links).FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
+        var arenas = rt.Tools.All.Where(t => t.Server == Runtime.ArenaName).Select(t => t.Name).Order().ToList();
+        Assert.Equal(["make_image", "web_search"], arenas);
     }
 
     [Fact]
@@ -91,7 +107,7 @@ public sealed class ServerTests : IDisposable
         Assert.Contains(rt.Tools.All, t => t.Name == "web_search");
         var said = _output.ToString();
         Assert.Equal(1, said.Split("Arena's tools did not connect").Length - 1);
-        Assert.Contains("Arena's tools connected: 3.", said);
+        Assert.Contains("Arena's tools connected: 2.", said);
     }
 
     [Fact]

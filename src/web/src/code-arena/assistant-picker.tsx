@@ -1,8 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, ChevronDown } from 'lucide-react'
+import { Bot } from 'lucide-react'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
@@ -13,10 +12,10 @@ import { assistantsQuery, chooseAssistant } from './tasks-api'
 const NONE = 'none'
 
 /**
- * The Arena assistant the session works as, in the chat's header: its instructions, model, thinking, Arena tools and skills.
- * Your assistants (yours, shared with you, the company's) are asked of Arena when the menu opens.
+ * The Arena assistant the session works as, a submenu of the chat's menu: its instructions, model, thinking, Arena tools
+ * and skills. Your assistants (yours, shared with you, the company's) are asked of Arena when it opens.
  */
-export function AssistantPicker({ state }: { state: CodeState }) {
+export function AssistantSubmenu({ state }: { state: CodeState }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const list = useQuery({ ...assistantsQuery, enabled: open })
@@ -31,21 +30,13 @@ export function AssistantPicker({ state }: { state: CodeState }) {
     }
   }
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={state.busy}
-          aria-label={current ? `Assistant: ${current.name}` : 'Assistant: none'}
-          className={cn('h-8 max-w-44 gap-1.5 px-2', !current && 'text-muted-foreground')}
-        >
-          <Bot />
-          <span className="hidden truncate @md:inline">{current?.name ?? 'Assistant'}</span>
-          <ChevronDown className="size-3.5 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
+    <DropdownMenuSub open={open} onOpenChange={setOpen}>
+      <DropdownMenuSubTrigger disabled={state.busy} aria-label={current ? `Assistant: ${current.name}` : 'Assistant: none'}>
+        <Bot />
+        <span className="flex-1">Assistant</span>
+        <span className={cn('max-w-28 truncate text-xs text-muted-foreground')}>{current?.name ?? 'None'}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-72">
         <DropdownMenuLabel>Work as an assistant from Arena</DropdownMenuLabel>
         {list.isPending && (
           <div className="grid gap-1 p-1">
@@ -68,7 +59,7 @@ export function AssistantPicker({ state }: { state: CodeState }) {
           ))}
         </DropdownMenuRadioGroup>
         {list.data?.assistants?.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">You have no assistants in Arena yet: make one there, under Assistants.</p>}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   )
 }

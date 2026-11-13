@@ -174,8 +174,8 @@ file) when they are elsewhere.
 ### Without signing in
 
 Code Arena works without an Arena too. Signed out, the models of a provider
-of your own answer, with your key (`/providers add NAME`, or the plug beside
-the IDE chat's model; see [other providers' models](#other-providers-models)): nothing goes to an Arena,
+of your own answer, with your key (`/providers add NAME`, or **Other providers…** in
+the IDE chat's **More** menu; see [other providers' models](#other-providers-models)): nothing goes to an Arena,
 and what needs one (syncing with the web chat, Arena's tools, memory and
 skills kept there, broadcasts, feedback) waits until you sign in. With no
 provider either, the IDE opens all the same (`code-arena`, or the shortcut):
@@ -643,8 +643,8 @@ The page is laid out as VS Code is, in Farzan Arena's design system:
 - **a tab or the chat in a window of its own**, as VS Code's Move into New
   Window: **Move into New Window** in a tab's menu (the palette's **Move
   Editor into New Window**) opens the file in a new browser window, with what
-  is unsaved in it, and closes its tab in the IDE; the chat's header button
-  **Open the chat in a new window** (the palette's **Open Chat in New
+  is unsaved in it, and closes its tab in the IDE; the chat's **More** menu's
+  **Open in a new window** (the palette's **Open Chat in New
   Window**) moves the chat there, hidden in the IDE meanwhile. Both windows
   are the same Code Arena: the session, the files and the settings are one.
   What the agent changes from the chat's window reloads in the IDE's editor,
@@ -2573,7 +2573,7 @@ web chat shows the same line.
 
 ## Goal mode
 
-`/goal TEXT` (or **Goal**, the target in the chat's header, and `/goal` in the
+`/goal TEXT` (or **Work toward a goal…** in the chat's **More** menu, and `/goal` in the
 IDE's box) sets a goal: the agent works toward it turn after turn, without you
 sending each, until it is met, and then says how it checked.
 
@@ -2639,7 +2639,7 @@ Arena.
 
 `/assistant` lists your assistants in Arena (yours, those shared with you and
 the company's); `/assistant N` or `/assistant NAME` works as one, `/assistant
-off` as none. In the IDE, **Assistant** at the left of the chat's header does
+off` as none. In the IDE, **Assistant** in the chat's **More** menu does
 the same. Working as one, the session's prompt has its instructions and names
 its skills for the model to load first, it switches to its model and thinking
 (when the gateway serves the model), and Arena's tool groups it does not have
@@ -3320,7 +3320,7 @@ Which project:
   repository's marked), and `/project N` or `/project NAME` chooses one;
   `/project none` takes the session out. The chat in Arena goes with it;
   `/project new NAME` makes one and puts the session in it;
-- in the IDE, the project in the chat's header (a folder mark with its name),
+- in the IDE, **Project** in the chat's **More** menu,
   **Put this session in it** in the Projects view or a project's tab, or
   `/project NAME` in the chat's box;
 - else, when none was chosen, the project the repository is in (its address in
@@ -3546,24 +3546,31 @@ wait, with their commands.
 ## Tool settings
 
 As Arena's own tool customisation (Admin → Tools) does for the web chat,
-**Configure Tools** (the gear beside the chat's Tools) sets each tool of the
-session up: the built-in ones, Arena's and Farzan Graph's, the MCP servers' and your
-own and the project's.
+**Configure Tools** (**Customize tools…** under the chat's Tools) sets each
+tool of the session up: the built-in ones, Arena's and Farzan Graph's, the MCP
+servers' and your own and the project's. Each is a line: its switch, its name
+and what it does, and how it asks you; its group folds, and says how many of
+its tools are on. The rest is under its gear (**Advanced**).
+
+Arena's tools that Code Arena has its own of (memory, past chats, skills,
+plans, Python and sums, which its shell runs, the date) and those of no use
+in coding (3D, video, speech, decks, data questions) are not offered in Code
+Arena, nor one named as a tool of its own: no tool comes twice.
 
 - **On or off.** A tool turned off is not offered to the model, and a call of
   it is refused.
-- **How it asks you**: as its kind and the mode say (the default), **Ask
-  before each call** (in every mode, yolo too, with no "always"), or **Never
-  ask** (but plan mode still refuses what changes things, and a command
+- **How it asks you** (beside its switch): **As the mode says** (the
+  default), **Always asks** (before each call, in every mode, yolo too, with
+  no "always"), or **Never asks** (but plan mode still refuses what changes things, and a command
   Laya flags still asks). One of Arena's tools that Arena's admins set to ask
   first, and `stop_command`, cannot be set to never ask.
-- **What the model is told of it**: your words in place of its description.
-- **Its arguments**: **Always this** fixes one (the model is not offered it,
+- **What the model is told of it** (Advanced): your words in place of its description.
+- **Its arguments** (Advanced): **Always this** fixes one (the model is not offered it,
   and every call gets your value); **A default** fills one the model leaves
   out (its description says so).
-- **Kept for**: **Every project** (your `config.json`, `"toolSettings"`) or
-  **This project** (on this computer only, over your settings for every
-  project). In the terminal: `/tools set NAME on|off|ask|allow|default
+- **Kept for**: every project (your `config.json`, `"toolSettings"`), or,
+  with **Only in this project** on, this project (on this computer only, over
+  your settings for every project). In the terminal: `/tools set NAME on|off|ask|allow|default
   [--here]`.
 - **The project's own** (`.arena/settings.json`, `"tools": {"NAME":
   {"enabled": false}}` or `{"approval": "ask"}`) may only turn a tool off or

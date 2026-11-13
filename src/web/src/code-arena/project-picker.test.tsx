@@ -3,7 +3,25 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { Providers } from '@/app/providers'
 import { fakeApi } from '@/test/utils'
-import { ProjectPicker } from './project-picker'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { ProjectSubmenu } from './project-picker'
+
+/** The chat's More menu, with the project's submenu in it. */
+function ProjectPicker({ project }: { project: { id: string; name: string } | null }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>More</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <ProjectSubmenu project={project} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+async function openProjects(name: string) {
+  await userEvent.click(screen.getByRole('button', { name: 'More' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name }))
+}
 
 describe('the session’s project in the IDE', () => {
   it('lists the projects the person may add to, the repository’s marked, and chooses one or none', async () => {
@@ -16,7 +34,7 @@ describe('the session’s project in the IDE', () => {
         <ProjectPicker project={{ id: 'p1', name: 'Payments' }} />
       </Providers>,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Project: Payments' }))
+    await openProjects('Project: Payments')
     expect(await screen.findByRole('menuitemcheckbox', { name: 'Payments' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('menuitemcheckbox', { name: /Company wiki/ })).toHaveTextContent("its repository's")
     await userEvent.click(screen.getByRole('menuitemcheckbox', { name: /Company wiki/ }))
@@ -28,7 +46,7 @@ describe('the session’s project in the IDE', () => {
         <ProjectPicker project={{ id: 'p2', name: 'Company wiki' }} />
       </Providers>,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Project: Company wiki' }))
+    await openProjects('Project: Company wiki')
     await userEvent.click(await screen.findByRole('menuitem', { name: 'In no project' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({ project: 'none' }))
   })
@@ -40,7 +58,7 @@ describe('the session’s project in the IDE', () => {
         <ProjectPicker project={null} />
       </Providers>,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Project: No project' }))
+    await openProjects('Project: No project')
     expect(await screen.findByRole('menuitem', { name: 'https://llm.test did not answer.' })).toBeInTheDocument()
   })
 })

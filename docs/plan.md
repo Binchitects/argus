@@ -79,6 +79,10 @@ program, and Edge or Chrome 109.
 11. **Agents and scheduled tasks in Code Arena** (asked 2026-11-13): Arena's agents (Agent Studio) and scheduled tasks
     made, run and followed from Code Arena too, the IDE and the terminal.
 
+12. **Code Arena's UI tidied** (asked 2026-11-13): the chat's header holds only what is used often, the rest in a
+    menu or where it belongs; no tool twice in its tools, and those of no use in Code Arena gone; the tools'
+    customization simple; every pane resizable.
+
 Done so far: 1 (YaRN on vLLM, SGLang, LMDeploy), 2 (time accounting), 5 (an answer cut at its longest carries on by
 itself), 10.
 

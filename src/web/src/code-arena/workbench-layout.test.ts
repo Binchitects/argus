@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allViews, barViews, defaults, keepWithheld, layoutOf, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, withhold, type Layout } from './workbench-layout'
+import { activityWidth, allViews, barViews, bounds, chatMax, defaults, editorMin, sideMax, tasksMax, threadMin, keepWithheld, layoutOf, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, withhold, type Layout } from './workbench-layout'
 
 const apply = (l: Layout, c: Partial<Layout>): Layout => ({ ...l, ...c })
 
@@ -9,7 +9,8 @@ describe('the workbench layout', () => {
       side: 9999, sideAt: 'right', panelAt: 'left', view: 'problems', panelTab: 'problems',
       order: ['search', 'search', 'nope', 'explorer'], panelTabs: ['problems', 'output', 42], panelOpen: true,
     })
-    expect(l.side).toBe(640)
+    // Kept as large as dragged, up to a bound: the window decides what is shown (sideMax).
+    expect(l.side).toBe(4000)
     expect(l.panelAt).toBe('left')
     expect(l.sideAt).toBe('right')
     // Search first as dragged, the views left out after it, none twice.
@@ -102,5 +103,15 @@ describe('the workbench layout', () => {
     const moved = keepWithheld(saved, reorderSide(shown, 'search'), ['memory'])
     expect([...moved.order!].sort()).toEqual([...allViews].sort())
     expect(moved.order!.at(-2)).toBe('search')
+  })
+
+  it('lets the side bar and the chat grow until the editor keeps its minimum, and the tasks until the thread keeps its', () => {
+    expect(sideMax(1600, { chat: 440, chatOpen: true })).toBe(1600 - 440 - activityWidth - editorMin)
+    expect(sideMax(1600, { chat: 440, chatOpen: false })).toBe(1600 - activityWidth - editorMin)
+    expect(chatMax(1600, { side: 264, sideOpen: true })).toBe(1600 - 264 - activityWidth - editorMin)
+    // A window too narrow for both: each still at least its smallest.
+    expect(chatMax(500, { side: 400, sideOpen: true })).toBe(bounds.chat[0])
+    expect(tasksMax(1000)).toBe(1000 - threadMin)
+    expect(tasksMax(500)).toBe(500)
   })
 })

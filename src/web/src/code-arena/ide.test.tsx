@@ -1078,7 +1078,8 @@ describe('Code Arena, the IDE', () => {
       await waitFor(() => expect(editor().model?.value).toBe('# Shop, typed elsewhere\n'))
 
       // The chat moves out too: hidden here, and shown again when it comes back.
-      await userEvent.click(screen.getByRole('button', { name: 'Open the chat in a new window' }))
+      await userEvent.click(screen.getByRole('button', { name: 'More' }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in a new window' }))
       expect(new URL(String(opened.mock.calls[1]![0])).searchParams.get('window')).toBe('chat')
       await waitFor(() => expect(document.querySelector('aside[aria-label="Agent"]')).toHaveAttribute('hidden'))
       other.postMessage({ type: 'back', kind: 'chat' })
@@ -3279,7 +3280,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
     await waitFor(() =>
       expect(now.preferences.layout).toEqual({
-        view: 'explorer', side: 300, chat: 960, panel: 280, tasks: 320, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
+        view: 'explorer', side: 300, chat: 4000, panel: 280, tasks: 320, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
         sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output', 'ports'], hidden: [], activityBar: 'default',
       }),
     )
@@ -4809,7 +4810,14 @@ describe('Code Arena, the help', () => {
       expect(screen.getByRole('button', { name: button })).toHaveFocus()
     }
     await at('Help: Explorer', 'Explorer', 'the-ide')
-    await at('Help: Chat with the agent', 'Chat with the agent', 'modes')
+    // The chat's help is in its More menu.
+    await userEvent.click(screen.getByRole('button', { name: 'More' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Help: the chat' }))
+    sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
+    expect(within(sheet).getByRole('heading', { name: 'This part: Chat with the agent' })).toBeInTheDocument()
+    expect(within(sheet).getByRole('link', { name: 'More on this in the manual' })).toHaveAttribute('href', 'https://llm.test/help/code-arena#modes')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await userEvent.click(within(bar).getByRole('button', { name: 'Search' }))
     await at('Help: Search', 'Search', 'the-ide')
     await userEvent.click(within(bar).getByRole('button', { name: 'Agent changes (1)' }))

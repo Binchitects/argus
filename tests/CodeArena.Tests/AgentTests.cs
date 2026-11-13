@@ -28,7 +28,8 @@ public sealed class AgentTests : IDisposable
         var tools = FakeGateway.ToolNames(first);
         Assert.Contains("read_file", tools);
         Assert.Contains("web_search", tools);
-        Assert.Contains("arena_read_file", tools); // Arena's read_file, renamed beside the local one
+        // Arena's read_file is Code Arena's own already: not offered twice.
+        Assert.DoesNotContain("arena_read_file", tools);
         var system = FakeGateway.System(first);
         Assert.Contains("Always answer in one sentence.", system);
         Assert.Contains("Arena: search the web with web_search", system);

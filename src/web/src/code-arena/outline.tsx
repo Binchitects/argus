@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, ChevronsDownUp } from 'lucide-react'
 import { useState } from 'react'
+import { Splitter } from './splitter'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { useOutline } from './outline-data'
@@ -10,6 +11,9 @@ const kindMark: Record<string, string> = {
   const: 'k', event: 'e', type: 'T', component: '<>', accessor: 'p', heading: '#', indexer: '[]', operator: '±', delegate: 'D',
 }
 
+const outlineKey = 'code-arena.outline-height'
+const outlineMin = 60
+
 /**
  * The Outline at the foot of the Explorer, as VS Code's: the symbols of the file shown, nested, read from the text the editor
  * holds (unsaved edits too, 300 ms after typing pauses), the one the cursor is in marked; a click goes to it.
@@ -18,6 +22,23 @@ export function Outline() {
   const ed = useEditor()
   const path = ed.active?.kind === 'file' && ed.active.status === 'ready' ? ed.active.path : null
   const [open, setOpen] = useState(true)
+  // As tall as the person dragged its top edge (kept on this computer), the Explorer keeping the rest.
+  const [height, setHeight] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(outlineKey))
+      return Number.isFinite(saved) && saved >= outlineMin ? saved : 240
+    } catch {
+      return 240
+    }
+  })
+  const resize = (size: number) => {
+    setHeight(size)
+    try {
+      localStorage.setItem(outlineKey, String(size))
+    } catch {
+      // Not kept: it is as tall as dragged until the page goes.
+    }
+  }
   const [shut, setShut] = useState<Set<string>>(new Set())
   const { tree, read, error } = useOutline(path, open)
   const here = ed.cursor ? innermost(tree, ed.cursor.line) : null
@@ -30,7 +51,8 @@ export function Outline() {
   }
   walk(tree, 0)
   return (
-    <section aria-label="Outline" className={cn('flex min-h-0 shrink-0 flex-col border-t', open && 'max-h-[40%]')}>
+    <section aria-label="Outline" className={cn('flex min-h-0 shrink-0 flex-col', !open && 'border-t')} style={open ? { height, maxHeight: 'calc(100% - 4rem)' } : undefined}>
+      {open && <Splitter label="Resize the outline" orientation="horizontal" value={height} min={outlineMin} max={Math.max(outlineMin, window.innerHeight - 160)} grow={-1} onChange={resize} />}
       <div className="flex h-7 shrink-0 items-center pr-1.5">
         <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-1 pl-1.5 text-left text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {open ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />}

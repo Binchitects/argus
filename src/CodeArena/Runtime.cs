@@ -1703,6 +1703,12 @@ internal sealed partial class Runtime : IAsyncDisposable
                 {
                     continue;
                 }
+                else if (link.Name == ArenaName && (local.Contains(name) || NotForCodeArena.Contains(t["_meta"].Str("arena/tool") ?? "")))
+                {
+                    // Code Arena has its own (web search and fetch, memory, past sessions, skills, the plan, the shell for
+                    // Python and sums), or it is of no use in coding (speech, video, decks): Arena's is not offered twice.
+                    continue;
+                }
                 else
                 {
                     // Arena (and code-intel) decide who may call what; a tool marked as changing things still asks here first.
@@ -2228,6 +2234,16 @@ internal sealed partial class Runtime : IAsyncDisposable
         var notes = report.Trim();
         return notes.Length == 0 || notes.StartsWith(PlanHolds, StringComparison.OrdinalIgnoreCase) ? null : notes.Length <= 4000 ? notes : notes[..4000];
     }
+
+    /// <summary>
+    /// Arena's tools Code Arena does not take: those it has its own of (memory, past chats and sessions, skills, plans and
+    /// checklists, Python and sums in its shell, the date) and those of no use in coding (3D, video, speech, decks, data
+    /// questions, the decision model). An Arena function named as one of Code Arena's own is left out too.
+    /// </summary>
+    public static readonly HashSet<string> NotForCodeArena = new(StringComparer.Ordinal)
+    {
+        "memory", "chat_history", "skills", "plans", "python", "calculator", "time", "3d", "video", "speech", "decks", "data", "laya",
+    };
 
     /// <summary>An MCP tool as the model sees it, calling the server when run; a call that finds the server gone has it connect again.</summary>
     public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing, ServerLink? link = null, string? group = null)

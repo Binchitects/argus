@@ -87,7 +87,7 @@ const mergeCommands: [string, string, ConflictAction][] = [
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
-import { barViews, bounds, inPanel, keepWithheld, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, withhold, type Layout, type PanelTab, type View } from './workbench-layout'
+import { activityWidth, barViews, bounds, chatMax, editorMin, inPanel, keepWithheld, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideMax, sideViews, tasksMax, toPanel, toSide, withhold, type Layout, type PanelTab, type View } from './workbench-layout'
 import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
@@ -1528,7 +1528,10 @@ function Workbench({
   const left = layout.sideAt === 'left'
   // Beside the editor, the panel is as wide as the window leaves; below it, as tall.
   const across = layout.panelAt !== 'bottom'
-  const maxSidePanel = Math.max(200, width - (layout.sideOpen ? layout.side : 0) - (layout.chatOpen ? layout.chat : 0) - 360)
+  // The side bar and the chat as large as the person dragged them, within what the window leaves the editor.
+  const chatSize = Math.min(layout.chat, chatMax(width, { side: bounds.side[0], sideOpen: layout.sideOpen }))
+  const sideSize = Math.min(layout.side, sideMax(width, { chat: chatSize, chatOpen: layout.chatOpen }))
+  const maxSidePanel = Math.max(200, width - (layout.sideOpen ? sideSize : 0) - (layout.chatOpen ? chatSize : 0) - activityWidth - editorMin)
   const panelSize = Math.min(layout.panel, across ? maxSidePanel : maxPanel)
   /** A view's own part, wherever it is (the side bar or the panel); `shown`: it is on screen now. */
   const viewPart = (v: View, shown: boolean): ReactNode => {
@@ -1637,7 +1640,7 @@ function Workbench({
   )
 
   const sideBar = (
-    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="flex min-h-0 shrink-0 flex-col overflow-clip bg-sidebar text-sidebar-foreground">
+    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: sideSize }} className="flex min-h-0 shrink-0 flex-col overflow-clip bg-sidebar text-sidebar-foreground">
       {topBar}
       {side.map((v) => (
         <div key={v} hidden={layout.view !== v} className="min-h-0 flex-1">
@@ -1647,7 +1650,7 @@ function Workbench({
     </aside>
   )
   const sideSplitter = layout.sideOpen && (
-    <Splitter key="side-splitter" label="Resize the side bar" orientation="vertical" value={layout.side} min={bounds.side[0]} max={bounds.side[1]} grow={left ? 1 : -1} onChange={(size) => change({ side: size })} />
+    <Splitter key="side-splitter" label="Resize the side bar" orientation="vertical" value={sideSize} min={bounds.side[0]} max={sideMax(width, { chat: chatSize, chatOpen: layout.chatOpen })} grow={left ? 1 : -1} onChange={(size) => change({ side: size })} />
   )
 
   const panel = panelUsed && (
@@ -1742,10 +1745,10 @@ function Workbench({
   )
 
   const chatSplitter = layout.chatOpen && (
-    <Splitter key="chat-splitter" label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={left ? -1 : 1} onChange={(size) => change({ chat: size })} />
+    <Splitter key="chat-splitter" label="Resize the chat" orientation="vertical" value={chatSize} min={bounds.chat[0]} max={chatMax(width, { side: sideSize, sideOpen: layout.sideOpen })} grow={left ? -1 : 1} onChange={(size) => change({ chat: size })} />
   )
   const chatSide = (
-    <aside key="chat" hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0 overflow-clip">
+    <aside key="chat" hidden={!layout.chatOpen} aria-label="Agent" style={{ width: chatSize }} className="min-h-0 shrink-0 overflow-clip">
       <Thread
         key={state.session}
         state={state}
@@ -1756,7 +1759,8 @@ function Workbench({
         onShow={showChat}
         onEvent={onEvent}
         onTurnEnd={onTurnEnd}
-        tasksWidth={layout.tasks}
+        tasksWidth={Math.min(layout.tasks, tasksMax(chatSize))}
+        tasksMaxWidth={tasksMax(chatSize)}
         onTasksWidth={(size) => change({ tasks: size })}
         shown={layout.chatOpen}
       />

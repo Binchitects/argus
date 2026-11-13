@@ -35,7 +35,7 @@ function show() {
 }
 
 describe('Configure Tools', () => {
-  it('turns a tool off, makes one ask, fixes an argument, and enables the project’s own for this project', async () => {
+  it('turns a tool off, makes one ask beside its switch, fixes an argument under Advanced, and enables the project’s own for this project', async () => {
     const calls = fakeApi(member, {
       'GET /api/tools/settings': () => ({ json: listed() }),
       'POST /api/tools/settings': () => ({ json: listed() }),
@@ -49,7 +49,8 @@ describe('Configure Tools', () => {
     await userEvent.click(within(own).getByRole('switch', { name: 'Enable deploy for this project' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/tools/enable')?.body).toEqual({ key: 'tool:deploy', on: true }))
 
-    // Off by the project: the person cannot turn it on.
+    // Off by the project: the person cannot turn it on. A group folds, and says how many of its are on.
+    expect(within(dialog).getByRole('button', { name: /Code Arena\s*1 of 2 on/ })).toHaveAttribute('aria-expanded', 'true')
     const write = within(dialog).getByRole('listitem', { name: 'write_file' })
     expect(within(write).getByRole('switch', { name: 'write_file on' })).toBeDisabled()
     expect(within(write).getByText('Turned off by the project (.arena/settings.json).')).toBeInTheDocument()
@@ -58,18 +59,21 @@ describe('Configure Tools', () => {
     await userEvent.click(within(shell).getByRole('switch', { name: 'run_shell on' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/tools/settings')?.body).toEqual({ name: 'run_shell', level: 'person', settings: { enabled: false } }))
 
-    // For this project only: asks each call, its timeout fixed.
-    await userEvent.click(within(dialog).getByRole('radio', { name: 'This project' }))
-    await userEvent.click(within(shell).getByRole('button', { name: 'Settings of run_shell' }))
-    const form = within(shell).getByRole('form', { name: 'Settings of run_shell' })
-    await userEvent.click(within(form).getByRole('radio', { name: 'Ask before each call' }))
+    // For this project only: asks each call (beside its switch), its timeout fixed and its words under Advanced.
+    await userEvent.click(within(dialog).getByRole('switch', { name: 'Only in this project' }))
+    await userEvent.selectOptions(within(shell).getByRole('combobox', { name: 'How run_shell asks' }), 'ask')
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/tools/settings').at(-1)?.body).toEqual({ name: 'run_shell', level: 'here', settings: { approval: 'ask' } }),
+    )
+    await userEvent.click(within(shell).getByRole('button', { name: 'Advanced settings of run_shell' }))
+    const form = within(shell).getByRole('form', { name: 'Advanced settings of run_shell' })
     await userEvent.selectOptions(within(form).getByRole('combobox', { name: 'How timeout_seconds is given' }), 'fixed')
     await userEvent.type(within(form).getByRole('textbox', { name: 'The value of timeout_seconds' }), '300')
     await userEvent.type(within(form).getByRole('textbox', { name: 'What the model is told of it' }), 'Run make targets only.')
     await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/tools/settings').at(-1)?.body).toEqual({
-        name: 'run_shell', level: 'here', settings: { approval: 'ask', description: 'Run make targets only.', fixed: { timeout_seconds: 300 } },
+        name: 'run_shell', level: 'here', settings: { description: 'Run make targets only.', fixed: { timeout_seconds: 300 } },
       }),
     )
   })
@@ -78,8 +82,8 @@ describe('Configure Tools', () => {
     fakeApi(member, { 'GET /api/tools/settings': () => ({ json: listed() }) })
     show()
     const web = await screen.findByRole('listitem', { name: 'web_search' })
-    await userEvent.click(within(web).getByRole('button', { name: 'Settings of web_search' }))
-    expect(within(web).getByRole('radio', { name: /Never ask/ })).toBeDisabled()
+    expect(within(web).getByRole('option', { name: 'Never asks' })).toBeDisabled()
+    expect(within(web).getByText('Arena’s admins set it to ask before each call.')).toBeInTheDocument()
     await userEvent.type(screen.getByRole('textbox', { name: 'Find a tool' }), 'greet')
     expect(screen.queryByRole('listitem', { name: 'web_search' })).toBeNull()
     expect(screen.getByRole('listitem', { name: 'greet' })).toBeInTheDocument()

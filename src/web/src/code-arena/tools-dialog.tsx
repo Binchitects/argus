@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Search, Settings2, ShieldAlert } from 'lucide-react'
+import { ChevronDown, ChevronRight, Search, Settings2 } from 'lucide-react'
 import { useState } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input, Textarea } from '@/components/ui/input'
@@ -9,7 +8,6 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
-import { cn } from '@/lib/utils'
 import { api } from './http'
 
 /** One tool's settings at a level: on or off, how it asks, its description for the model, fixed and default arguments. */
@@ -107,12 +105,25 @@ export function ToolsDialog({ open, onOpenChange }: { open: boolean; onOpenChang
   )
 }
 
+type Asks = 'default' | 'ask' | 'allow'
+
+const asksChoices: { value: Asks; label: string }[] = [
+  { value: 'default', label: 'As the mode says' },
+  { value: 'ask', label: 'Always asks' },
+  { value: 'allow', label: 'Never asks' },
+]
+
+/**
+ * Every tool in one list by where it comes from, each with its switch and how it asks, side by side; what the model is told
+ * of it and its arguments under Advanced. Kept for you in every project, or (ticked) in this project only.
+ */
 function ToolsEditor() {
   const queryClient = useQueryClient()
   const listed = useQuery(toolSettingsQuery)
   const [level, setLevel] = useState<Level>('person')
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const set = (data: ToolSettingsList) => queryClient.setQueryData(toolSettingsQuery.queryKey, data)
   const save = useMutation({
     mutationFn: ({ name, settings }: { name: string; settings: ToolChoice }) => api<ToolSettingsList>('/api/tools/settings', { body: { name, level, settings } }),
@@ -136,37 +147,25 @@ function ToolsEditor() {
   const waiting = [...data.own.filter((t) => t.source === 'project'), ...data.servers]
   const at = (t: ToolEntry) => (level === 'person' ? t.person : t.here)
   return (
-    <div className="grid min-h-0 gap-4">
+    <div className="grid min-h-0 gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div role="radiogroup" aria-label="Kept for" className="inline-flex rounded-md border p-0.5 text-xs">
-          {(
-            [
-              ['person', 'Every project'],
-              ['here', 'This project'],
-            ] as const
-          ).map(([value, label]) => (
-            <label key={value} className={cn('cursor-pointer rounded-sm px-2.5 py-1 has-focus-visible:ring-2 has-focus-visible:ring-ring', level === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-              <input type="radio" className="sr-only" name="tool-level" checked={level === value} onChange={() => setLevel(value)} />
-              {label}
-            </label>
-          ))}
-        </div>
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-          {level === 'person' ? 'Kept in your config.json: for you, in every project.' : 'Kept on this computer for this project only, over your settings for every project; never in the repository.'}
-        </p>
-        <div className="relative w-full sm:w-56">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <Input className="h-8 ps-8 text-sm" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a tool" aria-label="Find a tool" />
         </div>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Switch checked={level === 'here'} onCheckedChange={(here) => setLevel(here ? 'here' : 'person')} aria-label="Only in this project" />
+          Only in this project
+        </label>
       </div>
-      <div className="grid max-h-[60vh] gap-4 overflow-y-auto pe-1">
+      <div className="grid max-h-[60vh] gap-3 overflow-y-auto pe-1">
         {waiting.length > 0 && (
-          <section aria-label="The project’s own" className="grid gap-2">
-            <h3 className="text-sm font-semibold">The project’s own</h3>
-            <p className="text-xs text-muted-foreground">Defined in the repository: each runs only once you enable it here, as it is now. A change to its command waits for you again.</p>
+          <section aria-label="The project’s own" className="grid gap-2 rounded-md border border-dashed p-2.5">
+            <h3 className="text-sm font-semibold">The project’s own, waiting for you</h3>
+            <p className="text-xs text-muted-foreground">Defined in the repository: each runs only once you enable it, as it is now. A change to its command waits for you again.</p>
             <ul className="grid gap-2">
               {waiting.map((w) => (
-                <li key={w.key} className="flex items-start gap-3 rounded-md border p-2.5 text-sm">
+                <li key={w.key} className="flex items-start gap-3 text-sm">
                   <div className="grid min-w-0 flex-1 gap-0.5">
                     <span className="font-mono">{w.name}</span>
                     {'description' in w && <span className="text-xs text-muted-foreground">{w.description}</span>}
@@ -181,51 +180,86 @@ function ToolsEditor() {
             </ul>
           </section>
         )}
-        {groups.map((g) => (
-          <section key={g} aria-label={g} className="grid gap-1">
-            <h3 className="text-sm font-semibold">{g}</h3>
-            <ul className="divide-y rounded-md border">
-              {shown
-                .filter((t) => t.groupTitle === g)
-                .map((t) => {
-                  const offByProject = t.project.enabled === false
-                  const expanded = open === t.name
-                  return (
-                    <li key={t.name} aria-label={t.name} className="grid gap-2 p-2.5 text-sm">
-                      <div className="flex items-start gap-2">
-                        <button
-                          type="button"
-                          className="mt-0.5 grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                          aria-expanded={expanded}
-                          aria-label={`Settings of ${t.name}`}
-                          onClick={() => setOpen(expanded ? null : t.name)}
-                        >
-                          {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                        </button>
-                        <div className="grid min-w-0 flex-1 gap-0.5">
-                          <span className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-mono">{t.name}</span>
-                            <Badge variant="outline">{kindLabel[t.kind]}</Badge>
-                            {t.origin && <Badge variant="outline">{t.origin}</Badge>}
-                            {t.asks && <span className={cn('text-xs', t.asks === 'allow' || t.asks === 'ask' ? 'text-warning-ink' : 'text-muted-foreground')}>{asksLabel[t.asks]}</span>}
-                          </span>
-                          <span className="line-clamp-2 text-xs text-muted-foreground">{t.description}</span>
-                          {offByProject && <span className="text-xs text-muted-foreground">Turned off by the project ({data.projectFile}).</span>}
+        {groups.map((g) => {
+          const tools = shown.filter((t) => t.groupTitle === g)
+          const isFolded = !q && folded.has(g)
+          return (
+            <section key={g} aria-label={g} className="grid gap-1">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded text-left text-sm font-semibold hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                aria-expanded={!isFolded}
+                onClick={() => setFolded((f) => (f.has(g) ? new Set([...f].filter((x) => x !== g)) : new Set([...f, g])))}
+              >
+                {isFolded ? <ChevronRight className="size-4" aria-hidden="true" /> : <ChevronDown className="size-4" aria-hidden="true" />}
+                {g}
+                <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                  {tools.filter((t) => t.enabled).length} of {tools.length} on
+                </span>
+              </button>
+              {!isFolded && (
+                <ul className="divide-y rounded-md border">
+                  {tools.map((t) => {
+                    const offByProject = t.project.enabled === false
+                    const expanded = open === t.name
+                    const choice = at(t)
+                    const asks: Asks = choice.approval ?? 'default'
+                    return (
+                      <li key={t.name} aria-label={t.name} className="grid gap-2 px-2.5 py-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={t.enabled}
+                            disabled={offByProject || save.isPending}
+                            aria-label={`${t.name} on`}
+                            onCheckedChange={(on) => save.mutate({ name: t.name, settings: { ...choice, enabled: on ? undefined : false } })}
+                          />
+                          <div className="grid min-w-0 flex-1">
+                            <Tooltip content={`${kindLabel[t.kind]}${t.origin ? ` · ${t.origin}` : ''}${t.asks ? ` · ${asksLabel[t.asks]}` : ''}`}>
+                              <span className="truncate font-mono">{t.name}</span>
+                            </Tooltip>
+                            <span className="truncate text-xs text-muted-foreground">{offByProject ? `Turned off by the project (${data.projectFile}).` : t.description}</span>
+                          </div>
+                          {t.kind !== 'read' && t.asks !== 'never' && (
+                            <select
+                              aria-label={`How ${t.name} asks`}
+                              value={asks}
+                              disabled={save.isPending}
+                              onChange={(e) => {
+                                const v = e.target.value as Asks
+                                const { approval: _, ...rest } = choice
+                                save.mutate({ name: t.name, settings: v === 'default' ? rest : { ...rest, approval: v } })
+                              }}
+                              className="h-7 shrink-0 rounded-md border bg-card px-1.5 text-xs"
+                            >
+                              {asksChoices.map((a) => (
+                                <option key={a.value} value={a.value} disabled={a.value === 'allow' && !!t.allowLocked}>
+                                  {a.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <Tooltip content="Advanced: what the model is told of it, its arguments">
+                            <button
+                              type="button"
+                              className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                              aria-expanded={expanded}
+                              aria-label={`Advanced settings of ${t.name}`}
+                              onClick={() => setOpen(expanded ? null : t.name)}
+                            >
+                              <Settings2 className="size-3.5" />
+                            </button>
+                          </Tooltip>
                         </div>
-                        <Switch
-                          checked={t.enabled}
-                          disabled={offByProject || save.isPending}
-                          aria-label={`${t.name} on`}
-                          onCheckedChange={(on) => save.mutate({ name: t.name, settings: { ...at(t), enabled: on ? undefined : false } })}
-                        />
-                      </div>
-                      {expanded && <ToolForm key={`${t.name}-${level}`} tool={t} choice={at(t)} saving={save.isPending} onSave={(settings) => save.mutate({ name: t.name, settings })} />}
-                    </li>
-                  )
-                })}
-            </ul>
-          </section>
-        ))}
+                        {t.allowLocked && asks !== 'ask' && <span className="ms-11 text-xs text-muted-foreground">{t.allowLocked}</span>}
+                        {expanded && <ToolForm key={`${t.name}-${level}`} tool={t} choice={choice} saving={save.isPending} onSave={(settings) => save.mutate({ name: t.name, settings })} />}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          )
+        })}
         {shown.length === 0 && <p className="text-sm text-muted-foreground">No tool has “{search}” in its name or description.</p>}
       </div>
     </div>
@@ -250,7 +284,6 @@ function parsed(text: string, type: string | null): unknown {
 const shownValue = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
 
 function ToolForm({ tool: t, choice, saving, onSave }: { tool: ToolEntry; choice: ToolChoice; saving: boolean; onSave: (c: ToolChoice) => void }) {
-  const [approval, setApproval] = useState<'default' | 'ask' | 'allow'>(choice.approval ?? 'default')
   const [description, setDescription] = useState(choice.description ?? '')
   const [args, setArgs] = useState<Record<string, { how: 'model' | 'default' | 'fixed'; value: string }>>(() =>
     Object.fromEntries(
@@ -265,47 +298,24 @@ function ToolForm({ tool: t, choice, saving, onSave }: { tool: ToolEntry; choice
     ),
   )
   const pick = (how: 'model' | 'default' | 'fixed') => Object.fromEntries(t.arguments.filter((a) => args[a.name]?.how === how).map((a) => [a.name, parsed(args[a.name]!.value, a.type)]))
-  const approvals = [
-    { value: 'default', label: 'As its kind and the mode say' },
-    { value: 'ask', label: 'Ask before each call' },
-    { value: 'allow', label: 'Never ask' },
-  ] as const
   return (
     <form
       className="grid gap-3 rounded-md bg-muted/40 p-3"
-      aria-label={`Settings of ${t.name}`}
+      aria-label={`Advanced settings of ${t.name}`}
       onSubmit={(e) => {
         e.preventDefault()
         const defaults = pick('default')
         const fixed = pick('fixed')
         onSave({
           ...(choice.enabled === false ? { enabled: false } : {}),
-          ...(approval !== 'default' ? { approval } : {}),
+          ...(choice.approval ? { approval: choice.approval } : {}),
           ...(description.trim() ? { description: description.trim() } : {}),
           ...(Object.keys(defaults).length ? { defaults } : {}),
           ...(Object.keys(fixed).length ? { fixed } : {}),
         })
       }}
     >
-      <fieldset className="grid gap-1.5">
-        <legend className="mb-1 text-xs font-medium">How it asks you</legend>
-        {approvals.map((a) => {
-          const locked = a.value === 'allow' && t.allowLocked
-          return (
-            <label key={a.value} className={cn('flex items-center gap-2 text-sm', locked && 'opacity-60')}>
-              <input type="radio" name={`approval-${t.name}`} className="accent-primary" checked={approval === a.value} disabled={!!locked} onChange={() => setApproval(a.value)} />
-              {a.label}
-              {locked && (
-                <Tooltip content={t.allowLocked}>
-                  <ShieldAlert className="size-3.5 text-muted-foreground" aria-label={t.allowLocked ?? undefined} />
-                </Tooltip>
-              )}
-            </label>
-          )
-        })}
-        {approval === 'allow' && <p className="text-xs text-muted-foreground">Plan mode still refuses what changes things, and a command Laya flags still asks.</p>}
-        {t.project.approval === 'ask' && <p className="text-xs text-muted-foreground">The project makes it ask before each call, whatever is chosen here.</p>}
-      </fieldset>
+      {t.project.approval === 'ask' && <p className="text-xs text-muted-foreground">The project makes it ask before each call, whatever is chosen here.</p>}
       <div className="grid gap-1 text-xs font-medium">
         <label htmlFor={`description-${t.name}`}>What the model is told of it</label>
         <Textarea id={`description-${t.name}`} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t.description} rows={3} className="text-sm font-normal" />
@@ -345,25 +355,10 @@ function ToolForm({ tool: t, choice, saving, onSave }: { tool: ToolEntry; choice
         <Button type="submit" size="sm" loading={saving}>
           Save
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => onSave(choice.enabled === false ? { enabled: false } : {})}>
+        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => onSave({ ...(choice.enabled === false ? { enabled: false } : {}), ...(choice.approval ? { approval: choice.approval } : {}) })}>
           Reset
         </Button>
       </div>
     </form>
-  )
-}
-
-/** The chat header's button for Configure Tools. */
-export function ConfigureToolsButton() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <Tooltip content="Configure Tools…">
-        <Button type="button" variant="ghost" size="icon-sm" onClick={() => setOpen(true)} aria-label="Configure Tools">
-          <Settings2 />
-        </Button>
-      </Tooltip>
-      <ToolsDialog open={open} onOpenChange={setOpen} />
-    </>
   )
 }

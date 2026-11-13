@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, Network, PanelRightClose, Paperclip, PictureInPicture2, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, MoreHorizontal, Network, Plug, CircleHelp, PanelRightClose, Paperclip, PictureInPicture2, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
@@ -19,7 +19,7 @@ import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
-import { ProvidersButton } from './providers-dialog'
+import { ProvidersDialog } from './providers-dialog'
 import { ToolsPicker } from '@/pages/chat/tools-picker'
 import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
@@ -85,13 +85,14 @@ import { runCommand, useCommands } from './commands'
 import { makeProject } from '@/pages/projects/api'
 import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
+import { useOpenHelp } from './help-context'
 import { SyncStatus } from './sync-status'
-import { ProjectPicker } from './project-picker'
+import { ProjectSubmenu } from './project-picker'
 import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
 import { familyThemeName, themeNamed } from './settings-schema'
 import { useShownTheme } from './theme'
-import { AssistantPicker } from './assistant-picker'
+import { AssistantSubmenu } from './assistant-picker'
 import { GoalBar, GoalDialog, LoopsDialog } from './goal'
 import { TasksPanel } from './tasks-panel'
 import { useTurnNotices } from './turn-notices'
@@ -367,6 +368,64 @@ export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' |
 
 
 /** How much runs without asking: ask, auto-edit, plan, yolo. */
+/**
+ * The chat's "More" menu: what is chosen once in a while, not each turn (the assistant it works as, the project it counts
+ * to, other providers' models), the goal, help, and the chat's place (its own window, hidden).
+ */
+function ChatMoreMenu({
+  state,
+  onGoal,
+  onProviders,
+  onHelp,
+  onDetach,
+  onHide,
+}: {
+  state: CodeState
+  onGoal: () => void
+  onProviders: () => void
+  onHelp?: () => void
+  onDetach?: () => void
+  onHide?: () => void
+}) {
+  return (
+    <DropdownMenu>
+      <Tooltip content="More: the assistant, the project, providers, a goal, the window">
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="More">
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-64">
+        <AssistantSubmenu state={state} />
+        {state.arenaChats && <ProjectSubmenu project={state.workProject} />}
+        <DropdownMenuItem onSelect={onProviders}>
+          <Plug /> Other providers…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onGoal}>
+          <Target /> {goalActive(state.goal) ? 'Add a goal after this one…' : 'Work toward a goal…'}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {onHelp && (
+          <DropdownMenuItem onSelect={onHelp}>
+            <CircleHelp /> Help: the chat
+          </DropdownMenuItem>
+        )}
+        {onDetach && (
+          <DropdownMenuItem onSelect={onDetach}>
+            <PictureInPicture2 /> Open in a new window
+          </DropdownMenuItem>
+        )}
+        {onHide && (
+          <DropdownMenuItem onSelect={onHide}>
+            <PanelRightClose /> Hide the chat
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function ModePicker({ state, onChange }: { state: CodeState; onChange: (mode: Mode) => void }) {
   return (
     <Select value={state.mode} onValueChange={(v) => onChange(v as Mode)}>
@@ -426,6 +485,7 @@ export function Thread({
   onEvent,
   onTurnEnd,
   tasksWidth,
+  tasksMaxWidth,
   onTasksWidth,
   shown = true,
 }: {
@@ -441,6 +501,8 @@ export function Thread({
   onTurnEnd?: () => void
   /** The task list's width beside the thread (the workbench keeps it); a window of its own keeps it here. */
   tasksWidth?: number
+  /** The largest the tasks may be beside the thread (the chat's width less the thread's minimum). */
+  tasksMaxWidth?: number
   onTasksWidth?: (width: number) => void
   /** Whether the chat is on screen (the workbench may hide it): when not, what the agent says goes in a bubble. */
   shown?: boolean
@@ -522,6 +584,8 @@ export function Thread({
 
   // The Tasks panel beside the chat (a task chosen in it, by its id or its call's), and the goal's dialog and bar.
   const [tasksOpen, setTasksOpen] = useState(false)
+  const [providersOpen, setProvidersOpen] = useState(false)
+  const openHelp = useOpenHelp()
   const [taskShown, setTaskShown] = useState<string | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
   const [goalText, setGoalText] = useState('')
@@ -1074,10 +1138,10 @@ export function Thread({
   return (
     <section aria-label="Chat" className="@container flex h-full min-h-0 min-w-0 flex-col bg-background">
       <CodeContextSheet open={contextOpen} onOpenChange={setContextOpen} state={state} onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined} />
+      {/* The header keeps what is used every turn: the model, its thinking and tools, the sync's state, the tasks and the
+          sessions. The rest (the assistant, the project, other providers, the goal, help, the window) is under "More". */}
       <header className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
-        <AssistantPicker state={state} />
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
-        <ProvidersButton />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         {model?.tools !== false && state.toolGroups && (
           <ToolsPicker
@@ -1089,13 +1153,14 @@ export function Thread({
         )}
         <ToolsDialog open={customizing} onOpenChange={setCustomizing} />
         <span className="ml-auto" />
-        {state.arenaChats && <ProjectPicker project={state.workProject} />}
         <SyncStatus sync={state.sync} />
-        <Tooltip content={goalActive(state.goal) ? 'A goal is set: its bar is above the box' : 'Work toward a goal: the agent carries on until its check passes'}>
-          <Button variant="ghost" size="icon-sm" onClick={() => (goalActive(state.goal) ? setGoalAway(null) : askGoal())} aria-label="Goal" aria-pressed={goalActive(state.goal)}>
-            <Target className={cn(state.goal?.status === 'working' && 'text-primary-ink')} />
-          </Button>
-        </Tooltip>
+        {goalActive(state.goal) && (
+          <Tooltip content="A goal is set: its bar is above the box">
+            <Button variant="ghost" size="icon-sm" onClick={() => setGoalAway(null)} aria-label="Goal" aria-pressed>
+              <Target className={cn(state.goal?.status === 'working' && 'text-primary-ink')} />
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip content="Tasks and sub-agents">
           <Button variant="ghost" size="icon-sm" className="relative" onClick={() => setTasksOpen(!tasksOpen)} aria-label={state.tasksRunning ? `Tasks, ${state.tasksRunning} at work` : 'Tasks'} aria-pressed={tasksOpen}>
             <Network />
@@ -1106,27 +1171,20 @@ export function Thread({
             )}
           </Button>
         </Tooltip>
-        {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}
-        <PartHelp part="chat" className="size-8 rounded-md [&_svg]:size-4" />
         <Tooltip content="This folder's sessions">
           <Button variant="ghost" size="icon-sm" onClick={onOpenList} aria-label="Sessions">
             <History />
           </Button>
         </Tooltip>
-        {onDetach && (
-          <Tooltip content="Open the chat in a new window">
-            <Button variant="ghost" size="icon-sm" onClick={onDetach} aria-label="Open the chat in a new window">
-              <PictureInPicture2 />
-            </Button>
-          </Tooltip>
-        )}
-        {onHide && (
-          <Tooltip content="Hide the chat">
-            <Button variant="ghost" size="icon-sm" onClick={onHide} aria-label="Hide the chat">
-              <PanelRightClose />
-            </Button>
-          </Tooltip>
-        )}
+        <ChatMoreMenu
+          state={state}
+          onGoal={() => askGoal()}
+          onProviders={() => setProvidersOpen(true)}
+          onHelp={openHelp ? () => openHelp('chat') : undefined}
+          onDetach={onDetach}
+          onHide={onHide}
+        />
+        {providersOpen && <ProvidersDialog onClose={() => setProvidersOpen(false)} />}
       </header>
       <div className="relative flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1268,7 +1326,7 @@ export function Thread({
           style={{ '--tasks-w': `${tasksW}px` } as CSSProperties}
           className="absolute inset-y-0 right-0 z-20 flex w-[min(var(--tasks-w),100%)] min-w-0 animate-enter bg-background shadow-lg @3xl:static @3xl:w-(--tasks-w) @3xl:shrink-0 @3xl:shadow-none"
         >
-          <Splitter label="Resize the tasks" orientation="vertical" value={tasksW} min={layoutBounds.tasks[0]} max={layoutBounds.tasks[1]} grow={-1} onChange={setTasksW} />
+          <Splitter label="Resize the tasks" orientation="vertical" value={tasksW} min={layoutBounds.tasks[0]} max={tasksMaxWidth ?? layoutBounds.tasks[1]} grow={-1} onChange={setTasksW} />
           <div className="flex min-w-0 flex-1">
             <TasksPanel selected={taskShown} onSelect={setTaskShown} onClose={() => setTasksOpen(false)} plan={state.mode === 'plan'} />
           </div>

@@ -57,8 +57,35 @@ export const defaults: Layout = {
   activityBar: 'default',
 }
 
-/** The panels' sizes, smallest and largest (the panel's largest also follows the window). */
-export const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000], tasks: [240, 720] } as const
+/**
+ * The panels' sizes, smallest and largest kept. Each may be dragged as large as the window leaves (sideMax, chatMax): the
+ * editor keeps editorMin, the chat's thread keeps threadMin beside its tasks.
+ */
+export const bounds = { side: [160, 4000], chat: [280, 4000], panel: [100, 4000], tasks: [200, 4000] } as const
+
+/** What the editor keeps however large the side bar, the chat or a panel beside it are dragged; the activity bar's width. */
+export const editorMin = 240
+export const activityWidth = 48
+/** What the chat's thread keeps beside its tasks. */
+export const threadMin = 280
+
+/** The largest the side bar may be in a window this wide: all of it but the chat (when open), the activity bar and the editor's minimum. */
+export function sideMax(width: number, layout: Pick<Layout, 'chat' | 'chatOpen'>): number {
+  return Math.max(bounds.side[0], width - (layout.chatOpen ? layout.chat : 0) - activityWidth - editorMin)
+}
+
+/** The largest the chat may be in a window this wide: all of it but the side bar (when open), the activity bar and the editor's minimum. */
+export function chatMax(width: number, layout: Pick<Layout, 'side' | 'sideOpen'>): number {
+  return Math.max(bounds.chat[0], width - (layout.sideOpen ? layout.side : 0) - activityWidth - editorMin)
+}
+
+/** A chat this wide (Tailwind's @3xl) has its tasks beside the thread; a narrower one over it. */
+export const tasksBesideAt = 768
+
+/** The largest the tasks may be, in a chat this wide: beside the thread, all but its minimum; over it, the whole chat. */
+export function tasksMax(chat: number): number {
+  return Math.max(bounds.tasks[0], chat >= tasksBesideAt ? chat - threadMin : chat)
+}
 
 const isView = (x: unknown): x is View => typeof x === 'string' && (allViews as readonly string[]).includes(x)
 const isTab = (x: unknown): x is PanelTab => isView(x) || (typeof x === 'string' && (panelParts as readonly string[]).includes(x))
