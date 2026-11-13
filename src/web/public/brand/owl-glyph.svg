@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <title>The owl's glyph</title>
+  <!-- The brand's symbol, for patterns: the A, its apex the owl's two ear tufts, and its two eyes (favicon.svg, reduced). -->
+  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 42 L19 9 L24 15 L29 9 L40 42"/>
+    <circle cx="18.5" cy="30" r="5"/>
+    <circle cx="29.5" cy="30" r="5"/>
+  </g>
+</svg>

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 
 export function EmptyState({ icon: Icon, title, children, action, className }: { icon?: LucideIcon; title: string; children?: ReactNode; action?: ReactNode; className?: string }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-12 text-center', className)}>
+    <div className={cn('owl-pattern owl-pattern-strong flex flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-dashed px-6 py-12 text-center', className)}>
       {Icon && (
         <div className="mb-1 flex size-10 items-center justify-center rounded-full bg-muted">
           <Icon className="size-5 text-muted-foreground" aria-hidden="true" />

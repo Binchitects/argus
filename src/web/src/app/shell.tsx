@@ -117,13 +117,14 @@ function SignedIn({ me }: { me: Me }) {
   }
 
   return (
-    <div className="flex min-h-dvh">
+    // The owl's pattern behind every page (index.css: .owl-pattern), the sidebar's too.
+    <div className="owl-pattern flex min-h-dvh">
       <a href="#main" className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
       {/* The column stretches with the page (its background never ends); the panel inside stays in view. */}
       <aside
-        className={cn('hidden shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 md:block', collapsed ? 'w-14' : 'w-60')}
+        className={cn('owl-pattern hidden shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 md:block', collapsed ? 'w-14' : 'w-60')}
         aria-label="Sidebar"
       >
         <div className="sticky top-0 flex h-dvh flex-col">
