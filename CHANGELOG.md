@@ -94,9 +94,10 @@ and every use a model has is said. And the logo: an owl.
 - **Code Arena's icon on Linux and macOS**: the desktop entry names the
   window's class (the dock shows Code Arena's icon on its window), the icon
   at 128, 256 and 512 px; macOS gets a ready-made `.icns`.
-- **The owl**: the logo is an owl (its ear tufts, its eyes in its facial disc,
-  folded wings, a light belly, its feet), the sign-in's eyes the owl's, and its
-  outline a pattern behind the pages.
+- **The owl**: the logo is an owl drawn sharp, as an A is: pointed ear tufts,
+  sides widening to its talons, wings folded down them like the A's legs, its
+  chest the A's opening, its round eyes in an angular disc; the sign-in's
+  eyes the owl's, and its outline a pattern behind the pages.
 
 ### :bug: Bugs fixed
 
