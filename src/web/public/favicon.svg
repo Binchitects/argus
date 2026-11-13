@@ -1,23 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <title>Arena</title>
-  <!-- The wise one: an owl, its eyes open; no name in it (the names are the build's). -->
+  <!-- The Arena's A with its eyes open; no name in it (the names are the build's). -->
   <defs>
     <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
       <stop offset="0" stop-color="#12304a"/>
       <stop offset="1" stop-color="#06131f"/>
     </linearGradient>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="a" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="0.5" stop-color="#14b8a6"/>
+      <stop offset="0.55" stop-color="#14b8a6"/>
       <stop offset="1" stop-color="#0d8075"/>
-    </linearGradient>
-    <linearGradient id="wing" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0f766e"/>
-      <stop offset="1" stop-color="#0b5d56"/>
-    </linearGradient>
-    <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ccfbf1"/>
-      <stop offset="1" stop-color="#99f6e4"/>
     </linearGradient>
     <linearGradient id="white" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
@@ -30,25 +22,16 @@
     </radialGradient>
   </defs>
   <rect x="72" y="72" width="880" height="880" rx="230" fill="url(#bg)"/>
-  <!-- Its body, sharp as an A: pointed ear tufts, a flat crown, sides widening to its feet. -->
-  <path d="M300 152 L428 262 L596 262 L724 152 L712 340 L806 792 L218 792 L312 340 Z" fill="url(#body)" stroke="url(#body)" stroke-width="14" stroke-linejoin="round"/>
-  <!-- Its wings, folded down its sides like the A's legs. -->
-  <path d="M322 420 L236 788 L360 788 L392 540 Z" fill="url(#wing)"/>
-  <path d="M702 420 L788 788 L664 788 L632 540 Z" fill="url(#wing)"/>
-  <!-- Its chest: the A's opening, light, with chevron feathers. -->
-  <path d="M512 560 L652 788 L372 788 Z" fill="url(#belly)"/>
-  <path d="M486 676 l26 -22 l26 22 M452 728 l26 -22 l26 22 M520 728 l26 -22 l26 22" fill="none" stroke="#5eead4" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Its face: an angular disc, the eyes, the beak. -->
-  <path d="M512 318 L690 292 L726 452 L512 574 L298 452 L334 292 Z" fill="#0b4f4a" opacity="0.6"/>
-  <circle cx="412" cy="432" r="100" fill="url(#white)"/>
-  <circle cx="612" cy="432" r="100" fill="url(#white)"/>
-  <circle cx="418" cy="436" r="60" fill="url(#iris)"/>
-  <circle cx="606" cy="436" r="60" fill="url(#iris)"/>
-  <circle cx="421" cy="438" r="29" fill="#0b1720"/>
-  <circle cx="603" cy="438" r="29" fill="#0b1720"/>
-  <circle cx="440" cy="414" r="12" fill="#ffffff"/>
-  <circle cx="624" cy="414" r="12" fill="#ffffff"/>
-  <path d="M512 560 L484 506 L540 506 Z" fill="#f59e0b"/>
-  <!-- Its talons. -->
-  <path d="M444 790 L428 846 M468 790 L468 852 M492 790 L508 846 M532 790 L516 846 M556 790 L556 852 M580 790 L596 846" fill="none" stroke="#f59e0b" stroke-width="16" stroke-linecap="round"/>
+  <!-- The A. -->
+  <path d="M160 790 L428 238 Q446 204 482 204 L542 204 Q578 204 596 238 L864 790 L748 790 Q724 790 710 764 L512 352 L314 764 Q300 790 276 790 Z" fill="url(#a)"/>
+  <!-- Its eyes, side by side, the beak between them. -->
+  <circle cx="392" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="632" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="400" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="624" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="404" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="620" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="426" cy="534" r="15" fill="#ffffff"/>
+  <circle cx="642" cy="534" r="15" fill="#ffffff"/>
+  <path d="M512 640 L476 600 Q512 584 548 600 Z" fill="#f59e0b"/>
 </svg>

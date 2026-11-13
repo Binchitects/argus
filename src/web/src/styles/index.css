@@ -1336,13 +1336,13 @@
 }
 
 /* ------------------------------------------------------------------ the owl's pattern --
- * The brand's symbol (public/brand/owl-glyph.svg: the owl in a line, its tufts, eyes and beak), tiled two to a tile,
+ * The brand's symbol (public/brand/owl-glyph.svg: the A with its eyes, in a line), tiled two to a tile,
  * staggered, as a mask: its colour is the theme's own ink (--pattern-ink), faint behind the app and a little stronger
  * where a page has nothing yet. .owl-pattern puts it behind an element's content; --pattern-size sizes the tile.
  * Not drawn where colours are forced (Windows' high contrast), nor printed.
  */
 :root {
-  --owl-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg id='o' transform='translate(6 6) scale(0.62)'%3E%3Cpath d='M13 5 L19 11 L29 11 L35 5 L34 16 L40 43 L8 43 L14 16 Z'/%3E%3Cpath d='M22.5 27 L24 29.5 L25.5 27'/%3E%3Ccircle cx='18.5' cy='22' r='5'/%3E%3Ccircle cx='29.5' cy='22' r='5'/%3E%3C/g%3E%3Cg transform='translate(54 54) scale(0.62)'%3E%3Cpath d='M13 5 L19 11 L29 11 L35 5 L34 16 L40 43 L8 43 L14 16 Z'/%3E%3Cpath d='M22.5 27 L24 29.5 L25.5 27'/%3E%3Ccircle cx='18.5' cy='22' r='5'/%3E%3Ccircle cx='29.5' cy='22' r='5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  --owl-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg id='o' transform='translate(6 6) scale(0.62)'%3E%3Cpath d='M8 42 L24 7 L40 42'/%3E%3Ccircle cx='18.5' cy='30' r='5'/%3E%3Ccircle cx='29.5' cy='30' r='5'/%3E%3C/g%3E%3Cg transform='translate(54 54) scale(0.62)'%3E%3Cpath d='M8 42 L24 7 L40 42'/%3E%3Ccircle cx='18.5' cy='30' r='5'/%3E%3Ccircle cx='29.5' cy='30' r='5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   --pattern-ink: color-mix(in oklch, var(--foreground) 5%, transparent);
   --pattern-ink-strong: color-mix(in oklch, var(--primary) 14%, transparent);
 }

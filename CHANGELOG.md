@@ -22,7 +22,7 @@ longest carries on until it ends; the time of the model, the tools and the
 people is counted everywhere; Accounting and projects are live; a chat in a
 project keeps its goals and tasks; Code Arena runs schedules and Arena's
 agents, keeps checklists, and is tidier; a model is tested from its card,
-and every use a model has is said. And the logo: an owl.
+and every use a model has is said. And the logo: the A with its eyes.
 
 ### :rocket: Epics and highlights
 
@@ -94,10 +94,9 @@ and every use a model has is said. And the logo: an owl.
 - **Code Arena's icon on Linux and macOS**: the desktop entry names the
   window's class (the dock shows Code Arena's icon on its window), the icon
   at 128, 256 and 512 px; macOS gets a ready-made `.icns`.
-- **The owl**: the logo is an owl drawn sharp, as an A is: pointed ear tufts,
-  sides widening to its talons, wings folded down them like the A's legs, its
-  chest the A's opening, its round eyes in an angular disc; the sign-in's
-  eyes the owl's, and its outline a pattern behind the pages.
+- **The A with its eyes**: the logo is the Arena's A with two open eyes and
+  nothing else in it; the sign-in's eyes are its eyes, and its outline is a
+  pattern behind the pages.
 
 ### :bug: Bugs fixed
 
