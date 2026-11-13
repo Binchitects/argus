@@ -133,12 +133,12 @@ describe('behind the form', () => {
     expect(turns).toHaveLength(eyes + 1)
     for (const s of turns) expect(s.options.iterations).toBe(Infinity)
     expect(new Set(turns.map((s) => s.animation.startTime)).size).toBe(1)
-    // Each eye blinks and looks about, on its own time, and fades in as it comes.
+    // Each owl's eyes blink and look about, on their own time, and the face fades in as it comes.
     const blinks = started.filter((s) => s.el.classList.contains('watch-eye-lid') && s.options.iterations === Infinity)
     expect(blinks).toHaveLength(eyes)
     expect(started.filter((s) => s.el.classList.contains('watch-eye-iris'))).toHaveLength(eyes)
     expect(new Set(blinks.map((s) => s.options.duration)).size).toBeGreaterThan(eyes / 2)
-    expect(started.filter((s) => s.el.classList.contains('watch-eye-lid') && s.options.duration === FADE)).toHaveLength(eyes)
+    expect(started.filter((s) => s.el.classList.contains('watch-eye-body') && s.options.duration === FADE)).toHaveLength(eyes)
 
     // The form is not behind it, and works as ever.
     expect(backdrop.contains(name)).toBe(false)
@@ -177,7 +177,7 @@ describe('behind the form', () => {
       going = started.filter((s) => s.options.fill === 'forwards')
       expect(going.length).toBeGreaterThan(0)
     })
-    expect(going.every((s) => s.options.duration === FADE && s.el.classList.contains('watch-eye-lid'))).toBe(true)
+    expect(going.every((s) => s.options.duration === FADE && s.el.classList.contains('watch-eye-body'))).toBe(true)
     // Still drawn while they fade; gone when they have.
     expect(place()).toEqual(before)
     act(() => going.forEach((s) => s.animation.onfinish!()))

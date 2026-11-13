@@ -14,9 +14,9 @@ const SPREAD = 1_800
 export const OPENING = 450
 export const CLOSING = 400
 
-/** An eye's drawing (the logo's own eye): its box in the logo's units. */
-export const EYE_VIEW = '276 410 472 242'
-export const EYE_RATIO = 242 / 472
+/** An owl's eyes as the logo draws them (its facial disc, eyes, brow and beak): their box in the logo's units. */
+export const EYE_VIEW = '222 400 580 336'
+export const EYE_RATIO = 336 / 580
 
 export interface Eye {
   key: string

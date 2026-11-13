@@ -1315,10 +1315,12 @@
 :root {
   --eyes-bg: oklch(0.965 0.014 255);
   --eyes-lid: oklch(0.3 0.07 262);
+  --eyes-face: oklch(0.55 0.09 185);
 }
 .dark {
   --eyes-bg: oklch(0.2 0.05 262);
   --eyes-lid: oklch(0.13 0.04 262);
+  --eyes-face: oklch(0.45 0.08 185);
 }
 .eyes-backdrop {
   position: absolute;
@@ -1339,10 +1341,11 @@
 }
 .watch-eye {
   position: absolute;
-  aspect-ratio: 472 / 242;
+  aspect-ratio: 580 / 336;
   opacity: 0;
   will-change: transform, opacity;
 }
+.watch-eye-body,
 .watch-eye-lid,
 .watch-eye-iris,
 .watch-eye svg {
@@ -1352,9 +1355,32 @@
   height: 100%;
   overflow: visible;
 }
-.watch-eye-lid > svg path {
+/* A blink closes on the eyes' line (the logo's y 556, of the face's 400 to 736). */
+.watch-eye-lid {
+  transform-origin: 50% 46.4%;
+}
+/* The facial disc: the logo's darker feathers, its rim the A's light; a theme sets its own. */
+.watch-eye-face path {
+  fill: var(--eyes-face, oklch(0.36 0.06 185));
+  stroke: color-mix(in oklch, var(--primary) 60%, transparent);
+  stroke-width: 10;
+}
+.watch-eye-lid > svg:first-child circle {
   stroke: var(--eyes-lid);
+  stroke-width: 12;
+}
+.watch-eye-lids path {
+  fill: var(--eyes-lid);
+  fill-opacity: 0.55;
+}
+.watch-eye-brow path:first-child {
+  fill: none;
+  stroke: color-mix(in oklch, var(--primary) 55%, white);
   stroke-width: 16;
+  stroke-linecap: round;
+}
+.watch-eye-beak {
+  fill: #f59e0b;
 }
 
 /* ------------------------------------------------------------------ answers --

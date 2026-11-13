@@ -93,12 +93,14 @@ export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) 
 }
 
 /**
- * One eye, drawn as the logo's: the white, and over it the iris, which looks about.
- * It fades in when it comes and out when it goes (beside a form that changed size).
+ * One owl's eyes, drawn as the logo's: the facial disc, the two whites, the irises (which look about together) under
+ * their lids' shade, the brow and the beak. They fade in when they come and out when they go (beside a form that
+ * changed size).
  */
 function EyeView({ eye, clock, drop }: { eye: Shown; clock: () => number; drop: (key: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const lid = useRef<HTMLDivElement>(null)
+  const blinker = useRef<HTMLDivElement>(null)
   const iris = useRef<HTMLDivElement>(null)
   const { key, open, close, blink, blinkAt, look, lookAt, reverse, going } = eye
   // Its turn, on the shared clock.
@@ -111,8 +113,8 @@ function EyeView({ eye, clock, drop }: { eye: Shown; clock: () => number; drop: 
   // Its blinks and looks about, on its own time. Script-made like its turn, not CSS
   // animations: Chrome runs these on the compositor.
   useEffect(() => {
-    if (!lid.current?.animate || !iris.current) return
-    const blinks = lid.current.animate(blinkFrames, { duration: blink * 1000, delay: blinkAt * 1000, iterations: Infinity })
+    if (!blinker.current?.animate || !iris.current) return
+    const blinks = blinker.current.animate(blinkFrames, { duration: blink * 1000, delay: blinkAt * 1000, iterations: Infinity })
     const looks = iris.current.animate(lookFrames, { duration: look * 1000, delay: lookAt * 1000, iterations: Infinity, direction: reverse ? 'reverse' : 'normal' })
     return () => {
       blinks.cancel()
@@ -130,19 +132,41 @@ function EyeView({ eye, clock, drop }: { eye: Shown; clock: () => number; drop: 
     return () => fade.cancel()
   }, [going, key, drop])
   return (
-    // Each moving part is a box of its own: an <svg> itself is never moved on the compositor.
+    // Each moving part is a box of its own: an <svg> itself is never moved on the compositor. The face (its disc, brow
+    // and beak) stays still; the eyes in it blink and look about, both together, as an owl's do.
     <div ref={ref} className="watch-eye" style={{ left: eye.x - eye.width / 2, top: eye.y - (eye.width * EYE_RATIO) / 2, width: eye.width }}>
-      <div ref={lid} className="watch-eye-lid">
-        <svg viewBox={EYE_VIEW}>
-          <path d="M286 540 C372 470 436 420 512 420 C588 420 652 470 738 540 C668 540 612 642 512 642 C412 642 356 540 286 540 Z" fill="url(#eyes-white)" />
+      <div ref={lid} className="watch-eye-body">
+        <svg viewBox={EYE_VIEW} className="watch-eye-face">
+          <path d="M512 468 C468 396 232 388 234 556 C236 702 404 742 512 690 C620 742 788 702 790 556 C792 388 556 396 512 468 Z" />
         </svg>
-        <div ref={iris} className="watch-eye-iris">
+        <div ref={blinker} className="watch-eye-lid">
           <svg viewBox={EYE_VIEW}>
-            <circle cx="512" cy="528" r="96" fill="url(#eyes-iris)" />
-            <circle cx="512" cy="530" r="42" fill="#0b1720" />
-            <circle cx="545" cy="494" r="18" fill="#ffffff" />
+            <circle cx="392" cy="556" r="124" fill="url(#eyes-white)" />
+            <circle cx="632" cy="556" r="124" fill="url(#eyes-white)" />
+          </svg>
+          <div ref={iris} className="watch-eye-iris">
+            <svg viewBox={EYE_VIEW}>
+              {[392, 632].map((x) => (
+                <g key={x}>
+                  <circle cx={x + 6} cy="560" r="72" fill="url(#eyes-iris)" />
+                  {/* The iris's fibres, out from the pupil. */}
+                  <circle cx={x + 6} cy="560" r="54" fill="none" stroke="#92400e" strokeOpacity="0.35" strokeWidth="30" strokeDasharray="2 6" />
+                  <circle cx={x + 8} cy="562" r="34" fill="#0b1720" />
+                  <circle cx={x + 30} cy="534" r="14" fill="#ffffff" />
+                  <circle cx={x - 12} cy="586" r="6" fill="#ffffff" fillOpacity="0.7" />
+                </g>
+              ))}
+            </svg>
+          </div>
+          {/* The upper lids' shade over each eye. */}
+          <svg viewBox={EYE_VIEW} className="watch-eye-lids">
+            <path d="M268 556 A124 124 0 0 1 516 556 A124 96 0 0 0 268 556 Z M508 556 A124 124 0 0 1 756 556 A124 96 0 0 0 508 556 Z" />
           </svg>
         </div>
+        <svg viewBox={EYE_VIEW} className="watch-eye-brow">
+          <path d="M268 446 Q392 424 512 508 Q632 424 756 446" />
+          <path d="M512 640 L476 600 Q512 584 548 600 Z" className="watch-eye-beak" />
+        </svg>
       </div>
     </div>
   )
