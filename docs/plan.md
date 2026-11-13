@@ -87,6 +87,12 @@ program, and Edge or Chrome 109.
 
 Done (v8.1.0): every item above.
 
+## v9.0 IoT and OT (asked 2026-11-13; branch v9.0, beside v8)
+
+Cameras, sensors and machines read on the company's hardware, watched by models and asked in plain words; read-only
+first. The design and the releases (9.0 foundation, 9.1 vision, 9.2 edge, 9.3 operations AI, 9.4 control and
+compliance): [iot-ot.md](design/iot-ot.md).
+
 ## Next
 
 1. **Farzan Graph's code graphs.** Who calls a method, what implements an interface,
