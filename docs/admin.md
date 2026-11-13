@@ -1939,6 +1939,15 @@ what running the models really cost over the time chosen, and shares it out.
   `Costs:HardwareMonths`, `Costs:ServicePerMonth`). The page says what is
   missing: the GPUs not measured (no monitoring), no hardware price, no
   service cost.
+- **Time**: where the chats' time went, Code Arena's sessions too: the
+  model's (its answers' rounds), the tools' (their runs, sub-agents
+  included), and the people's (the time before each question: reading the
+  answer, writing the next, at most 30 minutes a question, longer being
+  away), in all, by person and by project, in the exports too. Each answer
+  shows its own under it (`model 9.1 s · tools 3.0 s · you 45 s`), and each
+  chat its whole (the timer in its header). The dashboard **Usage by person**
+  has the same per day and per person, from the view `gateway.chat_times`
+  (times and names only, never words).
 - **The totals**: the running cost and the spend at the prices of Settings →
   Prices, each against the time before (as long, at today's costs); a month
   at this rate; **GPU idle**, the running cost of the time the GPUs were not

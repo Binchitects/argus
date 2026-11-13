@@ -1176,6 +1176,335 @@
         "y": 8
       },
       "panels": []
+    },
+    {
+      "type": "row",
+      "title": "Time — the model's, the tools', the people's",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Chat time, the model",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "The model's time writing the chats' answers (Code Arena's too), every round.",
+      "gridPos": {
+        "x": 0,
+        "y": 79,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(coalesce(sum(t.ms),0) / 3600000.0, 2) as v from chat_times t where $__timeFilter(t.at) and t.part = 'model'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Chat time, tools",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "The tools' time in the chats: their runs, sub-agents included.",
+      "gridPos": {
+        "x": 6,
+        "y": 79,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(coalesce(sum(t.ms),0) / 3600000.0, 2) as v from chat_times t where $__timeFilter(t.at) and t.part = 'tools'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Chat time, people",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "The people's time before each question: reading the answer, writing the next, at most 30 minutes a question.",
+      "gridPos": {
+        "x": 12,
+        "y": 79,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(coalesce(sum(t.ms),0) / 3600000.0, 2) as v from chat_times t where $__timeFilter(t.at) and t.part = 'human'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Chat time, all",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "The model, tools and people together.",
+      "gridPos": {
+        "x": 18,
+        "y": 79,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select round(coalesce(sum(t.ms),0) / 3600000.0, 2) as v from chat_times t where $__timeFilter(t.at)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "none",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chat time per day: the model, tools, people",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "description": "Hours a day, stacked: the model's (answers), the tools' (their runs), the people's (before each question, at most 30 minutes).",
+      "gridPos": {
+        "x": 0,
+        "y": 83,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "select $__timeGroupAlias(t.at, 1d), case t.part when 'model' then 'The model' when 'tools' then 'Tools' else 'People' end as metric, round(coalesce(sum(t.ms),0) / 3600000.0, 2) as hours from chat_times t where $__timeFilter(t.at) group by 1,2 order by 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Chat time per person",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 83,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Per person, Code Arena's sessions included: hours of the model, of tools and of their own.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select coalesce(t.person, '(unattributed)') as \"Person\", round(coalesce(sum(t.ms) filter (where t.part = 'model'),0) / 3600000.0, 2) as \"The model, h\", round(coalesce(sum(t.ms) filter (where t.part = 'tools'),0) / 3600000.0, 2) as \"Tools, h\", round(coalesce(sum(t.ms) filter (where t.part = 'human'),0) / 3600000.0, 2) as \"Own, h\", round(coalesce(sum(t.ms),0) / 3600000.0, 2) as \"All, h\" from chat_times t where $__timeFilter(t.at) group by 1 order by \"All, h\" desc",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     }
   ]
 }

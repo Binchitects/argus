@@ -29,6 +29,7 @@ namespace Llm.Api.Chat;
 /// <paramref name="Quote"/>: the part of an earlier answer a question quotes, kept apart from its words both ways (ChatQuotes).
 /// <paramref name="Context"/>: what filled the request a Code Arena answer was written for, by kind in characters (ContextParts'
 /// shape), its biggest messages named by this end's id or by their ref; the web chat's context gauge shows it.
+/// <paramref name="Ms"/>: how long it took there (an answer's request to the model, a tool's run), for the time accounting.
 /// </summary>
 public sealed record SyncMessage(
     string Role,
@@ -49,7 +50,8 @@ public sealed record SyncMessage(
     IReadOnlyList<SyncAttachment>? Attachments = null,
     string? Quote = null,
     JsonObject? Context = null,
-    JsonObject? Details = null);
+    JsonObject? Details = null,
+    long? Ms = null);
 
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
@@ -635,7 +637,7 @@ public static partial class CodeArenaSync
                 var results = rest.TakeWhile(m => m.Role == "tool" && m.ToolCallId is { } call && calls.Contains(call)).ToList();
                 if (results.Count > 0)
                 {
-                    var last = Add(db, id, p, results, ref sequence, ids, owned, known);
+                    var last = Add(db, id, me.Id, p, results, ref sequence, ids, owned, known);
                     var next = await db.ChatMessages.SingleAsync(m => m.Id == tree.Path[place + 1].Id, ct);
                     next.ParentId = last;
                     c.UpdatedAt = DateTimeOffset.UtcNow;
@@ -652,7 +654,7 @@ public static partial class CodeArenaSync
         var count = (parent is null ? 0 : Depth(tree, parent.Value)) + rest.Count;
         if (rest.Count > 0)
         {
-            leaf = Add(db, id, parent, rest, ref sequence, ids, owned, known);
+            leaf = Add(db, id, me.Id, parent, rest, ref sequence, ids, owned, known);
             // An archived chat stays so: only the person's continuing it from Code Arena (/continued) brings it back to the list.
             c.UpdatedAt = DateTimeOffset.UtcNow;
             if (c.Title == "New chat" && rest.FirstOrDefault(m => m.Role == "user") is { } first && TitleOf(Text(first.Content)) is { } title)
@@ -693,7 +695,7 @@ public static partial class CodeArenaSync
     /// attachments are kept when they are the person's (<paramref name="owned"/>); an answer keeps what filled its request,
     /// the messages it names found among the chat's (<paramref name="named"/>).
     /// </summary>
-    private static Guid? Add(AppDbContext db, Guid conversation, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids, HashSet<Guid> owned,
+    private static Guid? Add(AppDbContext db, Guid conversation, Guid person, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids, HashSet<Guid> owned,
         Named named)
     {
         foreach (var m in messages)
@@ -717,6 +719,10 @@ public static partial class CodeArenaSync
                 CachedTokens = m.CachedTokens,
                 CompletionTokens = m.CompletionTokens,
                 CreatedAt = m.At ?? DateTimeOffset.UtcNow,
+                // How long it took in Code Arena (its answer's request, its tool's run): the time accounting's.
+                DurationMs = m.Role is "assistant" or "tool" && m.Ms is { } ms ? (int)Math.Clamp(ms, 0, int.MaxValue) : null,
+                // The person's own questions are theirs (the time accounting counts their time); Code Arena's notes are nobody's.
+                AuthorId = m.Role == "user" && m.Kind != "note" ? person : null,
                 SyncRef = Clip(m.Ref, 160),
                 // Stopped by the person in Code Arena: shown as stopped, as an answer stopped here is.
                 Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,

@@ -1505,6 +1505,10 @@ internal sealed class ChatSync : IAsyncDisposable
         var m = e.Message;
         var role = m.Str("role") ?? "user";
         var o = new JsonObject { ["role"] = role, ["content"] = m["content"]?.DeepClone() ?? "", ["at"] = e.At.ToString("o"), ["ref"] = $"{session}:{e.Key}" };
+        if (e.Ms is { } ms)
+        {
+            o["ms"] = ms;
+        }
         if (m.Str("reasoning_content") is { Length: > 0 } reasoning)
         {
             o["reasoning"] = reasoning;

@@ -71,11 +71,24 @@ public sealed record AccountUnit(decimal? PerMillionTokens, decimal? PerRequest,
 /// </summary>
 public sealed record AccountHealth(double? GpuBusy, decimal? IdleCost, decimal MonthlyRunning, decimal MonthlyCharged, double? Recovered);
 
+/// <summary>One person's or project's chat time (or all of it): the model's, the tools', the people's (gateway.chat_times), in hours.</summary>
+public sealed record TimeRow(string Kind, Guid? Id, string Name, string? Email, double ModelHours, double ToolHours, double HumanHours)
+{
+    public double Hours => Math.Round(ModelHours + ToolHours + HumanHours, 2);
+}
+
+/// <summary>Where the chats' time went in the window: all of it, by person, by project.</summary>
+public sealed record AccountTime(TimeRow All, IReadOnlyList<TimeRow> People, IReadOnlyList<TimeRow> Projects);
+
 /// <summary>Everything Admin → Accounting and its exports show.</summary>
 public sealed record AccountingReport(DateTimeOffset From, DateTimeOffset To, string Basis, CostOptions Settings, RunningCost Running, AccountUse Used, AccountUnit Unit,
     AccountHealth Health, AccountBefore? Before, TimeSpan Interval, IReadOnlyList<AccountBucket> Series, IReadOnlyList<AccountRow> People, IReadOnlyList<AccountRow> Groups,
     IReadOnlyList<AccountRow> CostCentres, IReadOnlyList<AccountRow> Projects, IReadOnlyList<AccountRow> Models, IReadOnlyList<AccountRow> Sources, IReadOnlyList<AccountRow> Kinds,
-    IReadOnlyList<AccountRow> Tags);
+    IReadOnlyList<AccountRow> Tags)
+{
+    /// <summary>Where the chats' time went (the model's, the tools', the people's); null where it could not be read.</summary>
+    public AccountTime? Time { get; init; }
+}
 
 /// <summary>
 /// The accountant's view (billing.read): over a time, what running the machine cost (<see cref="RunningCost"/>: power
@@ -335,10 +348,38 @@ public static class Accounting
             before = new AccountBefore(prevFrom, from, prevCost.Total, prevUse, Change((double)prevCost.Total, (double)running.Total), Change((double)prevUse.Charged, (double)allCharged),
                 Change(prevUse.Tokens, allTokens));
         }
+        var time = await TimeAsync(sql, db, window, users.ToDictionary(u => u.Key, u => (u.Value.Id, Name: u.Value.DisplayName is { Length: > 0 } d ? d : u.Value.UserName ?? u.Key)), ct);
         return new AccountingReport(from, to, by, o, running, new AccountUse(allRequests, allTokens, modelHours, allCharged, active, rows.Sum(r => r.Input), rows.Sum(r => r.Cached), rows.Sum(r => r.Output)), unit, health, before, interval, series,
             Ordered(Whole(people, running.Total)), [.. groups.OrderBy(g => g.Id is null).ThenByDescending(g => g.Cost)], Ordered(centreRows), Ordered(Whole(projects, running.Total)),
             Ordered(Whole(models, running.Total)), Ordered(Whole(sources, running.Total)), Ordered(Whole(kinds, running.Total)),
-            Ordered(tags));
+            Ordered(tags)) { Time = time };
+    }
+
+    /// <summary>
+    /// The chats' time in the window (gateway.chat_times): the model's (answers' rounds), the tools' (their runs, sub-agents
+    /// included), the people's (before each question, at most 30 minutes); all, by person, by project, the most first.
+    /// </summary>
+    private static async Task<AccountTime> TimeAsync(LedgerSql sql, AppDbContext db, Dictionary<string, object> window, Dictionary<string, (Guid Id, string Name)> users, CancellationToken ct)
+    {
+        var parts = (await sql.QueryAsync("""
+            select t.person, t.project, t.part, coalesce(sum(t.ms),0) / 3600000.0
+            from gateway.chat_times t
+            where t.at >= @from and t.at < @to
+            group by 1, 2, 3
+            """, window, ct)).Rows.Select(r => (Person: ((string?)r[0])?.ToLowerInvariant(), Project: r[1] is Guid g ? g : (Guid?)null, Part: (string)r[2]!, Hours: Dbl(r[3]))).ToList();
+        static double H(IEnumerable<(string? Person, Guid? Project, string Part, double Hours)> some, string part) => Math.Round(some.Where(x => x.Part == part).Sum(x => x.Hours), 2);
+        TimeRow Of(string kind, Guid? id, string name, string? email, IEnumerable<(string? Person, Guid? Project, string Part, double Hours)> some)
+        {
+            var list = some.ToList();
+            return new TimeRow(kind, id, name, email, H(list, "model"), H(list, "tools"), H(list, "human"));
+        }
+        var people = parts.GroupBy(p => p.Person ?? "").Select(g => g.Key.Length == 0 ? Of("person", null, "(attributed to nobody)", null, g)
+            : users.TryGetValue(g.Key, out var u) ? Of("person", u.Id, u.Name, g.Key, g) : Of("person", null, g.Key, g.Key, g)).OrderByDescending(t => t.Hours).ToList();
+        var ids = parts.Where(p => p.Project is not null).Select(p => p.Project!.Value).Distinct().ToList();
+        var names = await db.Projects.AsNoTracking().Where(p => ids.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+        var projects = parts.GroupBy(p => p.Project).Select(g => Of("project", g.Key, g.Key is { } id ? names.GetValueOrDefault(id) ?? "(a deleted project)" : "(in no project)", null, g))
+            .OrderBy(t => t.Id is null).ThenByDescending(t => t.Hours).ToList();
+        return new AccountTime(Of("all", null, "All chats", null, parts), people, projects);
     }
 
     /// <summary>Each bucket's average GPU draw in watts (from its start), measured; buckets Prometheus has nothing for are left out.</summary>
@@ -468,6 +509,14 @@ public static class Accounting
             [new(first, Width: 2.4), new("People", ReportKind.Number, 0.7), new("Requests", ReportKind.Number), new("Tokens", ReportKind.Number), new("In", ReportKind.Number), new("Cached", ReportKind.Number), new("Out", ReportKind.Number), new("Model hours", ReportKind.Number, 0.9),
                 new("Spend", ReportKind.Money), new("Share (%)", ReportKind.Number, 0.8), new("Cost", ReportKind.Money)],
             [.. rows.Select(x => (object?[])[x.Name, x.People, x.Requests, x.Tokens, x.Input, x.Cached, x.Output, x.ModelHours, x.Charged, Math.Round(x.Share * 100, 2), x.Cost])], note);
+        ReportTable Times(string title, string first, IEnumerable<TimeRow> rows) => new(title,
+            [new(first, Width: 2.4), new("Model hours", ReportKind.Number), new("Tool hours", ReportKind.Number), new("People's hours", ReportKind.Number), new("Hours", ReportKind.Number)],
+            [.. rows.Select(x => (object?[])[x.Name, x.ModelHours, x.ToolHours, x.HumanHours, x.Hours])],
+            "The chats' time: the model's (answers), the tools' (their runs, sub-agents included), the people's (before each question: reading, writing; at most 30 minutes a question).");
+        if (r.Time is { } time)
+        {
+            figures.Add(new("Chat time", $"{time.All.Hours:#,##0.##} h", $"The model {time.All.ModelHours:#,##0.##} h, tools {time.All.ToolHours:#,##0.##} h, people {time.All.HumanHours:#,##0.##} h"));
+        }
         var tables = new List<ReportTable>
         {
             Shares("Groups", "Group", r.Groups, "A person in two groups counts in both, so the groups can add up to more than the whole."),
@@ -478,6 +527,8 @@ public static class Accounting
             Shares("Where it came from", "From", r.Sources),
             Shares("What it was for", "Kind", r.Kinds),
             Shares("Tags", "Tag", r.Tags, "A request counts under each tag of its chat and its project, so the tags can add up to more than the whole."),
+            Times("Time by person", "Person", r.Time?.People ?? []),
+            Times("Time by project", "Project", r.Time?.Projects ?? []),
             new("By time", [new("From", ReportKind.Time, 1.4), new("Power", ReportKind.Money), new("Hardware", ReportKind.Money), new("Service", ReportKind.Money),
                     new("Running cost", ReportKind.Money), new("Spend", ReportKind.Money), new("Tokens", ReportKind.Number), new("Requests", ReportKind.Number)],
                 [.. r.Series.Select(b => (object?[])[b.At, b.Power, b.Hardware, b.Service, b.Total, b.Charged, b.Tokens, b.Requests])]),

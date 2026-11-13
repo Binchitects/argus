@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Calculator, ChevronDown, ChevronRight, Coins, Cpu, Gauge, Hash, Settings2, TrendingUp, Users, Zap } from 'lucide-react'
+import { ArrowDown, ArrowUp, Calculator, ChevronDown, ChevronRight, Coins, Cpu, Gauge, Hash, Settings2, Timer, TrendingUp, Users, Wrench, Zap } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -73,6 +73,26 @@ export interface AccountingReport {
   sources: AccountRow[]
   kinds: AccountRow[]
   tags: AccountRow[]
+  /** Where the chats' time went: the model's, the tools', the people's (null: not read). */
+  time?: AccountTime | null
+}
+
+/** A person's or project's chat time (or all of it), in hours. */
+export interface TimeRow {
+  kind: 'all' | 'person' | 'project'
+  id: string | null
+  name: string
+  email: string | null
+  modelHours: number
+  toolHours: number
+  humanHours: number
+  hours: number
+}
+
+export interface AccountTime {
+  all: TimeRow
+  people: TimeRow[]
+  projects: TimeRow[]
 }
 
 const bases: { value: Basis; label: string }[] = [
@@ -303,8 +323,79 @@ export function AccountingPage() {
             </Tabs>
           </CardContent>
         </Card>
+        {r.time && <TimeCard time={r.time} />}
       </div>
     </>
+  )
+}
+
+const hours = (h: number) => `${h.toLocaleString(undefined, { maximumFractionDigits: 2 })} h`
+
+/** Where the chats' time went: the model's, the tools', the people's; by person and by project. */
+function TimeCard({ time }: { time: AccountTime }) {
+  const share = (h: number) => (time.all.hours > 0 ? `${Math.round((h / time.all.hours) * 100)}%` : '–')
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Time</CardTitle>
+        <CardDescription>
+          Where the chats&apos; time went, Code Arena&apos;s too: the model&apos;s (its answers), the tools&apos; (their runs, sub-agents included), and the people&apos;s (before each question: reading the
+          answer, writing the next, at most 30 minutes a question).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <StatGrid>
+          <Stat label="All" value={hours(time.all.hours)} hint="The model, tools and people together" icon={Timer} />
+          <Stat label="The model" value={hours(time.all.modelHours)} hint={share(time.all.modelHours)} icon={Cpu} />
+          <Stat label="Tools" value={hours(time.all.toolHours)} hint={share(time.all.toolHours)} icon={Wrench} />
+          <Stat label="People" value={hours(time.all.humanHours)} hint={share(time.all.humanHours)} icon={Users} />
+        </StatGrid>
+        <Tabs defaultValue="people">
+          <TabsList>
+            <TabsTrigger value="people">People</TabsTrigger>
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+          </TabsList>
+          <TabsContent value="people">
+            <TimeTable rows={time.people} label="Time by person" first="Person" />
+          </TabsContent>
+          <TabsContent value="projects">
+            <TimeTable rows={time.projects} label="Time by project" first="Project" />
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  )
+}
+
+function TimeTable({ rows, label, first }: { rows: TimeRow[]; label: string; first: string }) {
+  if (rows.length === 0) return <p className="py-6 text-sm text-muted-foreground">No chat in this time.</p>
+  return (
+    <div className="overflow-x-auto pt-2">
+      <table className="w-full text-sm" aria-label={label}>
+        <thead>
+          <tr className="text-left text-xs text-muted-foreground">
+            <th className="py-1.5 pr-3 font-medium">{first}</th>
+            <th className="py-1.5 pr-3 text-right font-medium">The model</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Tools</th>
+            <th className="py-1.5 pr-3 text-right font-medium">People</th>
+            <th className="py-1.5 pr-3 text-right font-medium">All</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((x) => (
+            <tr key={`${x.id ?? x.name}`} className="border-t">
+              <td className="py-1.5 pr-3">
+                <bdi>{x.name}</bdi>
+              </td>
+              <td className="py-1.5 pr-3 text-right tabular-nums">{hours(x.modelHours)}</td>
+              <td className="py-1.5 pr-3 text-right tabular-nums">{hours(x.toolHours)}</td>
+              <td className="py-1.5 pr-3 text-right tabular-nums">{hours(x.humanHours)}</td>
+              <td className="py-1.5 pr-3 text-right font-medium tabular-nums">{hours(x.hours)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

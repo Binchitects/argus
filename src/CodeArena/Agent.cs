@@ -378,7 +378,7 @@ internal sealed partial class Agent
         Add(new JsonObject { ["role"] = "assistant", ["content"] = "Noted." }, kind: "note");
     }
 
-    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
+    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null, long? ms = null)
     {
         Messages.Add(message);
         if (kind == "note")
@@ -387,7 +387,8 @@ internal sealed partial class Agent
         }
         // An answer the gateway counted keeps what filled its request (the page's context gauge).
         var answer = message.Str("role") == "assistant";
-        Session?.Message(message, answer ? Model.Name : null, usage, kind, agents, answer && usage is not null ? Measured : null);
+        // How long it took (the model's request, a tool's run): Arena's time accounting adds them up.
+        Session?.Message(message, answer ? Model.Name : null, usage, kind, agents, answer && usage is not null ? Measured : null, ms ?? (answer && kind is null ? _askedMs : null));
     }
 
     /// <summary>The tool call running in this flow (each call of a round runs in its own): a sub-agent's events are that call's.</summary>
@@ -695,16 +696,19 @@ internal sealed partial class Agent
             Completion answer;
             Events?.Step();
             Ui.StartSpinner(step == 0 ? "Thinking" : "Working");
+            var asking = System.Diagnostics.Stopwatch.StartNew();
+            _askedMs = null;
             try
             {
                 answer = await AskAsync(printer, ct);
+                _askedMs = asking.ElapsedMilliseconds;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 Ui.StopSpinner();
                 printer.End();
                 // What was said before the stop stays, so the next turn follows from it.
-                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n" + StoppedMark : StoppedMark });
+                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n" + StoppedMark : StoppedMark }, ms: asking.ElapsedMilliseconds);
                 throw;
             }
             catch (GatewayException e) when (e is { ContextExceeded: true, SharedCache: true } && !waitedForCache && printer.Said.Length == 0)
@@ -1024,7 +1028,7 @@ internal sealed partial class Agent
             Events?.ToolCall(id, "command_output", tool, args);
             ShowResult("command_output", result, false);
             Events?.ToolResult(id, "command_output", 0, result, (job.Ended ?? DateTime.UtcNow) - job.Started, false);
-            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = result.Text });
+            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = result.Text }, ms: (long)((job.Ended ?? DateTime.UtcNow) - job.Started).TotalMilliseconds);
         }
         return true;
     }
@@ -1322,6 +1326,7 @@ internal sealed partial class Agent
         }
 
         var results = new ToolResult[planned.Count];
+        var took = new long[planned.Count];
         if (planned.Any(p => p.Refusal is null))
         {
             Ui.StartSpinner("Running");
@@ -1374,6 +1379,7 @@ internal sealed partial class Agent
                 }
             }
             results[i] = result;
+            took[i] = clock.ElapsedMilliseconds;
             Count(p.Name, p.Args, result, p.Refusal);
             ShowResult(p.Name, result, planned.Count > 1);
             Events?.ToolResult(p.Id, p.Name, i, result, clock.Elapsed, p.Declined);
@@ -1396,7 +1402,7 @@ internal sealed partial class Agent
                 // Said under the result, so the model calls it so next time.
                 text += $"\n\n(This call was mended before it ran: {mended}. Call {planned[i].Name} so next time.)";
             }
-            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text }, agents: results[i].Agents);
+            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text }, agents: results[i].Agents, ms: took[i]);
             _spending?.Called(planned[i].Name, text.Length);
         }
         // Pictures a tool took (a screenshot) follow the results, as the person's message: a tool's result is text only.
@@ -1605,6 +1611,9 @@ internal sealed partial class Agent
 
     /// <summary>The longest answer of this session, in tokens.</summary>
     private long _longestAnswer;
+
+    /// <summary>How long this step's request to the model took (its answer's time, for Arena's accounting); null: none this step.</summary>
+    private long? _askedMs;
 
     /// <summary>How many cuts in a row that bring nothing new (the same words again) end the turn: the model is stuck, not long.</summary>
     public const int MaxStuckCuts = 3;

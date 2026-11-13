@@ -483,7 +483,9 @@ export function AnswerTurn({
   const first = assistants[0]
   const last = assistants.at(-1)
   const text = assistants.map((a) => a.content).filter(Boolean).join('\n\n')
-  const took = assistants.reduce((a, m) => a + (m.durationMs ?? 0), 0) + answer.filter((m) => m.role === 'tool').reduce((a, m) => a + (m.durationMs ?? 0), 0)
+  const modelTook = assistants.reduce((a, m) => a + (m.durationMs ?? 0), 0)
+  const toolsTook = answer.filter((m) => m.role === 'tool').reduce((a, m) => a + (m.durationMs ?? 0), 0)
+  const took = modelTook + toolsTook
   const usage = answerUsage(answer, config)
   const waiting = waitsForModel(answer, live)
   // Auto: who answered and why, kept with the answer's first message.
@@ -538,7 +540,12 @@ export function AnswerTurn({
         <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
           {last?.model && <span>{last.model}</span>}
           {agentModels.length > 0 && <span>· sub-agents: {agentModels.join(', ')}</span>}
-          {took > 0 && <span>· {seconds(took)}</span>}
+          {took > 0 && (
+            <span title="The model's time (its rounds), the tools' (their runs, sub-agents included), and yours before the question (reading, writing; at most 30 minutes)">
+              · {toolsTook > 0 ? `model ${seconds(modelTook)} · tools ${seconds(toolsTook)}` : seconds(took)}
+              {question?.humanMs ? ` · you ${seconds(question.humanMs)}` : ''}
+            </span>
+          )}
           {usage.prompt + usage.completion > 0 && (
             <span
               title={`${usage.prompt.toLocaleString()} in (${usage.cached.toLocaleString()} from cache), ${usage.completion.toLocaleString()} out${

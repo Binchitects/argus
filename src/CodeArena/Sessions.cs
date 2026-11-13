@@ -33,6 +33,8 @@ internal sealed class SyncEntry
     /// <summary>Its number among the session's messages: Arena knows it as session:number (its ref), so a message sent twice is one.</summary>
     public int Key { get; init; }
     public DateTimeOffset At { get; init; }
+    /// <summary>How long it took: an answer, its request to the model; a tool result, the tool's run. Null: not measured.</summary>
+    public long? Ms { get; init; }
     /// <summary>The model that wrote it (an answer).</summary>
     public string? Model { get; init; }
     /// <summary>An answer's tokens, when the gateway said.</summary>
@@ -216,6 +218,7 @@ internal sealed class SessionData
                     Web = web,
                     Key = entry.Int("n") ?? Keys,
                     At = DateTimeOffset.TryParse(entry.Str("at"), out var at) ? at : written,
+                    Ms = entry.Long("ms"),
                     Model = model,
                     Usage = usage,
                     Kind = entry.Str("kind"),
@@ -448,9 +451,9 @@ internal sealed class SessionStore
     /// A message the session adds, with the model that wrote it and its tokens (an answer), or "note" (<paramref name="kind"/>:
     /// Code Arena's own word to the model, not the person's); Arena is sent it.
     /// </summary>
-    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null, JsonObject? context = null)
+    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null, JsonObject? context = null, long? ms = null)
     {
-        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents, Context = context }));
+        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents, Context = context, Ms = ms }));
         Added?.Invoke(message);
     }
 
@@ -541,6 +544,10 @@ internal sealed class SessionStore
         if (e.Kind is not null)
         {
             line["kind"] = e.Kind;
+        }
+        if (e.Ms is { } ms)
+        {
+            line["ms"] = ms;
         }
         if (e.Status is not null)
         {

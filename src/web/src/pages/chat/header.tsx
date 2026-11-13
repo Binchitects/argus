@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Tag, Trash2, Users, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Tag, Timer, Trash2, Users, Wrench } from 'lucide-react'
 import { ReadInMenu } from './read-in'
 import { ChatProjectMenu } from '../projects/chat-project'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,7 +27,8 @@ import { formatValue } from '@/lib/format'
 import { AUTO, assistantsQuery, chatModel, onAuto } from './api'
 import { chatAnswerMost } from './context'
 import { AssistantIcon } from './assistant-icon'
-import type { ChatConfig, ChatSettings } from './types'
+import { seconds } from './format'
+import type { ChatConfig, ChatSettings, ChatTime } from './types'
 import { useChatActions } from './chat-actions'
 import { ChecklistButton } from './checklist-button'
 import { MemoryButton } from './memory'
@@ -252,7 +253,7 @@ export function ChatHeader({
   onToggleFiles: () => void
   onOpenList: () => void
   /** The chat on screen, once it exists: fork, archive and delete it from here too. */
-  chat?: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean; tags?: string[]; brief?: string | null }
+  chat?: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean; tags?: string[]; brief?: string | null; time?: ChatTime }
   /** Summarize the branch on screen (undefined: nothing to compact now). */
   onCompact?: () => void
   /** Export the branch on screen, or its summary. */
@@ -315,9 +316,46 @@ export function ChatHeader({
             <FolderOpen /> <span className="hidden tabular-nums sm:inline">{filesCount}</span>
           </Button>
         </Tooltip>
+        {chat?.time && chat.time.modelMs + chat.time.toolMs + chat.time.humanMs > 0 && <ChatTimeButton time={chat.time} />}
         {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} assistant={assistant} onMove={onMove} onShare={onShare} onMakeRoom={onMakeRoom} />}
       </span>
     </header>
+  )
+}
+
+/** Where the chat's time went: the model's, the tools', the person's. */
+export function ChatTimeButton({ time }: { time: ChatTime }) {
+  const total = time.modelMs + time.toolMs + time.humanMs
+  const share = (ms: number) => (total > 0 ? Math.round((ms / total) * 100) : 0)
+  return (
+    <Popover>
+      <Tooltip content="Where this chat's time went">
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5" aria-label={`Time: ${seconds(total)}`}>
+            <Timer /> <span className="hidden tabular-nums sm:inline">{seconds(total)}</span>
+          </Button>
+        </PopoverTrigger>
+      </Tooltip>
+      <PopoverContent align="end" className="w-72" aria-label="This chat's time">
+        <p className="text-sm font-semibold">This chat's time</p>
+        <dl className="mt-2 grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-1 text-sm tabular-nums">
+          {(
+            [
+              ['The model', time.modelMs],
+              ['Tools', time.toolMs],
+              ['You', time.humanMs],
+            ] as const
+          ).map(([label, ms]) => (
+            <div key={label} className="contents">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="text-end">{seconds(ms) || '0 s'}</dd>
+              <dd className="text-end text-muted-foreground">{share(ms)}%</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-2 text-xs text-muted-foreground">Yours is the time before each question: reading the answer, writing the next, at most 30 minutes a question.</p>
+      </PopoverContent>
+    </Popover>
   )
 }
 

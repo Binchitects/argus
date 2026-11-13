@@ -57,6 +57,50 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     private static object Answer(string text, string? reference = null) => new { role = "assistant", content = text, model = "m", @ref = reference };
 
     [Fact]
+    public async Task Code_Arenas_times_are_counted_the_models_the_tools_and_the_persons_per_answer_per_chat_and_in_accounting()
+    {
+        await using var f = NewApp();
+        var (browser, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var chat = await ChatAsync(arena, "times-1");
+        var t = DateTimeOffset.UtcNow.AddHours(-3);
+        string At(int minutes) => t.AddMinutes(minutes).ToString("o");
+        var call = new[] { new { id = "c1", type = "function", function = new { name = "run_command", arguments = "{}" } } };
+        // Put down as each ends: the answer's request took 30 minutes, its tool 10; the person came back 20 minutes after the
+        // answer ended; Code Arena's own note is nobody's time; an hour away counts 30 minutes only.
+        await SendAsync(arena, chat, null,
+        [
+            new { role = "user", content = "q1", at = At(0), @ref = "s:0" },
+            new { role = "assistant", content = "", tool_calls = call, model = "m", at = At(30), ms = 1_800_000, @ref = "s:1" },
+            new { role = "tool", content = "ok", tool_call_id = "c1", name = "run_command", at = At(40), ms = 600_000, @ref = "s:2" },
+            new { role = "assistant", content = "a1", model = "m", at = At(41), ms = 60_000, @ref = "s:3" },
+            new { role = "user", content = "q2", at = At(61), @ref = "s:4" },
+            new { role = "assistant", content = "a2", model = "m", at = At(62), ms = 60_000, @ref = "s:5" },
+            new { role = "user", content = "(a note)", kind = "note", at = At(63), @ref = "s:6" },
+            new { role = "assistant", content = "Noted.", model = "m", at = At(63), @ref = "s:7" },
+            new { role = "user", content = "q3", at = At(125), @ref = "s:8" },
+            new { role = "assistant", content = "a3", model = "m", at = At(126), ms = 60_000, @ref = "s:9" },
+        ]);
+        var read = await browser.JsonAsync(await browser.GetAsync($"/api/chat/conversations/{chat}"));
+        var time = read.GetProperty("time");
+        Assert.Equal((1_980_000, 600_000, 1_200_000 + 1_800_000), (time.GetProperty("modelMs").GetInt64(), time.GetProperty("toolMs").GetInt64(), time.GetProperty("humanMs").GetInt64()));
+        var questions = read.GetProperty("messages").EnumerateArray().Where(m => m.GetProperty("role").GetString() == "user")
+            .ToDictionary(m => m.GetProperty("content").GetString()!, m => m.GetProperty("humanMs").ValueKind == JsonValueKind.Null ? (int?)null : m.GetProperty("humanMs").GetInt32());
+        Assert.Equal(new Dictionary<string, int?> { ["q1"] = null, ["q2"] = 1_200_000, ["(a note)"] = null, ["q3"] = 1_800_000 }, questions);
+
+        // Accounting: the same, in hours, for the person.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var window = $"from={Uri.EscapeDataString(t.AddHours(-1).ToString("o"))}&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddMinutes(1).ToString("o"))}";
+        var report = await admin.JsonAsync(await admin.GetAsync($"/api/admin/accounting?{window}"));
+        var all = report.GetProperty("time").GetProperty("all");
+        Assert.Equal((0.55, 0.17, 0.83), (all.GetProperty("modelHours").GetDouble(), all.GetProperty("toolHours").GetDouble(), all.GetProperty("humanHours").GetDouble()));
+        var person = Assert.Single(report.GetProperty("time").GetProperty("people").EnumerateArray());
+        Assert.Equal(0.83, person.GetProperty("humanHours").GetDouble());
+        Assert.EndsWith("@example.test", person.GetProperty("email").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Time by person", await (await admin.GetAsync($"/api/admin/accounting/export?{window}&format=csv")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Code_Arena_hears_its_chats_changes_as_they_happen_a_web_message_and_a_rename_and_not_another_persons()
     {
         await using var f = NewApp();

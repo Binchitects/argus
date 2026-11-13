@@ -111,6 +111,8 @@ export interface Message {
   cost?: number | null
   thinkingMs: number | null
   durationMs: number | null
+  /** A person's question: their time before it (reading the answer it follows, writing it), at most 30 minutes. Null or missing: none counted. */
+  humanMs?: number | null
   createdAt: string
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
@@ -406,6 +408,15 @@ export interface Conversation extends ConversationSummary {
   queued?: QueuedMessage[]
   /** A science lab notebook: its science (mathematics, physics...). */
   labField?: string | null
+  /** Where the chat's time went, every branch of it. */
+  time?: ChatTime
+}
+
+/** A chat's time: the model's (its answers), the tools' (their runs, sub-agents included), and the person's (reading and writing, at most 30 minutes a question). */
+export interface ChatTime {
+  modelMs: number
+  toolMs: number
+  humanMs: number
 }
 
 /** A message sent while the chat answers (kept on the server: a reload still shows it): the answer reads it at its next step, or it goes when the answer ends. */

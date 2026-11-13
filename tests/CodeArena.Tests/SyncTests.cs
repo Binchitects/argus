@@ -49,6 +49,21 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task An_answer_and_a_tool_result_go_to_Arena_with_how_long_they_took()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        File.WriteAllText(Path.Combine(h.Work, "a.txt"), "hello");
+        var asked = 0;
+        _gateway.Answer = _ => ++asked == 1 ? Reply.Call(("read_file", """{"path":"a.txt"}""")) : Reply.Say("It says hello.");
+        Assert.Equal(0, await h.Run("", "-p", "what does a.txt say?"));
+        var chat = Assert.Single(_mcp.Chats.All);
+        Assert.Equal(["user", "assistant", "tool", "assistant"], chat.Messages.Select(Role));
+        // Arena's time accounting adds them up: the model's requests, the tool's run; the person's question has none.
+        Assert.Null(chat.Messages[0]["ms"]);
+        Assert.All([chat.Messages[1], chat.Messages[2], chat.Messages[3]], m => Assert.True(m["ms"]!.GetValue<long>() >= 0));
+    }
+
+    [Fact]
     public async Task What_Arena_missed_while_down_is_sent_later_once()
     {
         using var h = new Harness(_gateway, _mcp);

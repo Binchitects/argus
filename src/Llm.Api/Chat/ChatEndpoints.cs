@@ -398,7 +398,7 @@ public static partial class ChatEndpoints
         // The person's thumbs, and the arena's answers without their models until voted on.
         var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
         return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas,
-            await QueuedMessages.ListAsync(db, id, ct), c.IsRoom ? await RoomEndpoints.BriefAsync(db, c, me, jobs, ct) : null, earlier));
+            await QueuedMessages.ListAsync(db, id, ct), c.IsRoom ? await RoomEndpoints.BriefAsync(db, c, me, jobs, ct) : null, earlier, await TimeSplit.OfChatAsync(db, id, ct)));
     }
 
     /// <summary>
@@ -450,6 +450,7 @@ public static partial class ChatEndpoints
         // Who wrote each (a room's people), by name only: never their email.
         var authors = messages.Where(m => m.AuthorId is not null).Select(m => m.AuthorId!.Value).ToHashSet();
         var names = await db.Users.AsNoTracking().Where(u => authors.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName, ct);
+        var byId = messages.ToDictionary(m => m.Id);
         return messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Quote, skills = SkillLibrary.KeptAll(m.Skill), m.Reasoning, m.ToolName, m.ToolCallId,
@@ -464,6 +465,8 @@ public static partial class ChatEndpoints
             m.CutShort, m.Pinned, m.LeftOut,
             status = m.Status.ToString().ToLowerInvariant(), error = quality is null ? m.Error : quality.Error(m), model = quality is null ? m.Model : quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
+            // A person's question: their time before it (reading the answer it follows, writing it), at most 30 minutes.
+            humanMs = TimeSplit.HumanMs(m, m.ParentId is { } parent ? byId.GetValueOrDefault(parent) : null),
             // An arena answer's cost waits for the vote, as its model does: prices would tell the two apart.
             cost = quality is not null && quality.Model(m) != m.Model ? null : m.Cost,
             noAccess = m.Role == "tool" && CodeIntelMcp.IsNoAccess(m.Content),
@@ -476,7 +479,7 @@ public static partial class ChatEndpoints
     /// <param name="queued">Messages waiting for the answer to end (QueuedMessages).</param>
     /// <param name="earlier">A long chat's messages before its window, not sent (GetAsync's last).</param>
     private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? assistant = null,
-        object? arenas = null, IEnumerable<object>? queued = null, object? room = null, int earlier = 0) =>
+        object? arenas = null, IEnumerable<object>? queued = null, object? room = null, int earlier = 0, ChatTime? time = null) =>
         new
         {
             // A room's: the person's role, its people and its settings (RoomEndpoints).
@@ -484,6 +487,8 @@ public static partial class ChatEndpoints
             c.Id, c.Title, c.Thinking, tools, useCodeIntel = tools.Contains("code-intel"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, c.Tags, c.Brief, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace, projectId = c.WorkProjectId,
+            // Where the chat's time went (every branch): the model's, the tools', the person's.
+            time = time ?? new ChatTime(0, 0, 0),
             // A science lab notebook's field (null: a chat).
             labField = c.LabField,
             // Code Arena is answering in it: what the person sends waits in the queue until its turn ends.
