@@ -204,6 +204,7 @@ export const notInTheManual = [
   'design/code-intel-graph.md',
   'design/code-intel-rename.md',
   'design/code-index.md',
+  'design/iot-ot.md',
   'design/own-gateway.md',
   'design/v5.9-code-review-access.md',
   'design/v5.9-rooms.md',

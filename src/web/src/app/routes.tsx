@@ -48,6 +48,8 @@ export const routes: RouteObject[] = [
           { path: 'plans', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlansPage }))) },
           { path: 'lab', ...lazy(() => import('@/pages/lab').then((m) => ({ Component: m.LabPage }))) },
           { path: 'lab/:id', ...lazy(() => import('@/pages/lab').then((m) => ({ Component: m.LabNotebookPage }))) },
+          { path: 'plant', ...lazy(() => import('@/pages/plant').then((m) => ({ Component: m.PlantPage }))) },
+          { path: 'plant/:id', ...lazy(() => import('@/pages/plant').then((m) => ({ Component: m.PlantSitePage }))) },
           { path: 'apps', ...lazy(() => import('@/pages/apps/apps').then((m) => ({ Component: m.AppsPage }))) },
           { path: 'apps/:id', ...lazy(() => import('@/pages/apps/apps').then((m) => ({ Component: m.AppPage }))) },
           { path: 'data', ...lazy(() => import('@/pages/data/data').then((m) => ({ Component: m.DataPage }))) },
