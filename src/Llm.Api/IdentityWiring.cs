@@ -705,6 +705,7 @@ public static class IdentityWiring
         Code.CodeArenaAutomation.MapCodeArenaAutomation(app);
         Models.ModelBenchEndpoints.MapModelBench(app);
         Plant.PlantEndpoints.MapPlant(app);
+        Plant.PlantSamples.Map(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);

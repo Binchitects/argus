@@ -2,13 +2,13 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
-import { areaTree, limits, type PlantArea, type PlantPoint } from './plant-api'
+import { areaTree, limits, shown, type PlantArea, type PlantPoint } from './plant-api'
 
 const kinds = { areas: ['area', 'line', 'room', 'floor'], assets: ['machine', 'sensor', 'camera'], types: ['number', 'boolean', 'text', 'state'], sources: ['manual', 'mqtt', 'opcua', 'modbus'] }
 const site = { id: 's1', name: 'Plant north', description: null, timeZone: 'Europe/Berlin', groupIds: [], createdAt: '', updatedAt: '', assets: 2, points: 1 }
 const area = (id: string, name: string, parentId: string | null = null, position = 0): PlantArea => ({ id, parentId, name, kind: 'line', position })
 const asset = (id: string, name: string, areaId: string | null) => ({ id, siteId: 's1', areaId, name, kind: 'machine', vendor: null, model: null, serial: null, description: null, tags: [], x: null, y: null, points: 1, createdAt: '', updatedAt: '' })
-const point: PlantPoint = { id: 'p1', assetId: 'a1', name: 'Outlet temperature', description: null, dataType: 'number', unit: '°C', source: 'opcua', address: 'ns=2;s=P1.T', lowLow: null, low: 10, high: 80, highHigh: null, deadband: null, states: null }
+const point: PlantPoint = { id: 'p1', assetId: 'a1', name: 'Outlet temperature', description: null, dataType: 'number', unit: '°C', source: 'opcua', address: 'ns=2;s=P1.T', lowLow: null, low: 10, high: 80, highHigh: null, deadband: null, states: null, latest: { at: '2026-11-13T10:00:00Z', value: 21.456789, text: null } }
 
 describe('plant', () => {
   it('areas make a tree: a parent before its children, an orphan at the top, no loop followed', () => {
@@ -16,6 +16,10 @@ describe('plant', () => {
     expect(tree.map((t) => `${t.depth}:${t.area.name}`)).toEqual(['0:Hall', '1:Bay', '0:Lost'])
     expect(limits(point)).toBe('low 10 · high 80 °C')
     expect(limits({ ...point, low: null, high: null })).toBe('')
+    expect(shown(point)).toBe('21.4568 °C')
+    expect(shown({ ...point, dataType: 'boolean', latest: { at: '', value: 0, text: null } })).toBe('off')
+    expect(shown({ ...point, dataType: 'state', states: '0=stopped, 1=running', latest: { at: '', value: 1, text: null } })).toBe('running')
+    expect(shown({ ...point, latest: null })).toBe('')
   })
 
   it('a manager adds a site and is taken to it', async () => {
@@ -53,6 +57,7 @@ describe('plant', () => {
     await userEvent.click(within(nav).getByRole('button', { name: /Pump 1/ }))
     expect(await screen.findByText('Outlet temperature')).toBeInTheDocument()
     expect(screen.getByText('low 10 · high 80 °C')).toBeInTheDocument()
+    expect(screen.getByText('21.4568 °C')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Import a sheet/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete Pump 1' })).not.toBeInTheDocument()
   })

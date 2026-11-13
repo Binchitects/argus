@@ -743,7 +743,7 @@ export const topics = {
     about: 'One site: its areas as a tree with their assets under them, and the chosen asset\'s points.',
     parts: [
       { name: 'Areas and assets', text: 'An area\'s **+** adds an area inside it, the factory button an asset in it. Deleting an area moves the areas inside it up a level; its assets stay in the site, outside any area.' },
-      { name: 'Points', text: 'An asset\'s values: their type (number, boolean, text, state), unit, source (OPC UA, Modbus, MQTT, BACnet, SNMP, HTTP or by hand), address and limits.' },
+      { name: 'Points', text: 'An asset\'s values: their type (number, boolean, text, state), unit, source (OPC UA, Modbus, MQTT, BACnet, SNMP, HTTP or by hand), address and limits. **Now** is the latest value a gateway sent; hover it for when.' },
       { name: 'Import a sheet', text: 'Areas and assets not there yet are made, points already there are updated, and nothing is kept when a line is wrong: the error says which lines.' },
     ],
     tasks: [{ title: 'Add a point by hand', steps: ['Choose the asset.', 'Press **Point**.', 'Give its name, type, unit, source and address, and its limits if it has them.'] }],

@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Llm.Tests;
 
@@ -12,9 +14,24 @@ public sealed class PlantTests(AppFixture app)
 
     private async Task<(Guid Id, TestBrowser Browser)> PersonAsync(TestBrowser admin)
     {
+        var (id, browser, _) = await PersonWithKeyAsync(admin);
+        return (id, browser);
+    }
+
+    private async Task<(Guid Id, TestBrowser Browser, string Key)> PersonWithKeyAsync(TestBrowser admin)
+    {
         var name = "pl" + Guid.NewGuid().ToString("N")[..8];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
-        return (made.GetProperty("id").GetGuid(), await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!));
+        return (made.GetProperty("id").GetGuid(), await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!), made.GetProperty("apiKey").GetString()!);
+    }
+
+    /// <summary>A gateway: no session, its person's API key.</summary>
+    private HttpClient Gateway(string key)
+    {
+        var http = app.Factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false, HandleCookies = false });
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        http.DefaultRequestHeaders.Add("X-Requested-With", "gateway");
+        return http;
     }
 
     private static async Task<Guid> Made(TestBrowser b, string path, object body)
@@ -86,6 +103,81 @@ public sealed class PlantTests(AppFixture app)
         Assert.False((await ann.JsonAsync(await ann.GetAsync("/api/plant"))).GetProperty("mayManage").GetBoolean());
         // Seeing is not setting up.
         await StatusAssert.Is(HttpStatusCode.Forbidden, await ann.PostAsync($"/api/plant/sites/{theirs}/assets", new { name = "Mine" }));
+    }
+
+    [Fact]
+    public async Task A_gateway_with_plant_write_sends_values_to_the_sites_it_sees_and_they_read_back_as_series_and_latest()
+    {
+        var admin = await AdminAsync();
+        var (gatewayId, _, key) = await PersonWithKeyAsync(admin);
+        var group = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "Gateways " + Guid.NewGuid().ToString("N")[..6] }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { gatewayId } }));
+        var site = await Made(admin, "/api/plant/sites", new { name = "Fed " + Guid.NewGuid().ToString("N")[..6], groupIds = new[] { group } });
+        var hidden = await Made(admin, "/api/plant/sites", new { name = "Not theirs " + Guid.NewGuid().ToString("N")[..6], groupIds = new[] { Guid.NewGuid() } });
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var pump = await Made(admin, $"/api/plant/sites/{site}/assets", new { name = "Pump" });
+        var temperature = await Made(admin, $"/api/plant/assets/{pump}/points", new { name = "temperature", unit = "°C", source = "opcua", address = $"ns=2;s={tag}.T" });
+        var running = await Made(admin, $"/api/plant/assets/{pump}/points", new { name = "running", dataType = "boolean", source = "mqtt", address = $"site/{tag}/running" });
+        var note = await Made(admin, $"/api/plant/assets/{pump}/points", new { name = "note", dataType = "text" });
+        var other = await Made(admin, $"/api/plant/sites/{hidden}/assets", new { name = "Pump" });
+        var theirs = await Made(admin, $"/api/plant/assets/{other}/points", new { name = "temperature", source = "opcua", address = $"ns=2;s={tag}.T" });
+
+        var gateway = Gateway(key);
+        var t0 = DateTimeOffset.UtcNow.AddMinutes(-30);
+        object Batch() => new
+        {
+            samples = new object[]
+            {
+                new { point = temperature, at = t0, value = 20.0 },
+                new { source = "opcua", address = $"ns=2;s={tag}.T", at = t0.AddMinutes(1), value = 30.0 },
+                new { address = $"site/{tag}/running", at = t0, on = true },
+                new { address = $"site/{tag}/running", at = t0.AddMinutes(20), text = "off" },
+                new { point = note, at = t0, text = "Bearing noise" },
+                new { point = Guid.NewGuid(), value = 1.0 },
+                new { point = temperature, at = DateTimeOffset.UtcNow.AddHours(1), value = 99.0 },
+                new { point = temperature, at = t0.AddMinutes(2), text = "warm" },
+            },
+        };
+        // Without plant.write, a key sends nothing.
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await gateway.PostAsJsonAsync("/api/plant/samples", Batch()));
+        var role = (await admin.JsonAsync(await admin.PostAsync("/api/admin/access/roles", new { name = "Plant gateway " + tag, permissions = new[] { "plant.write", "feature.plant" } }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments", new { roleId = role, subjectKind = "Person", subjectId = gatewayId }));
+
+        var res = await gateway.PostAsJsonAsync("/api/plant/samples", Batch());
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        var sent = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+        // The hidden site's point at the same address gets nothing; a moment ahead and a number as words are wrong.
+        Assert.Equal((5, 1, 2), (sent.GetProperty("kept").GetInt32(), sent.GetProperty("unknownCount").GetInt32(), sent.GetProperty("wrongCount").GetInt32()));
+        // The same moment sent again replaces its value.
+        await StatusAssert.Is(HttpStatusCode.OK, await gateway.PostAsJsonAsync("/api/plant/samples", new { samples = new[] { new { point = temperature, at = t0, value = 22.0 } } }));
+
+        var series = await admin.JsonAsync(await admin.GetAsync($"/api/plant/points/{temperature}/series?from={Uri.EscapeDataString(t0.AddMinutes(-1).ToString("O"))}&to={Uri.EscapeDataString(t0.AddMinutes(59).ToString("O"))}&buckets=1"));
+        var bucket = Assert.Single(series.GetProperty("buckets").EnumerateArray());
+        Assert.Equal((26.0, 22.0, 30.0, 30.0, 2), (bucket.GetProperty("avg").GetDouble(), bucket.GetProperty("min").GetDouble(), bucket.GetProperty("max").GetDouble(), bucket.GetProperty("last").GetDouble(), bucket.GetProperty("n").GetInt32()));
+        var texts = await admin.JsonAsync(await admin.GetAsync($"/api/plant/points/{note}/series"));
+        Assert.Equal(["Bearing noise"], texts.GetProperty("texts").EnumerateArray().Select(t => t.GetProperty("text").GetString()));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/plant/points/{temperature}/series?from={Uri.EscapeDataString(t0.ToString("O"))}&to={Uri.EscapeDataString(t0.AddDays(-1).ToString("O"))}"));
+
+        var asset = await admin.JsonAsync(await admin.GetAsync($"/api/plant/assets/{pump}"));
+        double? Latest(string name) => asset.GetProperty("points").EnumerateArray().Single(p => p.GetProperty("name").GetString() == name).GetProperty("latest") is { ValueKind: JsonValueKind.Object } l
+            && l.GetProperty("value") is { ValueKind: JsonValueKind.Number } v ? v.GetDouble() : null;
+        Assert.Equal((30.0, 0.0), (Latest("temperature"), Latest("running")));
+        var hiddenAsset = await admin.JsonAsync(await admin.GetAsync($"/api/plant/assets/{other}"));
+        Assert.Equal(JsonValueKind.Null, hiddenAsset.GetProperty("points")[0].GetProperty("latest").ValueKind);
+        _ = theirs;
+    }
+
+    [Fact]
+    public void A_value_is_kept_as_its_points_type_keeps_it()
+    {
+        var number = new Llm.Core.Plant.PlantPoint { Name = "t" };
+        var flag = new Llm.Core.Plant.PlantPoint { Name = "f", DataType = "boolean" };
+        Assert.Equal(1.5, Llm.Api.Plant.PlantSamples.Sample(number, new(Text: "1.5"), out _)!.Value);
+        Assert.Null(Llm.Api.Plant.PlantSamples.Sample(number, new(Value: double.NaN), out var why));
+        Assert.Equal("not a number", why);
+        Assert.Equal(1, Llm.Api.Plant.PlantSamples.Sample(flag, new(Value: 7), out _)!.Value);
+        Assert.Equal(0, Llm.Api.Plant.PlantSamples.Sample(flag, new(Text: "Off"), out _)!.Value);
+        Assert.Null(Llm.Api.Plant.PlantSamples.Sample(flag, new(Text: "maybe"), out _));
     }
 
     [Fact]

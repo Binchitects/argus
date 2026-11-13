@@ -7689,6 +7689,26 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("plant_points", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Plant.PlantSample", b =>
+                {
+                    b.Property<Guid>("PointId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<double?>("Value")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("PointId", "At");
+
+                    b.ToTable("plant_samples", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Plant.PlantSite", b =>
                 {
                     b.Property<Guid>("Id")
@@ -10023,6 +10043,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Plant.PlantAsset", null)
                         .WithMany()
                         .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Plant.PlantSample", b =>
+                {
+                    b.HasOne("Llm.Core.Plant.PlantPoint", null)
+                        .WithMany()
+                        .HasForeignKey("PointId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

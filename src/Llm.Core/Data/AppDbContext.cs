@@ -70,6 +70,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Plant.PlantArea> PlantAreas => Set<Plant.PlantArea>();
     public DbSet<Plant.PlantAsset> PlantAssets => Set<Plant.PlantAsset>();
     public DbSet<Plant.PlantPoint> PlantPoints => Set<Plant.PlantPoint>();
+    public DbSet<Plant.PlantSample> PlantSamples => Set<Plant.PlantSample>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelToolMode> ModelToolModes => Set<ModelToolMode>();
@@ -756,6 +757,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.AssetId, x.Name }).IsUnique();
             e.HasIndex(x => new { x.Source, x.Address });
             e.HasOne<Plant.PlantAsset>().WithMany().HasForeignKey(x => x.AssetId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Plant.PlantSample>(e =>
+        {
+            e.ToTable("plant_samples");
+            e.HasKey(x => new { x.PointId, x.At });
+            e.Property(x => x.Text).HasMaxLength(2000);
+            e.HasOne<Plant.PlantPoint>().WithMany().HasForeignKey(x => x.PointId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ModelBenchRun>(e =>
         {

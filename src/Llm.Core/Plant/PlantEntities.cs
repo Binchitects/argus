@@ -82,3 +82,15 @@ public sealed class PlantPoint
     public string? States { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// One value of a point at one moment, as a connector or a gateway sent it: a number (a boolean as 0 or 1, a state as
+/// its number) or a text. One a point and moment; sending the same moment again replaces it.
+/// </summary>
+public sealed class PlantSample
+{
+    public Guid PointId { get; set; }
+    public DateTimeOffset At { get; set; }
+    public double? Value { get; set; }
+    public string? Text { get; set; }
+}

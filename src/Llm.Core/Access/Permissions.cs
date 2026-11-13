@@ -158,6 +158,7 @@ public static class Permissions
     public const string Studio = "feature.studio";
     public const string Plant = "feature.plant";
     public const string PlantManage = "plant.manage";
+    public const string PlantWrite = "plant.write";
     public const string FixIt = "feature.fixit";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
@@ -230,6 +231,7 @@ public static class Permissions
         new(BusinessManage, "Code", "Remove business maps.", true),
         new(ProjectsManage, "Projects", "See every project and what it used, and change or delete any.", true),
         new(PlantManage, "Plant", "Set up the plant: its sites, areas, assets and their points, and who sees each site.", true),
+        new(PlantWrite, "Plant", "Send the plant's values (a connector or a gateway, with its API key), to the sites it sees.", true),
 
         new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
         new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),

@@ -53,12 +53,12 @@ public static class PlantEndpoints
         g.MapPost("/sites/{id:guid}/import", ImportAsync);
     }
 
-    private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
+    internal static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    private static IResult Bad(string code, string message) => AuthEndpoints.Problem(400, code, message);
+    internal static IResult Bad(string code, string message) => AuthEndpoints.Problem(400, code, message);
 
     /// <summary>Whether the person may see the site: one of its groups, or none named, or the plant's managers.</summary>
-    private static bool Sees(PlantSite s, Membership m) => s.GroupIds.Count == 0 || s.GroupIds.Any(m.Groups.Contains) || m.Has(Core.Access.Permissions.PlantManage);
+    internal static bool Sees(PlantSite s, Membership m) => s.GroupIds.Count == 0 || s.GroupIds.Any(m.Groups.Contains) || m.Has(Core.Access.Permissions.PlantManage);
 
     private static async Task<PlantSite?> VisibleAsync(AppDbContext db, Guid id, Membership m, CancellationToken ct) =>
         await db.PlantSites.SingleOrDefaultAsync(s => s.Id == id, ct) is { } s && Sees(s, m) ? s : null;
@@ -93,9 +93,10 @@ public static class PlantEndpoints
         a.Id, a.SiteId, a.AreaId, a.Name, a.Kind, a.Vendor, a.Model, a.Serial, a.Description, a.Tags, a.X, a.Y, a.CreatedAt, a.UpdatedAt, points,
     };
 
-    private static object PointShape(PlantPoint p) => new
+    private static object PointShape(PlantPoint p, PlantSample? latest) => new
     {
         p.Id, p.AssetId, p.Name, p.Description, p.DataType, p.Unit, p.Source, p.Address, p.LowLow, p.Low, p.High, p.HighHigh, p.Deadband, p.States, p.CreatedAt,
+        latest = latest is null ? null : new { latest.At, latest.Value, latest.Text },
     };
 
     /// <summary>The sites the person sees, with how many assets and points each has, and whether they may set the plant up.</summary>
@@ -403,7 +404,12 @@ public static class PlantEndpoints
             return Results.NotFound();
         }
         var points = await db.PlantPoints.AsNoTracking().Where(pt => pt.AssetId == id).OrderBy(pt => pt.Name).ToListAsync(ct);
-        return Results.Ok(new { asset = AssetShape(asset, points.Count), points = points.Select(PointShape) });
+        var latest = await PlantSamples.LatestAsync(db, [.. points.Select(pt => pt.Id)], ct);
+        return Results.Ok(new
+        {
+            asset = AssetShape(asset, points.Count),
+            points = points.Select(pt => PointShape(pt, latest.GetValueOrDefault(pt.Id))),
+        });
     }
 
     private static async Task<IResult> ChangeAssetAsync(Guid id, AssetRequest body, AppDbContext db, CancellationToken ct)

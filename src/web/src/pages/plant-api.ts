@@ -64,6 +64,8 @@ export interface PlantPoint {
   highHigh: number | null
   deadband: number | null
   states: string | null
+  /** Its latest value, as the gateway last sent it. */
+  latest: { at: string; value: number | null; text: string | null } | null
 }
 
 export interface PlantSiteWhole {
@@ -124,4 +126,21 @@ export function limits(p: PlantPoint): string {
     p.highHigh != null && `high-high ${p.highHigh}`,
   ].filter(Boolean)
   return parts.length ? parts.join(' · ') + (p.unit ? ` ${p.unit}` : '') : ''
+}
+
+/** A point's latest value in words: "21.5 °C", "on", "running" (from its states), or its text. */
+export function shown(p: PlantPoint): string {
+  const l = p.latest
+  if (!l) return ''
+  if (p.dataType === 'text') return l.text ?? ''
+  if (l.value == null) return ''
+  if (p.dataType === 'boolean') return l.value ? 'on' : 'off'
+  if (p.dataType === 'state' && p.states) {
+    const named = p.states
+      .split(',')
+      .map((s) => s.split('='))
+      .find(([k]) => Number(k.trim()) === l.value)
+    if (named?.[1]) return named[1].trim()
+  }
+  return `${Number(l.value.toPrecision(6))}${p.unit ? ` ${p.unit}` : ''}`
 }

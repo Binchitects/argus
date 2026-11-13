@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { areaTree, limits, plantAssetQuery, plantQuery, plantSiteQuery, type PlantAsset, type PlantImported, type PlantKinds } from './plant-api'
+import { areaTree, limits, plantAssetQuery, shown, plantQuery, plantSiteQuery, type PlantAsset, type PlantImported, type PlantKinds } from './plant-api'
 
 const POINTS_SHEET = 'area,asset,kind,point,unit,type,source,address,low,high\nLine 1,Pump 1,machine,Outlet temperature,°C,number,opcua,ns=2;s=P1.T,10,80'
 
@@ -445,6 +445,7 @@ function AssetPanel({ id, may, onAddPoint, onDelete }: { id: string; may: boolea
               <thead className="text-start text-xs text-muted-foreground">
                 <tr>
                   <th className="py-1 pe-3 text-start font-medium">Point</th>
+                  <th className="py-1 pe-3 text-start font-medium">Now</th>
                   <th className="py-1 pe-3 text-start font-medium">Type</th>
                   <th className="py-1 pe-3 text-start font-medium">Source</th>
                   <th className="py-1 pe-3 text-start font-medium">Limits</th>
@@ -457,6 +458,13 @@ function AssetPanel({ id, may, onAddPoint, onDelete }: { id: string; may: boolea
                     <td className="py-1.5 pe-3">
                       {p.name}
                       {p.unit && <span className="text-muted-foreground"> ({p.unit})</span>}
+                    </td>
+                    <td className="py-1.5 pe-3 tabular-nums">
+                      {p.latest ? (
+                        <span title={new Date(p.latest.at).toLocaleString()}>{shown(p)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="py-1.5 pe-3">{p.dataType}</td>
                     <td className="py-1.5 pe-3">

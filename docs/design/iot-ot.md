@@ -110,6 +110,26 @@ Each with something to show (docs/plan.md's rule):
   RTSP streams from video files; load tests for thousands of points a second and hundreds of streams.
 - A camera or two and a sensor kit for the real checks, when the user has them.
 
+## Built so far (branch v9.0)
+
+- **Assets**: sites (seen by their groups), areas one under another, assets and points with units, sources and
+  limits; a sheet of points imported whole (`POST /api/plant/sites/{id}/import`). Workspace → Plant shows them.
+- **Values over HTTP**: a connector or a gateway sends values with its person's API key, which needs `plant.write`
+  (and the sites it sees). A batch of up to 10,000, each to a point by id or by its source and address:
+
+  ```bash
+  curl -X POST https://arena.example/api/plant/samples \
+    -H "Authorization: Bearer $ARENA_KEY" -H "X-Requested-With: gateway" -H "Content-Type: application/json" \
+    -d '{"samples":[{"source":"opcua","address":"ns=2;s=P101.Temp","value":71.5},{"address":"site/hall1/door2/open","on":true}]}'
+  ```
+
+  The key is made in Connect your tools (never put one in a script that is shared). A value dated more than five
+  minutes ahead is refused; the same point and moment sent again replaces it. The answer says how many were kept,
+  and which were for no point the key sees or wrong for their point's type.
+- **Reading them**: `GET /api/plant/points/{id}/series?from=&to=&buckets=` (average, lowest, highest, last and how
+  many a bucket; a text point's texts), and each point's latest value with its asset. Stored in Postgres
+  (`plant_samples`, a row a point and moment) until TimescaleDB is in the stack.
+
 ## Open questions for the user
 
 - Which protocols first (what the sites run: Siemens S7 via OPC UA, Modbus, BACnet, MQTT)?
