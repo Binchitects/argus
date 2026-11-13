@@ -1,6 +1,7 @@
-# code-intel in this stack. GITLAB_URL and GITLAB_TOKEN in .env say which GitLab.
+# code-intel in this stack. GITLAB_URL and GITLAB_TOKEN in .env say which GitLab; without them it serves its
+# knowledge packs only (nothing indexed from a GitLab), and says so.
 gitlab:
-  url: https://gitlab.example.com
+  url: ""
 index:
   data_dir: /var/lib/code-intel
   db_path: /var/lib/code-intel/index.db

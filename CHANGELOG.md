@@ -100,6 +100,12 @@ and every use a model has is said. And the logo: an owl in the form of an A.
 
 ### :bug: Bugs fixed
 
+- **The stack without a GitLab**: code-intel no longer stops at its start
+  when GITLAB_URL and GITLAB_TOKEN are empty (its config's placeholder
+  address was taken for a GitLab, then refused for want of a token): it
+  serves its knowledge packs, indexes nothing, and says why where a GitLab
+  would be asked; a fresh install with no GitLab still leaves it out, and
+  the rest of the stack runs without it.
 - A chat's digest whose model timed out was never made: it is made at the
   next pass (the gateway's failure was read as nothing to say).
 - Code Arena's admins' messages that came after its banner were dropped:

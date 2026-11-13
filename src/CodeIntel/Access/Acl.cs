@@ -118,6 +118,8 @@ public static class Acl
         now ??= () => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         if (string.IsNullOrEmpty(token))
             throw new AclDenied("No credential was sent. Configure the server with --auth header.");
+        if (!cfg.Configured)
+            throw new AclDenied(GitLabConfig.NotSet);
 
         var key = Hash(token);
         var cached = Writes.GetAclCache(conn, key);

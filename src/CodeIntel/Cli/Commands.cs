@@ -267,6 +267,13 @@ public static class Commands
             AuditLog.IndexEnd(code, Ms(started), 0, 0, 0, reason);
             return code;
         }
+        if (!cfg.GitLab.Configured)
+        {
+            // No GitLab: nothing to index (the knowledge packs are loaded on their own).
+            Out.WriteLine(GitLabConfig.NotSet);
+            AuditLog.IndexEnd(0, Ms(started), 0, 0, 0, "no_gitlab");
+            return 0;
+        }
         if (!allowPartial)
         {
             EnumerationHealth health;

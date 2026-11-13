@@ -1,6 +1,7 @@
 # code-intel in this stack. GITLAB_URL and GITLAB_TOKEN in .env say which GitLab.
 gitlab:
-  url: https://gitlab.example.com
+  # Its GitLab comes from the release's values (CODE_INTEL_GITLAB_URL); without one, its knowledge packs only.
+  url: ""
 index:
   data_dir: /var/lib/code-intel
   db_path: /var/lib/code-intel/index.db

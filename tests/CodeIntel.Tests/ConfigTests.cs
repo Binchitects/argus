@@ -95,6 +95,21 @@ public class ConfigTests
     }
 
     [Fact]
+    public void Without_a_GitLab_it_loads_for_its_knowledge_packs_and_an_index_pass_or_a_GitLab_token_says_why_not()
+    {
+        // No GitLab address (its environment empty too, as compose leaves GITLAB_URL unset): no error, nothing of GitLab's.
+        using var env = new EnvScope([.. Clean, ("CODE_INTEL_GITLAB_URL", ""), ("CODE_INTEL_GITLAB_TOKEN", "")]);
+        using var dir = new TempDir();
+        var cfg = CodeIntelConfig.Load(Write(dir, "gitlab:\n  url: \"\"\nindex:\n  data_dir: /data\n  db_path: /data/index.db\n"));
+        Assert.False(cfg.GitLab.Configured);
+        Assert.Equal(Path.Combine("/data", "packs"), cfg.PacksDir);
+        var denied = Assert.Throws<CodeIntel.Access.AclDenied>(() => CodeIntel.Access.Acl.Resolve(null!, cfg.GitLab, "glpat-something"));
+        Assert.Equal(GitLabConfig.NotSet, denied.Message);
+        // A GitLab with no credential is still refused: an address alone cannot index anything.
+        Assert.Throws<ConfigError>(() => CodeIntelConfig.Load(Write(dir, "gitlab:\n  url: https://g\nindex:\n  data_dir: /d\n  db_path: /d/i.db\n")));
+    }
+
+    [Fact]
     public void Missing_index_paths_are_named()
     {
         using var env = new EnvScope(Clean);

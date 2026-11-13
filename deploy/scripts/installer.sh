@@ -83,8 +83,8 @@
 #   --http-port N  --https-port N   (default 80 and 443; Podman 8080 and 8443)
 #   --gitlab-url URL  --gitlab-token-file FILE   the GitLab code-intel indexes, and its read-only
 #                        token (read from the file, never from the command line). Without them
-#                        code-intel, which cannot start without a GitLab, is left out until they are
-#                        in .env
+#                        code-intel (which would serve its knowledge packs only) is left out until
+#                        they are in .env; the rest of the stack runs without it
 #   --cpu-only           no NVIDIA GPU: the features that need one are off unless --with names them
 #   --with A,B  --without A,B   features on and off (install, upgrade and repair; installer.sh features)
 #   --no-cert            no certificate of the deployment's own: by default install, upgrade and repair make
@@ -2636,7 +2636,7 @@ cmd_install() {
     if [[ -z "$NEW_GITLAB" || -z "$NEW_GITLAB_TOKEN" ]]; then
       [[ -n "$NEW_GITLAB" && $DRY -eq 0 ]] && refuse "--gitlab-url needs its token: --gitlab-token-file FILE"
       NEW_GITLAB=""
-      # code-intel cannot start without a GitLab: off until .env names one.
+      # code-intel without a GitLab would index nothing (its knowledge packs only): off until .env names one.
       [[ "$known" == *" code-intel "* ]] && NO_GITLAB=1
     fi
   fi

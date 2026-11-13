@@ -196,6 +196,7 @@ public static partial class CodeIntelServer
         app.MapPost(AdminPrefix + "repos/discover", (HttpRequest request) =>
         {
             if (!Authorised(request)) return Forbidden();
+            if (!cfg.GitLab.Configured) return Json(new JsonObject { ["error"] = GitLabConfig.NotSet }, 409);
             try
             {
                 var projects = GitLab.ListProjects(cfg.GitLab);
@@ -309,6 +310,7 @@ public static partial class CodeIntelServer
         app.MapGet(AdminPrefix + "repos/{gitlabId:long}/branches", (long gitlabId, HttpRequest request) =>
         {
             if (!Authorised(request)) return Forbidden();
+            if (!cfg.GitLab.Configured) return Json(new JsonObject { ["error"] = GitLabConfig.NotSet }, 409);
             try
             {
                 var branches = GitLab.ListBranches(cfg.GitLab, gitlabId);

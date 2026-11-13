@@ -27,6 +27,15 @@ public sealed record GitLabConfig
     /// </summary>
     public string Ldap { get; init; } = "";
 
+    /// <summary>
+    /// A GitLab is set (its address given): without one, code-intel serves its knowledge packs and nothing of GitLab's
+    /// (no repository is indexed, no GitLab token signs in), and says so where GitLab would be asked.
+    /// </summary>
+    public bool Configured => Url.Length > 0;
+
+    /// <summary>What code-intel says where a GitLab would be needed and none is set.</summary>
+    public const string NotSet = "No GitLab is set up here: code-intel serves its knowledge packs only. Its admins give it one with GITLAB_URL and GITLAB_TOKEN (installer.sh repair --with code-intel).";
+
     /// <summary>Validate and normalise, exactly as <c>GitLabConfig.__post_init__</c>.</summary>
     public static GitLabConfig Create(string url, string token = "", string auth = "", string username = "",
         string password = "", string caCert = "", bool verify = true, string ldap = "")
@@ -119,11 +128,8 @@ public sealed record CodeIntelConfig
         var ix = Section(root, "index");
         var pk = Section(root, "packs");
 
-        var url = Env("CODE_INTEL_GITLAB_URL") ?? Scalar(gl, "url");
-        if (string.IsNullOrEmpty(url))
-            throw new ConfigError(
-                "gitlab.url is required: set CODE_INTEL_GITLAB_URL in the " +
-                "environment or gitlab.url in the config file");
+        // No GitLab: code-intel runs with its knowledge packs only (GitLabConfig.Configured).
+        var url = Env("CODE_INTEL_GITLAB_URL") ?? Scalar(gl, "url") ?? "";
 
         var token = Env("CODE_INTEL_GITLAB_TOKEN") ?? Scalar(gl, "token") ?? "";
         var username = Env("CODE_INTEL_GITLAB_USERNAME") ?? Scalar(gl, "username") ?? "";
@@ -152,7 +158,7 @@ public sealed record CodeIntelConfig
                 "certificate, or set gitlab.verify=false if no such file " +
                 "exists.");
 
-        if (token.Length == 0 && username.Length == 0 && password.Length == 0)
+        if (url.Length > 0 && token.Length == 0 && username.Length == 0 && password.Length == 0)
             throw new ConfigError(
                 "no GitLab credential: set gitlab.token (or CODE_INTEL_GITLAB_TOKEN), " +
                 "or gitlab.username with CODE_INTEL_GITLAB_PASSWORD");
@@ -176,7 +182,7 @@ public sealed record CodeIntelConfig
         var packsDir = Scalar(pk, "dir");
         return new CodeIntelConfig
         {
-            GitLab = GitLabConfig.Create(url.TrimEnd('/'), token, auth, username, password, caCert, verify,
+            GitLab = url.Length == 0 ? new GitLabConfig() : GitLabConfig.Create(url.TrimEnd('/'), token, auth, username, password, caCert, verify,
                 Env("CODE_INTEL_GITLAB_LDAP") ?? Scalar(gl, "ldap") ?? ""),
             Index = new IndexConfig
             {

@@ -194,8 +194,10 @@ features it requires.
 | `valkey` | no | `valkey` | LMCache's shared store for the vLLM models' token cache, when `LMCACHE_REMOTE` names it |
 | `meetings`, `lab`, `apps`, `data`, `decks`, `media`, `agents`, `code-studio` | yes | nothing: parts of the app | meetings, the science lab, apps, ask your data, decks, the media studio, Agent Studio, Code Studio |
 
-`--cpu-only` turns the GPU features off. Farzan Graph cannot start without a GitLab.
-Without `--gitlab-url` and a token, the installer leaves it out. To turn it
+`--cpu-only` turns the GPU features off. Without a GitLab, Farzan Graph serves its
+knowledge packs only (it indexes nothing, and says so where a GitLab would be asked);
+without `--gitlab-url` and a token, the installer leaves it out, and the rest of the
+stack runs without it. To turn it
 on later, put `GITLAB_URL` and `GITLAB_TOKEN` in `.env` and run
 `./arenactl repair --with code-intel`.
 
