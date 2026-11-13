@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
+import { liveFallback, useUsageLive } from '@/lib/usage-live'
 import { useTimeWindow } from '@/lib/use-time-window'
 import { cn } from '@/lib/utils'
 
@@ -120,8 +121,11 @@ export function AccountingPage() {
     if (basis) q.set('basis', basis)
     return q
   }
+  // Every request booked shows within a second or two (the usage stream), a window ending now moving with it.
+  useUsageLive(() => [['admin', 'accounting']])
   const report = useQuery({
     queryKey: ['admin', 'accounting', time.key, basis],
+    refetchInterval: liveFallback,
     queryFn: async ({ signal }) => {
       const r = time.resolved()
       return { ...(await api<AccountingReport>(`/api/admin/accounting?${query()}`, { signal })), fromMs: r.from.getTime(), toMs: r.to.getTime() }
@@ -340,7 +344,7 @@ function TimeCard({ time }: { time: AccountTime }) {
         <CardTitle>Time</CardTitle>
         <CardDescription>
           Where the chats&apos; time went, Code Arena&apos;s too: the model&apos;s (its answers), the tools&apos; (their runs, sub-agents included), and the people&apos;s (before each question: reading the
-          answer, writing the next, at most 30 minutes a question).
+          answer, writing the next; a break past 15 minutes, or a chat&apos;s first question, counts a minute).
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">

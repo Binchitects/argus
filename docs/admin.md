@@ -924,7 +924,16 @@ full the models kept loaded would make it.
   model's below, the picture, video and speech models' under
   [Picture, video and speech models](#picture-video-and-speech-models). A text
   encoder or decoder is put in among a picture or video model's files by its
-  role. Embedding models, rerankers, projectors, draft heads and adapters are
+  role. **A model with more than one use says each**: a chat model that a
+  picture model reads its prompt with (Qwen3 for FLUX.2 klein and Z-Image,
+  Qwen2.5-VL for Qwen-Image, Mistral for FLUX.2 dev, Llama for HiDream) is
+  listed as "also a picture or video model's text encoder", and is added as
+  a chat model, chosen as a picture model's `llm` file, or both; a projector
+  says whether it sees or hears. **Hugging Face** search names each
+  repository's uses before a download, from its pipeline, tags and name
+  (a repository such as pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF
+  reads as a picture model's text encoder that chats and sees too); hover a
+  use for where it is taken as that. Embedding models, rerankers, projectors, draft heads and adapters are
   not added as models of their own (they belong to Farzan Graph or a model's own
   settings): chosen, they say what they are for. A chat model needs the
   llama.cpp engine; a split model with a part missing is refused as
@@ -1942,8 +1951,11 @@ what running the models really cost over the time chosen, and shares it out.
 - **Time**: where the chats' time went, Code Arena's sessions too: the
   model's (its answers' rounds), the tools' (their runs, sub-agents
   included), and the people's (the time before each question: reading the
-  answer, writing the next, at most 30 minutes a question, longer being
-  away), in all, by person and by project, in the exports too. Each answer
+  answer, writing the next; a break past 15 minutes, or a chat's first
+  question, counts a minute, as a project's active time does), in all, by
+  person and by project, in the exports too. All of it is live: a request
+  booked shows on the page within a second or two (the page hears it as it
+  is booked), as on a project's page and Usage. Each answer
   shows its own under it (`model 9.1 s · tools 3.0 s · you 45 s`), and each
   chat its whole (the timer in its header). The dashboard **Usage by person**
   has the same per day and per person, from the view `gateway.chat_times`

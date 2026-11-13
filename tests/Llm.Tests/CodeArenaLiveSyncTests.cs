@@ -240,6 +240,150 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
         Assert.DoesNotContain(notices, n => n.Contains("not in step", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The network between Code Arena and Arena, failing by a seeded chance: a request lost before Arena saw it, one whose
+    /// answer is lost after Arena did it (the worst: done there, not known here), and delays.
+    /// </summary>
+    private sealed class Flaky(HttpMessageHandler inner, int seed) : DelegatingHandler(inner)
+    {
+        private readonly Random _random = new(seed);
+        private readonly Lock _gate = new();
+        public volatile bool On = true;
+        public int Lost, Unanswered;
+
+        private int Roll()
+        {
+            lock (_gate)
+            {
+                return _random.Next(100);
+            }
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            // Only the sync's calls about chats: signing in and the rest are not what this is about.
+            var chats = request.RequestUri?.AbsolutePath.StartsWith("/api/code-arena/chats", StringComparison.Ordinal) == true;
+            var roll = On && chats ? Roll() : 100;
+            if (roll < 10)
+            {
+                Interlocked.Increment(ref Lost);
+                throw new HttpRequestException("The network dropped the request.");
+            }
+            if (roll < 15)
+            {
+                await Task.Delay(Roll() * 3, ct);
+            }
+            var response = await base.SendAsync(request, ct);
+            if (roll is >= 15 and < 25)
+            {
+                // Arena did it; its answer never comes back.
+                Interlocked.Increment(ref Unanswered);
+                response.Dispose();
+                throw new HttpRequestException("The connection closed before the answer.");
+            }
+            return response;
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public async Task Through_a_network_that_drops_requests_and_answers_and_restarts_a_session_and_its_chat_end_the_same_both_ways(int seed)
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var flaky = new Flaky(f.Server.CreateHandler(), seed);
+        var config = new Ca.Config { Url = $"https://{AppFixture.Domain}", ApiKey = key, SyncChats = true };
+        var http = new HttpClient(flaky) { Timeout = Timeout.InfiniteTimeSpan };
+        var store = Ca.SessionStore.Create(_dir, "/home/pat/shop", "model-a");
+        var sync = Ca.ChatSync.Start(config, http, store, "/home/pat/shop", () => "model-a", (_, _) => { })!;
+        var random = new Random(seed * 7919);
+        // The first turn reaches Arena however the network goes: its chat exists from then on.
+        store.Message(Said("user", "q0"));
+        store.Message(Said("assistant", "a0"), "model-a");
+        flaky.On = false;
+        await Until(() => sync.InStep, "Arena has the session's first turn");
+        flaky.On = true;
+        var chat = sync.Conversation!;
+        var n = 0;
+        for (var step = 0; step < 40; step++)
+        {
+            switch (random.Next(7))
+            {
+                case 0 or 1:
+                    // A turn here: the web's news taken in first (as a turn does), then the session's question and answer.
+                    try
+                    {
+                        await sync.TakeInAsync(CancellationToken.None);
+                    }
+                    catch (HttpRequestException)
+                    {
+                        // The network: taken in at the next turn.
+                    }
+                    n++;
+                    store.Message(Said("user", $"here q{n}"));
+                    store.Message(Said("assistant", $"here a{n}"), "model-a");
+                    break;
+                case 2:
+                    // The person on the web, while the session is quiet: the web's model answers.
+                    n++;
+                    await (await web.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"web q{n}" })).Content.ReadAsStringAsync();
+                    break;
+                case 3:
+                    try
+                    {
+                        await sync.TakeInAsync(CancellationToken.None);
+                    }
+                    catch (HttpRequestException)
+                    {
+                    }
+                    break;
+                case 4:
+                    // Code Arena stops and starts again on the same session.
+                    await sync.DisposeAsync();
+                    store = Ca.SessionStore.Open(store.File);
+                    sync = Ca.ChatSync.Start(config, http, store, "/home/pat/shop", () => "model-a", (_, _) => { })!;
+                    break;
+                case 5:
+                    // Both at once: the person writes on the web while the session's turn is put down here.
+                    n++;
+                    var both = web.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"web q{n}" });
+                    n++;
+                    store.Message(Said("user", $"here q{n}"));
+                    store.Message(Said("assistant", $"here a{n}"), "model-a");
+                    await (await both).Content.ReadAsStringAsync();
+                    break;
+                default:
+                    await Task.Delay(random.Next(200));
+                    break;
+            }
+        }
+        // The network mends: everything left goes, and what the web added comes in.
+        flaky.On = false;
+        await Until(async () =>
+        {
+            await sync.TakeInAsync(CancellationToken.None);
+            return sync.InStep && !(await sync.TakeInAsync(CancellationToken.None)).Any;
+        }, "the session and its chat settle", TimeSpan.FromSeconds(60));
+        var here = Contents(store);
+        var there = (await WebChatAsync(web, chat)).Select(m => m.Content).ToList();
+        Assert.True(here.SequenceEqual(there), $"Seed {seed} ({flaky.Lost} lost, {flaky.Unanswered} unanswered):\nhere:  {string.Join(" | ", here)}\nthere: {string.Join(" | ", there)}");
+        // Nothing twice, on either side.
+        Assert.Equal(here.Count, here.Where(c => c.StartsWith("here ", StringComparison.Ordinal) || c.StartsWith("web q", StringComparison.Ordinal)).Distinct().Count()
+            + here.Count(c => !c.StartsWith("here ", StringComparison.Ordinal) && !c.StartsWith("web q", StringComparison.Ordinal)));
+        await sync.DisposeAsync();
+    }
+
     [Fact]
     public async Task A_turn_quiet_past_its_hold_s_renewals_and_the_next_one_reach_the_web_at_once_and_let_the_chat_go()
     {

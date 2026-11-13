@@ -8,7 +8,8 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>What the model answered, or why it was not asked (the problem to return).</summary>
-public sealed record Asked(string? Text, string? Model, IResult? Problem);
+/// <param name="Unreached">The model could not be reached, or did not answer in time: worth asking again later (not a refusal).</param>
+public sealed record Asked(string? Text, string? Model, IResult? Problem, bool Unreached = false);
 
 /// <summary>
 /// One question to the model as a person, outside a chat (an app's arena.ask, a question to the company's data): their
@@ -70,7 +71,7 @@ public sealed class OneQuestion(Safeguards.Safeguards safeguards, GatewayChat ga
         }
         catch (ChatGatewayException ex)
         {
-            return new(null, model, AuthEndpoints.Problem(502, "model", ex.Message));
+            return new(null, model, AuthEndpoints.Problem(502, "model", ex.Message), Unreached: true);
         }
         var answer = await safeguards.RunAsync(new Safeguards.RuleRun("answer", said.ToString()) { User = me, Model = model }, ct);
         return answer.Blocked

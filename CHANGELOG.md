@@ -15,6 +15,100 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v8.1.0 (unreleased, branch v8.1)
+
+Work that goes on by itself and is counted as it goes. An answer cut at its
+longest carries on until it ends; the time of the model, the tools and the
+people is counted everywhere; Accounting and projects are live; a chat in a
+project keeps its goals and tasks; Code Arena runs schedules and Arena's
+agents, keeps checklists, and is tidier; a model is tested from its card,
+and every use a model has is said. And the logo: an owl in the form of an A.
+
+### :rocket: Epics and highlights
+
+- **Runs until the work is done.** An answer cut at the output limit, or at
+  the end of the model's context, carries on by itself in the same message,
+  as many times as it needs, compacting first when the context is why; a
+  tool call cut half-way is made again in smaller parts. Only an answer that
+  adds nothing when asked to go on (or goes on 64 times) stops and says so.
+  Code Arena carries on the same way, past its old three carry-ons.
+- **Where the time goes.** Under every answer: the model's time, the tools'
+  and yours before the question; each chat's in its header; in Accounting
+  (a Time card, by person and by project, in the exports too) and on the
+  Usage by person dashboard, from one view (`gateway.chat_times`). A
+  question after a break past 15 minutes, or a chat's first, counts a
+  minute, as a project's active time always did; Code Arena's sessions send
+  each answer's and tool's time.
+- **Live numbers.** Accounting, a project's page and Usage read their
+  numbers again within a second or two of each request booked (a stream of
+  beats, on every replica), not at their next look.
+- **Goals and tasks from the work.** A chat or a Code Arena session in a
+  project reads its plan and keeps it: a goal for an aim set out, its steps
+  as tasks, ticked as they are done (`project_plan`, `project_goal`,
+  `project_task`); a session's `/goal` is one of the project's goals, done
+  when met. The project's page says which chat set each.
+- **Automation in Code Arena.** Its own schedules (a prompt run in a folder
+  every 30 minutes to every week, as a session of its own, while the IDE is
+  open and, with `code-arena schedule install`, from an OS timer), Arena's
+  agents run and followed (`/agents`), and Arena's scheduled tasks run now
+  (`/schedule arena N`), in the terminal and the IDE's Automation view.
+- **The model test bench.** Admin → Models → **Test**: a model's capability
+  (eight tests checked by rules: arithmetic, an instruction, logic, JSON, a
+  tool call, a fact in a long text, Persian, code) and its capacity (answers
+  at once raised until more do not make more: tokens a second all together
+  and each answer's, the wait for the first token), each run kept.
+
+### :sparkles: New features & Enhancements
+
+- **Context stretch on every engine**: YaRN on vLLM (`--hf-overrides`),
+  SGLang (`--json-model-override-args`) and LMDeploy
+  (`--rope-scaling-factor`), as on llama.cpp: a model's context up to four
+  times what it was trained for.
+- **The token capacity, live**: Stack Performance opens with what the system
+  can make (each model's busiest minute in the last 7 days), what it makes
+  now, the share and the room; a line per model, now and its most, and the
+  stack's lines per model rather than one for all.
+- **Every use a model has**: a chat model that a picture model reads its
+  prompt with (Qwen3, Qwen2.5-VL, Mistral, Llama) says it is that model's
+  text encoder too; Hugging Face search names each repository's uses before
+  a download (a text encoder GGUF that chats and sees, an embedder, a
+  reranker, a picture, video or speech model).
+- **Checklists in Code Arena**: made, edited and deleted there
+  (`/checklist new NAME: …`, the Plan view's form), and a repository's own
+  in `.arena/checklists/*.md` for everyone who opens it.
+- **Code Arena tidied**: the chat's header keeps the model, its thinking and
+  tools, the sync, the tasks and the sessions; the assistant, the project,
+  other providers, a goal, help and the window are in its **More** menu.
+  Arena's tools Code Arena has its own of (memory, past chats, skills, plans,
+  Python and sums, the date) or no use for in coding (3D, video, speech,
+  decks, data questions) are not offered, nor one named as its own; Configure
+  Tools is a line a tool (its switch, how it asks), the rest under Advanced;
+  the side bar, the chat and the tasks as large as the window leaves, the
+  Outline resizable.
+- **Chat sync between Code Arena and the web, proved**: a session and its
+  chat end the same, message for message and in order, nothing twice,
+  through a network that drops requests and loses answers after Arena did
+  them, Code Arena restarting, and the person writing on the web while the
+  session's turn is put down (twelve runs of forty random steps each, now a
+  test).
+- **Code Arena's icon on Linux and macOS**: the desktop entry names the
+  window's class (the dock shows Code Arena's icon on its window), the icon
+  at 128, 256 and 512 px; macOS gets a ready-made `.icns`.
+- **The owl**: the logo is an owl in the form of an A (its ear tufts the A's
+  top, its wings the legs, its feet below), the sign-in's eyes the owl's, and
+  its glyph a pattern behind the pages.
+
+### :bug: Bugs fixed
+
+- A chat's digest whose model timed out was never made: it is made at the
+  next pass (the gateway's failure was read as nothing to say).
+- Code Arena's admins' messages that came after its banner were dropped:
+  said as they come.
+- Code Intel's browser tests expected the source at the renamed address:
+  the repository's own.
+- A Code Arena turn's start waited for the checklist and the project's plan
+  one after the other when Arena was slow: side by side.
+
 ## v8.0.0 (2026-11-13)
 
 The names people see are the build's: Farzan Arena, and Farzan Graph for its

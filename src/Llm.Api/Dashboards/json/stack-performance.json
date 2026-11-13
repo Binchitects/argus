@@ -27,6 +27,376 @@
   },
   "panels": [
     {
+      "type": "row",
+      "title": "Capacity: what the system can make, and makes, model by model",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": [],
+      "id": 65
+    },
+    {
+      "type": "stat",
+      "title": "Capacity (tokens a second)",
+      "description": "What the system can make a second: each model's busiest minute in the last 7 days, added up. It grows as the models are used harder; a model not used this week counts nothing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(max_over_time((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))[7d:1m])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "live": true,
+      "id": 66
+    },
+    {
+      "type": "stat",
+      "title": "Making now (tokens a second)",
+      "description": "Tokens every model makes a second now, added up (each llama.cpp slot counted).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "live": true,
+      "id": 67
+    },
+    {
+      "type": "stat",
+      "title": "Of capacity, now",
+      "description": "What is made now as a share of the capacity: room for more is the rest.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * (sum((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))) or vector(0)) / (sum(max_over_time((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))[7d:1m])) > 0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "live": true,
+      "id": 68
+    },
+    {
+      "type": "stat",
+      "title": "Room now (tokens a second)",
+      "description": "The capacity not used now: how many more tokens a second the system could make at its busiest this week.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "clamp_min(sum(max_over_time((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))[7d:1m])) - (sum((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))) or vector(0)), 0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "live": true,
+      "id": 69
+    },
+    {
+      "type": "timeseries",
+      "title": "Each model: tokens a second now, and the most it made (7 days)",
+      "description": "A line a model: what it makes a second now (solid), and its busiest minute in the last 7 days (dashed), its capacity as measured. The gap is its room.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))",
+          "legendFormat": "{{model}} now",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max_over_time((sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))[7d:1m])",
+          "legendFormat": "{{model}} most (7 days)",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* most \\(7 days\\)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "id": 70
+    },
+    {
       "id": 1,
       "type": "row",
       "title": "Throughput: the stack and a request (every engine)",
@@ -35,7 +405,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 13
       },
       "panels": []
     },
@@ -52,7 +422,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -117,7 +487,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -190,7 +560,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -255,7 +625,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -320,7 +690,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -393,7 +763,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 1
+        "y": 14
       },
       "targets": [
         {
@@ -456,8 +826,8 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Tokens a second: the stack and a request",
-      "description": "'the stack' is every token generated a second, all requests and engines together, now and over 5 minutes. 'a request, decode' is how fast one answer streams: its tokens over the time it spent making them, not its prompt or its wait, averaged over requests by their tokens (5 minutes). 'a request, prefill' is how fast its prompt was read. With N answering at once, the stack makes about N times a request's speed.",
+      "title": "Tokens a second, by model (live and 5 min)",
+      "description": "A line a model: every token it generates a second, all its requests together, now (live) and over 5 minutes. One request's speed is beside, under Decode speed a request, by model.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -466,7 +836,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 18
       },
       "targets": [
         {
@@ -475,11 +845,9 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))) or vector(0)) + (sum(rate(vllm:generation_tokens_total[1m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[1m])) or vector(0))",
-          "legendFormat": "the stack (live)",
-          "refId": "A",
-          "instant": false,
-          "range": true
+          "expr": "(sum by (model) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model) (rate(vllm:generation_tokens_total[1m])) or sum by (model) (rate(sglang:generation_tokens_total[1m])))",
+          "legendFormat": "{{model}} (live)",
+          "refId": "A"
         },
         {
           "datasource": {
@@ -487,35 +855,9 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:generation_tokens_total[5m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[5m])) or vector(0))",
-          "legendFormat": "the stack (5 min)",
-          "refId": "B",
-          "instant": false,
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "((sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:request_generation_tokens_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_count[5m])) or vector(0))) / ((sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_decode_time_seconds_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_sum[5m])) or vector(0))) >= 0",
-          "legendFormat": "a request, decode (5 min)",
-          "refId": "C",
-          "instant": false,
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "((sum(rate(llamacpp:prompt_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:request_prompt_tokens_sum[5m])) or vector(0))) / ((sum(rate(llamacpp:prompt_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_prefill_time_seconds_sum[5m])) or vector(0))) >= 0",
-          "legendFormat": "a request, prefill (5 min)",
-          "refId": "D",
-          "instant": false,
-          "range": true
+          "expr": "(sum by (model) (rate(llamacpp:tokens_predicted_total[5m])) or sum by (model) (rate(vllm:generation_tokens_total[5m])) or sum by (model) (rate(sglang:generation_tokens_total[5m])))",
+          "legendFormat": "{{model}} (5 min)",
+          "refId": "B"
         }
       ],
       "options": {
@@ -568,7 +910,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 18
       },
       "targets": [
         {
@@ -658,7 +1000,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 13
+        "y": 26
       },
       "targets": [
         {
@@ -738,7 +1080,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 13
+        "y": 26
       },
       "targets": [
         {
@@ -812,7 +1154,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 34
       },
       "panels": []
     },
@@ -829,7 +1171,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 35
       },
       "targets": [
         {
@@ -895,7 +1237,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 35
       },
       "targets": [
         {
@@ -957,7 +1299,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 61
       },
       "panels": []
     },
@@ -974,7 +1316,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 62
       },
       "targets": [
         {
@@ -1054,7 +1396,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 62
       },
       "targets": [
         {
@@ -1132,7 +1474,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 70
       },
       "targets": [
         {
@@ -1222,7 +1564,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 70
       },
       "targets": [
         {
@@ -1308,7 +1650,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 78
       },
       "panels": []
     },
@@ -1325,7 +1667,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 66
+        "y": 79
       },
       "targets": [
         {
@@ -1393,7 +1735,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 66
+        "y": 79
       },
       "targets": [
         {
@@ -1461,7 +1803,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 87
       },
       "targets": [
         {
@@ -1551,7 +1893,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 87
       },
       "targets": [
         {
@@ -1629,7 +1971,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 82
+        "y": 95
       },
       "targets": [
         {
@@ -1731,7 +2073,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 82
+        "y": 95
       },
       "targets": [
         {
@@ -1797,7 +2139,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 82
+        "y": 95
       },
       "targets": [
         {
@@ -1825,7 +2167,8 @@
           "placement": "bottom",
           "showLegend": true
         }
-      }
+      },
+      "id": 71
     },
     {
       "id": 58,
@@ -1836,7 +2179,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 90
+        "y": 103
       },
       "panels": []
     },
@@ -1853,7 +2196,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 104
       },
       "targets": [
         {
@@ -1926,9 +2269,10 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 43
       },
-      "panels": []
+      "panels": [],
+      "id": 72
     },
     {
       "type": "table",
@@ -1942,7 +2286,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 44
       },
       "targets": [
         {
@@ -1966,7 +2310,8 @@
       },
       "options": {
         "showHeader": true
-      }
+      },
+      "id": 73
     },
     {
       "type": "timeseries",
@@ -1980,7 +2325,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 53
       },
       "targets": [
         {
@@ -2026,7 +2371,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 74
     },
     {
       "type": "timeseries",
@@ -2040,7 +2386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 53
       },
       "targets": [
         {
@@ -2086,7 +2432,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "id": 75
     }
   ]
 }

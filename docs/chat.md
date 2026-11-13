@@ -1010,6 +1010,13 @@ What a project holds:
 - **Goals** (milestones with a state: planned, doing, done or dropped, and a
   due date) and **tasks** (done or not, of a goal or not, with who does
   them). The plans of the project's chats count too: their steps are tasks.
+  The project's chats keep them up to date themselves: an answer in a chat
+  in a project reads its goals and tasks, adds a goal when you set out an
+  aim, adds its steps as tasks under it as it plans, and ticks them as the
+  work is done (the tools `project_plan`, `project_goal` and `project_task`,
+  which every answer in a project has; a viewer's chats only read them). The
+  page says which chat set each one, linked when it is yours (another
+  person's: "set by a chat").
   Each goal and task can have its **hours by hand**: what a person would take
   for it without the models (empty or 0: not estimated).
 

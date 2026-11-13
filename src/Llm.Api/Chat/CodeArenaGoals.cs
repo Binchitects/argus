@@ -89,7 +89,7 @@ public static class CodeArenaGoals
         return await db.ChatGoals.AsNoTracking().SingleOrDefaultAsync(g => g.ConversationId == id, ct) is { } goal ? Results.Ok(Shape(goal)) : Results.NoContent();
     }
 
-    private static async Task<IResult> PutAsync(Guid id, CodeGoal body, HttpContext http, McpPeople people, AppDbContext db, TimeProvider clock)
+    private static async Task<IResult> PutAsync(Guid id, CodeGoal body, HttpContext http, McpPeople people, AppDbContext db, AccessService access, TimeProvider clock)
     {
         var (me, refusal) = await ChatAsync(id, http, people, db);
         if (me is null)
@@ -138,6 +138,8 @@ public static class CodeArenaGoals
         goal.StartedAt = body.Started ?? goal.StartedAt;
         goal.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
+        // A session in a project: its goal is one of the project's too, its state following the session's.
+        await Projects.ProjectWork.MirrorAsync(db, access, me, goal, ct);
         return Results.Ok(new { saved = true });
     }
 

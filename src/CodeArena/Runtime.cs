@@ -675,6 +675,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         tools.Add(SkillSave.Tool());
         tools.Add(SessionChecklist.Tool());
+        tools.AddRange(SessionProjectPlan.Tools());
         tools.Add(SessionSearch.Tool());
         tools.AddRange(SessionHistory.Tools());
         if (Extensions.Skills.Count > 0)
@@ -701,7 +702,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         Demand.Budget = Config.ToolChars ?? ToolDemand.DefaultBudget;
         Demand.Loader = LoadTools;
         Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
-        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings, Withheld = name => name is "remember" or "recall" && Memory.Denied };
+        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings, Withheld = name => name is "remember" or "recall" && Memory.Denied
+            // The project's plan only while the session is in an Arena project: the rest of the time not a word of it in each request.
+            || Array.IndexOf(SessionProjectPlan.Names, name) >= 0 && ProjectPlanText.Length == 0 };
 
         // With providers of the person's own, Arena's word on them first: its admins decide whether they are offered.
         if (Config.Providers.Count > 0 && ArenaConnectedAccount)
@@ -823,6 +826,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
             Checklist = () => Checklist is { } on ? SessionChecklist.Text(on) : "",
+            ProjectPlan = () => ProjectPlanText,
             CodeIndex = CodeIndex is not null,
             Assistant = () => Assistant,
             Assistants = () => KnownAssistants,
@@ -897,6 +901,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Context.SessionId = () => Session.Id;
         Context.Store = () => Session;
         Context.Checklist = CheckItemAsync;
+        Context.ProjectPlan = CallProjectPlanAsync;
 
         if (resumed is not null && resumedFile is not null)
         {
@@ -975,8 +980,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             return Taken.None;
         }
         await sync.BeginTurnAsync(ct);
-        // The checklist as the web chat left it (ticked there, or turned on or off).
-        await RefreshChecklistAsync(ct);
+        // The checklist as the web chat left it (ticked there, or turned on or off), and the project's plan as it is now.
+        // Side by side: an Arena slow to answer holds the turn's start one wait, not two.
+        await Task.WhenAll(RefreshChecklistAsync(ct), RefreshProjectPlanAsync(ct));
         return await sync.TakeInAsync(ct);
     }
 
@@ -991,9 +997,11 @@ internal sealed partial class Runtime : IAsyncDisposable
         }, () => Sees(Model.Info));
         // Another session, another chat: its own checklist, read from Arena.
         Volatile.Write(ref _checklist, null);
+        Volatile.Write(ref _projectPlan, null);
         if (Sync is not null)
         {
             _ = Task.Run(() => RefreshChecklistAsync(CancellationToken.None));
+            _ = Task.Run(() => RefreshProjectPlanAsync(CancellationToken.None));
             Sync.OnNews = _webNews;
             if (Account is null)
             {

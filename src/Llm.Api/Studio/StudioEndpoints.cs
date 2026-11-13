@@ -54,10 +54,10 @@ public static class StudioEndpoints
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    private static async Task<bool> MayRunAsync(Workflow w, AppUser me, AccessService access, CancellationToken ct) =>
+    internal static async Task<bool> MayRunAsync(Workflow w, AppUser me, AccessService access, CancellationToken ct) =>
         w.OwnerId == me.Id || w.Reach == Workflow.Company || (w.Reach == Workflow.Groups && (await access.MembershipAsync(me, ct)).Groups.Any(w.GroupIds.Contains));
 
-    private static object Brief(Workflow w, Guid me, string? owner) => new
+    internal static object Brief(Workflow w, Guid me, string? owner) => new
     {
         w.Id, w.Name, w.Description, w.Enabled, w.Reach, w.GroupIds, w.NextRunAt, w.LastRunAt, w.UpdatedAt, mine = w.OwnerId == me, owner,
         trigger = FlowModel.Read(w.Flow).Trigger.Kind,
@@ -313,13 +313,20 @@ public static class StudioEndpoints
         CancellationToken ct)
     {
         var me = await Me(p, users);
+        var (run, problem) = await StartRunAsync(id, body, me, db, access, runs, ct);
+        return problem ?? Results.Accepted($"/api/studio/runs/{run}", new { id = run });
+    }
+
+    /// <summary>A workflow run by the person (the page, or Code Arena with their key): its run's id, or why not.</summary>
+    internal static async Task<(Guid? Run, IResult? Problem)> StartRunAsync(Guid id, RunRequest body, AppUser me, AppDbContext db, AccessService access, StudioRuns runs, CancellationToken ct)
+    {
         if (await db.Workflows.AsNoTracking().SingleOrDefaultAsync(w => w.Id == id, ct) is not { } w || !await MayRunAsync(w, me, access, ct))
         {
-            return Results.NotFound();
+            return (null, Results.NotFound());
         }
         if (!w.Enabled && w.OwnerId != me.Id)
         {
-            return AuthEndpoints.Problem(409, "off", "It is off.");
+            return (null, AuthEndpoints.Problem(409, "off", "It is off."));
         }
         var trigger = FlowModel.Read(w.Flow).Trigger;
         var input = new JsonObject { ["text"] = (body.Text ?? "").Trim() is var t && t.Length > 20_000 ? t[..20_000] : t, ["by"] = me.DisplayName == "" ? me.UserName : me.DisplayName };
@@ -328,16 +335,15 @@ public static class StudioEndpoints
             var value = body.Fields?.GetValueOrDefault(f.Name)?.Trim() ?? "";
             if (f.Required && value.Length == 0)
             {
-                return AuthEndpoints.Problem(400, f.Name, $"{(f.Label.Length > 0 ? f.Label : f.Name)} is needed.");
+                return (null, AuthEndpoints.Problem(400, f.Name, $"{(f.Label.Length > 0 ? f.Label : f.Name)} is needed."));
             }
             if (f.Kind == "choice" && value.Length > 0 && f.Choices?.Contains(value) != true)
             {
-                return AuthEndpoints.Problem(400, f.Name, $"{(f.Label.Length > 0 ? f.Label : f.Name)}: one of {string.Join(", ", f.Choices ?? [])}.");
+                return (null, AuthEndpoints.Problem(400, f.Name, $"{(f.Label.Length > 0 ? f.Label : f.Name)}: one of {string.Join(", ", f.Choices ?? [])}."));
             }
             input[f.Name] = value.Length > 10_000 ? value[..10_000] : value;
         }
-        var run = await runs.StartAsync(w, trigger.Kind == "form" ? "form" : "manual", input, me.Id, null, ct);
-        return Results.Accepted($"/api/studio/runs/{run}", new { id = run });
+        return (await runs.StartAsync(w, trigger.Kind == "form" ? "form" : "manual", input, me.Id, null, ct), null);
     }
 
     private static async Task<IResult> RunsAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
@@ -352,18 +358,21 @@ public static class StudioEndpoints
     }
 
     /// <summary>A run with its steps in the order they went: for its workflow's owner, and for whoever started it.</summary>
-    private static async Task<IResult> RunDetailAsync(Guid runId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> RunDetailAsync(Guid runId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await DetailAsync(runId, await Me(p, users), db, ct) is { } detail ? Results.Ok(detail) : Results.NotFound();
+
+    /// <summary>A run with its steps in the order they went, for its workflow's owner and for whoever started it; null for anyone else.</summary>
+    internal static async Task<object?> DetailAsync(Guid runId, AppUser me, AppDbContext db, CancellationToken ct)
     {
-        var me = await Me(p, users);
         if (await db.WorkflowRuns.AsNoTracking().SingleOrDefaultAsync(r => r.Id == runId, ct) is not { } run
             || await db.Workflows.AsNoTracking().SingleOrDefaultAsync(w => w.Id == run.WorkflowId, ct) is not { } w
             || (w.OwnerId != me.Id && run.ById != me.Id))
         {
-            return Results.NotFound();
+            return null;
         }
         var steps = await db.WorkflowRunSteps.AsNoTracking().Where(s => s.RunId == runId).OrderBy(s => s.Order).ToListAsync(ct);
         var mine = w.OwnerId == me.Id;
-        return Results.Ok(new
+        return new
         {
             run.Id, run.WorkflowId, workflow = w.Name, run.Trigger, run.Status, run.Error, run.StartedAt, run.FinishedAt,
             input = JsonNode.Parse(run.Input), flow = mine ? JsonNode.Parse(run.Flow) : null,
@@ -373,7 +382,7 @@ public static class StudioEndpoints
                 s.Path, s.StepId, s.Kind, s.Name, s.Status, input = mine ? s.Input : null, output = mine || s.Kind is "text" ? s.Output : null,
                 s.Link, s.Error, s.StartedAt, s.FinishedAt,
             }),
-        });
+        };
     }
 
     /// <summary>An approval answered by the workflow's owner: the run goes on (or ends, turned down).</summary>

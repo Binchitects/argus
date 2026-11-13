@@ -901,6 +901,38 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Use_booked_beats_to_the_pages_that_watch_it_within_a_second_or_two_and_a_stranger_may_not_watch()
+    {
+        var (b, _) = await PersonAsync();
+        var anonymous = app.Factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false });
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/usage/live")).StatusCode);
+
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var res = await b.Http.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/api/usage/live"), HttpCompletionOption.ResponseHeadersRead, stop.Token);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        using var reader = new StreamReader(await res.Content.ReadAsStreamAsync(stop.Token));
+        async Task<JsonElement> NextAsync()
+        {
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(stop.Token).AsTask().WaitAsync(TimeSpan.FromSeconds(20)) ?? throw new InvalidOperationException("The stream ended.");
+                if (line.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    return JsonDocument.Parse(line[6..]).RootElement.Clone();
+                }
+            }
+        }
+        Assert.Equal("watching", (await NextAsync()).GetProperty("type").GetString());
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
+        var asked = System.Diagnostics.Stopwatch.StartNew();
+        await SendAsync(b, id, "hello");
+        var beat = await NextAsync();
+        Assert.Equal("usage", beat.GetProperty("type").GetString());
+        Assert.True(asked.Elapsed < TimeSpan.FromSeconds(10), $"{asked.Elapsed}");
+        await stop.CancelAsync();
+    }
+
+    [Fact]
     public async Task An_answer_cut_at_its_longest_carries_on_in_the_same_message_until_it_ends()
     {
         var (b, email) = await PersonAsync();

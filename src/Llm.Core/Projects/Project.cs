@@ -111,6 +111,8 @@ public sealed class ProjectGoal
     public decimal? HumanHours { get; set; }
     /// <summary>Its place in the list.</summary>
     public int Position { get; set; }
+    /// <summary>The chat or Code Arena session that set it (and keeps it up to date); null: set on the project's page.</summary>
+    public Guid? ChatId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -127,5 +129,7 @@ public sealed class ProjectTask
     /// <summary>The hours a person would take for it by hand, without the models; null: not estimated.</summary>
     public decimal? HumanHours { get; set; }
     public Guid? CreatedById { get; set; }
+    /// <summary>The chat or Code Arena session that set it (and ticks it); null: set on the project's page.</summary>
+    public Guid? ChatId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -752,6 +752,16 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
     'GET /api/workspace/state': () => ({ json: {} }),
     'POST /api/workspace/state': (body) => ({ json: body }),
     'GET /api/backups': () => ({ json: { backups: [] } }),
+    'GET /api/automation': () => ({
+      json: {
+        folder: '/home/pat/shop',
+        schedules: [{ name: 'nightly', prompt: 'Run the tests', folder: '/home/pat/shop', every: '1d', at: '02:00', mode: 'plan', model: null, enabled: true, lastAt: null, lastStatus: null, lastLog: null, next: '2026-11-14T02:00:00Z', when: 'every 1d at 02:00' }],
+        agents: [{ id: 'g1', name: 'Release notes', description: 'Writes the release notes', enabled: true, mine: true, owner: 'Pat', trigger: 'manual' }],
+        agentsProblem: null,
+        tasks: [],
+        tasksProblem: null,
+      },
+    }),
     'POST /api/backups': () => ({ status: 204 }),
     'GET /api/debug/sessions': () => ({ json: [] }),
     'GET /api/user-files': (_, __, url) => {
@@ -885,7 +895,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Projects', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Projects', 'Automation', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1522,7 +1532,7 @@ describe('Code Arena, the IDE', () => {
 
     // Kept for the next run, as arranged.
     await waitFor(() =>
-      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'projects', 'chat'] }),
+      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'projects', 'automation', 'chat'] }),
     )
   })
 
@@ -4729,7 +4739,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('navigation', { name: 'Breadcrumbs' })
     for (const r of regionsShown()) seen.add(r)
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Projects', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Projects', 'Automation', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }
@@ -4902,6 +4912,41 @@ describe('quick open ranking', () => {
     await userEvent.click(within(items).getByRole('checkbox', { name: 'Tick 2: Docs updated' }))
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/checklist' && c.method === 'POST').at(-1)?.body).toEqual({ tick: 2, done: true }))
     expect(await within(card).findByText('2/2 done')).toBeInTheDocument()
+  })
+
+  it("makes a checklist from the Plan view, edits and deletes the person's, and turns the repository's on", async () => {
+    let mine = [{ id: 'k1', name: 'Before a merge', items: ['Tests pass'] }]
+    const repo = [{ name: 'Release', file: '.arena/checklists/release.md', items: ['Changelog written'] }]
+    const { calls } = backend({
+      'GET /api/checklist': () => ({ json: { on: null, mine, repo, problem: null } }),
+      'POST /api/checklist': (body) => {
+        const b = body as { save?: { id?: string; name: string; items: string[] }; delete?: string; repo?: string }
+        if (b.save) mine = b.save.id ? mine.map((c) => (c.id === b.save!.id ? { ...c, ...b.save!, id: c.id } : c)) : [...mine, { id: 'k2', name: b.save.name, items: b.save.items }]
+        if (b.delete) mine = mine.filter((c) => c.id !== b.delete)
+        if (b.repo) return { json: { on: { name: 'Release', done: 0, total: 1, items: [{ number: 1, text: 'Changelog written', done: false }] } } }
+        return { json: { on: null, mine, repo, problem: null } }
+      },
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const card = await screen.findByRole('region', { name: 'Checklist' })
+    await userEvent.click(await within(card).findByRole('button', { name: 'New' }))
+    const form = within(card).getByRole('form', { name: 'New checklist' })
+    await userEvent.type(within(form).getByRole('textbox', { name: 'Checklist name' }), 'Done means done')
+    await userEvent.type(within(form).getByRole('textbox', { name: 'Its items, one a line' }), '- The tests pass{enter}The docs say what changed')
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/checklist')?.body).toEqual({ save: { name: 'Done means done', items: ['The tests pass', 'The docs say what changed'] } }),
+    )
+    const yours = await within(card).findByRole('list', { name: 'Your checklists' })
+    expect(yours).toHaveTextContent('Done means done')
+    await userEvent.click(within(yours).getByRole('button', { name: 'Delete Before a merge' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/checklist').at(-1)?.body).toEqual({ delete: 'k1' }))
+    // The repository's: under its own heading, turned on by name.
+    await userEvent.selectOptions(within(card).getByRole('combobox', { name: 'Turn a checklist on' }), 'repo:Release')
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/checklist').at(-1)?.body).toEqual({ repo: 'Release' }))
+    expect(await within(card).findByRole('list', { name: "Release's items" })).toHaveTextContent('Changelog written')
   })
 
   it("shows the agent's plan as it changes: each step with what done means, its check and its files, and where Arena shows it", async () => {

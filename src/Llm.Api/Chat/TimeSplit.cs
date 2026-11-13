@@ -7,23 +7,35 @@ namespace Llm.Api.Chat;
 public sealed record ChatTime(long ModelMs, long ToolMs, long HumanMs);
 
 /// <summary>
-/// Time accounting, as the view gateway.chat_times counts it (migration ChatTimes) for Accounting and the dashboards. A
-/// person's time is a question's wait since the message it follows ended (reading the answer, writing the question), at
-/// most <see cref="HumanCapMs"/>: longer, they were away.
+/// Time accounting, as the view gateway.chat_times counts it (migration ChatTimes) for Accounting, projects and the
+/// dashboards. A person's time is a question's wait since the message it follows ended (reading the answer, writing the
+/// question); a break longer than <see cref="IdleMs"/> (they were away), or a chat's first question, counts <see cref="BreakMs"/>.
 /// </summary>
 public static class TimeSplit
 {
-    /// <summary>The most of a person's time one question counts (30 minutes).</summary>
-    public const int HumanCapMs = 30 * 60 * 1000;
+    /// <summary>A longer wait before a question is a break, not work (15 minutes, Projects.ProjectReport.Idle).</summary>
+    public const int IdleMs = 15 * 60 * 1000;
+
+    /// <summary>What a question after a break, or a chat's first, counts of the person's time: a minute.</summary>
+    public const int BreakMs = 60 * 1000;
 
     /// <summary>When a message ended: one written here starts at its time and runs its duration; one from Code Arena is put down as it ends.</summary>
     public static DateTimeOffset End(ChatMessage m) => m.SyncRef is null ? m.CreatedAt.AddMilliseconds(m.DurationMs ?? 0) : m.CreatedAt;
 
-    /// <summary>A person's question: their time before it, since the answer (or tool result) it follows ended. Null: none counted (the first question, a task's, a note).</summary>
-    public static int? HumanMs(ChatMessage question, ChatMessage? parent) =>
-        question is { Role: "user", AuthorId: not null } && parent is { Role: "assistant" or "tool" }
-            ? (int)Math.Clamp((question.CreatedAt - End(parent)).TotalMilliseconds, 0, HumanCapMs)
-            : null;
+    /// <summary>A person's question: their time before it, since the answer (or tool result) it follows ended. Null: nobody's (a task's, a note).</summary>
+    public static int? HumanMs(ChatMessage question, ChatMessage? parent)
+    {
+        if (question is not { Role: "user", AuthorId: not null })
+        {
+            return null;
+        }
+        if (parent is not { Role: "assistant" or "tool" })
+        {
+            return BreakMs;
+        }
+        var ms = (question.CreatedAt - End(parent)).TotalMilliseconds;
+        return ms is <= 0 or > IdleMs ? BreakMs : (int)ms;
+    }
 
     /// <summary>These messages' times together (each question's parent among them).</summary>
     public static ChatTime Of(IReadOnlyCollection<ChatMessage> messages)

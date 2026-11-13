@@ -41,6 +41,40 @@ public sealed class StudioTests(AppFixture app)
         [.. run.GetProperty("steps").EnumerateArray().Select(s => (s.GetProperty("path").GetString()!, s.GetProperty("status").GetString()!, s.GetProperty("output").GetString() ?? ""))];
 
     [Fact]
+    public async Task Code_Arena_lists_runs_and_follows_the_persons_agents_and_scheduled_tasks_with_their_key_and_not_anothers()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "w" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", displayName = "Kim" }));
+        var kim = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        var (other, _) = await PersonAsync(admin, f, "Lee");
+        var flow = new { trigger = new { kind = "manual" }, steps = new object[] { new { id = "say", kind = "text", text = "Notes for {{input.text}}" } } };
+        var mine = (await kim.JsonAsync(await kim.PostAsync("/api/studio", new { name = "Release notes", flow }))).GetProperty("workflow").GetProperty("id").GetGuid();
+        var lees = (await other.JsonAsync(await other.PostAsync("/api/studio", new { name = "Lee's own", flow }))).GetProperty("workflow").GetProperty("id").GetGuid();
+        var task = (await kim.JsonAsync(await kim.PostAsync("/api/tasks", new { name = "Weekly", prompt = "What is new?", cron = "0 8 * * MON", timeZone = "UTC" }))).GetProperty("id").GetGuid();
+
+        var arena = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false, HandleCookies = false });
+        arena.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", made.GetProperty("apiKey").GetString());
+        arena.DefaultRequestHeaders.Add("X-Requested-With", "code-arena");
+        var agents = JsonDocument.Parse(await arena.GetStringAsync(new Uri("/api/code-arena/agents", UriKind.Relative))).RootElement;
+        Assert.Equal(["Release notes"], agents.EnumerateArray().Select(a => a.GetProperty("name").GetString()));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await arena.PostAsJsonAsync($"/api/code-arena/agents/{lees}/run", new { text = "x" }));
+        var started = JsonDocument.Parse(await (await arena.PostAsJsonAsync($"/api/code-arena/agents/{mine}/run", new { text = "8.1" })).Content.ReadAsStringAsync()).RootElement;
+        var run = started.GetProperty("id").GetGuid();
+        await f.Services.GetRequiredService<StudioRuns>().Finished(run).WaitAsync(TimeSpan.FromSeconds(30));
+        var detail = JsonDocument.Parse(await arena.GetStringAsync(new Uri($"/api/code-arena/agents/runs/{run}", UriKind.Relative))).RootElement;
+        Assert.Equal(("done", "Notes for 8.1"), (detail.GetProperty("status").GetString(), detail.GetProperty("steps")[0].GetProperty("output").GetString()));
+
+        var tasks = JsonDocument.Parse(await arena.GetStringAsync(new Uri("/api/code-arena/scheduled", UriKind.Relative))).RootElement;
+        Assert.Equal(["Weekly"], tasks.EnumerateArray().Select(t => t.GetProperty("name").GetString()));
+        await StatusAssert.Is(HttpStatusCode.Accepted, await arena.PostAsync(new Uri($"/api/code-arena/scheduled/{task}/run", UriKind.Relative), null));
+        // Without a key, nothing.
+        var nobody = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+        Assert.False((await nobody.GetAsync("/api/code-arena/agents")).IsSuccessStatusCode);
+    }
+
+    [Fact]
     public async Task A_run_asks_reads_JSON_branches_loops_uses_a_tool_and_saves_a_file_each_step_kept()
     {
         await using var f = NewApp();

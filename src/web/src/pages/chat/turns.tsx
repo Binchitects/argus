@@ -541,7 +541,7 @@ export function AnswerTurn({
           {last?.model && <span>{last.model}</span>}
           {agentModels.length > 0 && <span>· sub-agents: {agentModels.join(', ')}</span>}
           {took > 0 && (
-            <span title="The model's time (its rounds), the tools' (their runs, sub-agents included), and yours before the question (reading, writing; at most 30 minutes)">
+            <span title="The model's time (its rounds), the tools' (their runs, sub-agents included), and yours before the question (reading, writing; after a break past 15 minutes, a minute)">
               · {toolsTook > 0 ? `model ${seconds(modelTook)} · tools ${seconds(toolsTook)}` : seconds(took)}
               {question?.humanMs ? ` · you ${seconds(question.humanMs)}` : ''}
             </span>

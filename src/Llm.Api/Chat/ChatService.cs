@@ -349,6 +349,11 @@ public sealed partial class ChatService(
             {
                 await StartToolAsync(new ToolChoice(new ChecklistTool(db), new ToolSetting { ToolId = ChecklistTool.ToolId }, null));
             }
+            // A chat in a project: the answer reads the project's goals and tasks, and keeps them up to date as the work goes.
+            if (conversation.WorkProjectId is not null)
+            {
+                await StartToolAsync(new ToolChoice(new Projects.ProjectWorkTool(db, access), new ToolSetting { ToolId = Projects.ProjectWorkTool.ToolId }, null));
+            }
         }
 
         // Deep research with sub-agents: the parts research and the web is theirs, and the answer delegates at most
@@ -537,7 +542,7 @@ public sealed partial class ChatService(
             return (pieces, windowTokens.CountAsync(modelName, request, pieces, whole: false, TimeSpan.FromSeconds(20), CancellationToken.None));
         }
         // A tool the person may turn off for this chat: one of theirs it has on (not those the chat brings itself: its history, its checklist).
-        bool CanTurnOff(string tool) => allowed.Any(t => t.Tool.Id == tool) && tool is not (ChatHistoryTool.ToolId or ChecklistTool.ToolId);
+        bool CanTurnOff(string tool) => allowed.Any(t => t.Tool.Id == tool) && tool is not (ChatHistoryTool.ToolId or ChecklistTool.ToolId or Projects.ProjectWorkTool.ToolId);
 
         for (var round = 0; ; round++)
         {

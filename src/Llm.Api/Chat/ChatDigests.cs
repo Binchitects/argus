@@ -144,6 +144,11 @@ public sealed partial class ChatDigests(IServiceScopeFactory scopes, Operations.
         }
         question.Append(conversation);
         var asked = await services.GetRequiredService<OneQuestion>().AskAsync(person, question.ToString(), Instructions, "small", 400, Tag, ct);
+        if (asked.Unreached)
+        {
+            // The model away or too slow: the chat is digested at the next pass, not marked done without its digest.
+            throw new ChatGatewayException("The model did not answer the digest.");
+        }
         return asked.Problem is null && asked.Text?.Trim() is { Length: > 0 } digest ? digest[..Math.Min(digest.Length, 4_000)] : null;
     }
 

@@ -357,7 +357,7 @@ public static class Accounting
 
     /// <summary>
     /// The chats' time in the window (gateway.chat_times): the model's (answers' rounds), the tools' (their runs, sub-agents
-    /// included), the people's (before each question, at most 30 minutes); all, by person, by project, the most first.
+    /// included), the people's (before each question; a break past 15 minutes a minute); all, by person, by project, the most first.
     /// </summary>
     private static async Task<AccountTime> TimeAsync(LedgerSql sql, AppDbContext db, Dictionary<string, object> window, Dictionary<string, (Guid Id, string Name)> users, CancellationToken ct)
     {
@@ -512,7 +512,7 @@ public static class Accounting
         ReportTable Times(string title, string first, IEnumerable<TimeRow> rows) => new(title,
             [new(first, Width: 2.4), new("Model hours", ReportKind.Number), new("Tool hours", ReportKind.Number), new("People's hours", ReportKind.Number), new("Hours", ReportKind.Number)],
             [.. rows.Select(x => (object?[])[x.Name, x.ModelHours, x.ToolHours, x.HumanHours, x.Hours])],
-            "The chats' time: the model's (answers), the tools' (their runs, sub-agents included), the people's (before each question: reading, writing; at most 30 minutes a question).");
+            "The chats' time: the model's (answers), the tools' (their runs, sub-agents included), the people's (before each question: reading, writing; a break past 15 minutes, or a chat's first question, a minute).");
         if (r.Time is { } time)
         {
             figures.Add(new("Chat time", $"{time.All.Hours:#,##0.##} h", $"The model {time.All.ModelHours:#,##0.##} h, tools {time.All.ToolHours:#,##0.##} h, people {time.All.HumanHours:#,##0.##} h"));

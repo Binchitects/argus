@@ -20,7 +20,7 @@ internal sealed partial class Runtime
     /// <summary>The tools a sub-agent never has: those of the main conversation only (its plan, its jobs, more sub-agents).</summary>
     private static readonly HashSet<string> MainOnly = new(StringComparer.Ordinal)
     {
-        "task", "run_steps", "plan", "stop_command", "command_output", "ask_agent", SessionChecklist.ToolName, GoalTools.CheckName,
+        "task", "run_steps", "plan", "stop_command", "command_output", "ask_agent", SessionChecklist.ToolName, SessionProjectPlan.PlanName, SessionProjectPlan.GoalName, SessionProjectPlan.TaskName, GoalTools.CheckName,
     };
 
     private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct) =>

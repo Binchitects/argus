@@ -7073,6 +7073,51 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("media_models", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Models.ModelBenchRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Results")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Model", "StartedAt");
+
+                    b.ToTable("model_bench_runs", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Models.ModelDownload", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7551,6 +7596,9 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ChatId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -7584,6 +7632,8 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(200)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ChatId");
 
                     b.HasIndex("ProjectId", "Position");
 
@@ -7696,6 +7746,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid?>("AssigneeId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ChatId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -7725,6 +7778,8 @@ namespace Llm.Core.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssigneeId");
+
+                    b.HasIndex("ChatId");
 
                     b.HasIndex("GoalId");
 
@@ -9738,6 +9793,11 @@ namespace Llm.Core.Data.Migrations
 
             modelBuilder.Entity("Llm.Core.Projects.ProjectGoal", b =>
                 {
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Llm.Core.Projects.Project", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
@@ -9787,6 +9847,11 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("AssigneeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Llm.Core.Projects.ProjectGoal", null)

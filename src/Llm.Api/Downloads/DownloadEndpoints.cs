@@ -317,8 +317,14 @@ public static class DownloadEndpoints
         if [ -z "${CODE_ARENA_NO_DESKTOP:-}" ]; then
           if [ "$os" = linux ]; then
             share="${XDG_DATA_HOME:-$HOME/.local/share}"
-            mkdir -p "$share/applications" "$share/icons/hicolor/512x512/apps"
-            curl "$@" -o "$share/icons/hicolor/512x512/apps/code-arena.png" "$arena/icons/icon-512.png" 2>/dev/null || true
+            # Its icon at the sizes desktops look for (docks 128 and 256, menus and the switcher 512), and the theme told.
+            for size in 128 256 512; do
+              mkdir -p "$share/icons/hicolor/${size}x${size}/apps"
+              curl "$@" -o "$share/icons/hicolor/${size}x${size}/apps/code-arena.png" "$arena/icons/icon-$size.png" 2>/dev/null \
+                || echo "Code Arena's icon ($size px) could not be fetched from $arena: the menus show a plain one until install.sh runs again."
+            done
+            mkdir -p "$share/applications"
+            command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$share/icons/hicolor" >/dev/null 2>&1
             cat > "$share/applications/code-arena.desktop" <<DESKTOP
         [Desktop Entry]
         Type=Application
@@ -326,11 +332,11 @@ public static class DownloadEndpoints
         GenericName=Coding agent and IDE
         Comment=An IDE in your browser around a coding agent, on {{Branding.Brand.Product}}
         Exec="$dir/code-arena" -C %f
-        Icon=code-arena
+        Icon=$share/icons/hicolor/512x512/apps/code-arena.png
         Terminal=false
         Categories=Development;IDE;
         MimeType=inode/directory;
-        StartupWMClass=code-arena
+        StartupWMClass=CodeArena
         DESKTOP
             command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$share/applications" >/dev/null 2>&1
         {{FolderMenusSh}}
@@ -340,10 +346,17 @@ public static class DownloadEndpoints
             rm -rf "$app"; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             printf '#!/bin/sh\nexec "%s" -C "${1:-$HOME}"\n' "$dir/code-arena" > "$app/Contents/MacOS/code-arena"
             chmod 755 "$app/Contents/MacOS/code-arena"
-            if curl "$@" -o "$app/Contents/Resources/icon.png" "$arena/icons/icon-512.png" 2>/dev/null && command -v sips >/dev/null 2>&1; then
-              sips -s format icns "$app/Contents/Resources/icon.png" --out "$app/Contents/Resources/code-arena.icns" >/dev/null 2>&1
-              rm -f "$app/Contents/Resources/icon.png"
+            # Its icon, made for macOS already (every size in one .icns); else made here from the PNG.
+            if ! curl "$@" -o "$app/Contents/Resources/code-arena.icns" "$arena/icons/code-arena.icns" 2>/dev/null; then
+              if curl "$@" -o "$app/Contents/Resources/icon.png" "$arena/icons/icon-512.png" 2>/dev/null && command -v sips >/dev/null 2>&1; then
+                sips -s format icns "$app/Contents/Resources/icon.png" --out "$app/Contents/Resources/code-arena.icns" >/dev/null 2>&1
+                rm -f "$app/Contents/Resources/icon.png"
+              else
+                echo "Code Arena's icon could not be fetched from $arena: Finder shows a plain one until install.sh runs again."
+              fi
             fi
+            # The Dock and Finder read an app's icon once: told it changed.
+            touch "$app"
             cat > "$app/Contents/Info.plist" <<PLIST
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

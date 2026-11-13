@@ -65,6 +65,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<PersonCredential> PersonCredentials => Set<PersonCredential>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
     public DbSet<MediaModel> MediaModels => Set<MediaModel>();
+    public DbSet<ModelBenchRun> ModelBenchRuns => Set<ModelBenchRun>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelToolMode> ModelToolModes => Set<ModelToolMode>();
@@ -705,6 +706,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Left).HasColumnType("jsonb");
             e.OwnsOne(m => m.Move, mv => mv.ToJson());
         });
+        builder.Entity<ModelBenchRun>(e =>
+        {
+            e.ToTable("model_bench_runs");
+            e.Property(r => r.Model).HasMaxLength(200);
+            e.Property(r => r.Kind).HasMaxLength(20);
+            e.Property(r => r.Status).HasMaxLength(20);
+            e.Property(r => r.Error).HasMaxLength(2000);
+            e.HasIndex(r => new { r.Model, r.StartedAt });
+        });
         builder.Entity<MediaModel>(e =>
         {
             e.ToTable("media_models");
@@ -967,6 +977,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Status).HasMaxLength(12);
             e.HasIndex(x => new { x.ProjectId, x.Position });
             e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<Projects.ProjectTask>(e =>
         {
@@ -976,6 +987,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Projects.ProjectGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.AssigneeId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<ProductFeedback>(e =>
         {

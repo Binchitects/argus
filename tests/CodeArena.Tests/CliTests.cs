@@ -198,7 +198,7 @@ public sealed class CliTests : IDisposable
             Assert.Contains("You cannot edit files or run commands now", note);
             Assert.Contains("Arena's tools are not available in this session", note);
             var withArena = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, HasArenaTools = () => true };
-            Assert.Contains("pictures, video and speech", SystemPrompt.Note(withArena));
+            Assert.Contains("making pictures, as the person", SystemPrompt.Note(withArena));
             Assert.Equal(prompt, SystemPrompt.Build(withArena, now: new DateTime(2026, 10, 4)));
             // A checklist on in the session's chat: in the note (the prompt stays the same), its items numbered and ticked.
             Assert.DoesNotContain("# Checklist", note);
@@ -206,6 +206,10 @@ public sealed class CliTests : IDisposable
             var withChecklist = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, Checklist = () => SessionChecklist.Text(run) };
             Assert.Contains("# Checklist\n\n" + SessionChecklist.Instructions + "\n\nChecklist \"Done means done\" (1 of 2 done):\n1. [x] The tests pass (42 of 42)\n2. [ ] The docs say what changed", SystemPrompt.Note(withChecklist));
             Assert.Equal(prompt, SystemPrompt.Build(withChecklist, now: new DateTime(2026, 10, 4)));
+            // In an Arena project: its plan, as Arena says it, in the note too.
+            var withPlan = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, ProjectPlan = () => "This chat is in the project \"Shop\".\nGoal: Checkout [doing] (goal 1)" };
+            Assert.Contains("# The project's plan\n\nThis chat is in the project \"Shop\".\nGoal: Checkout [doing] (goal 1)", SystemPrompt.Note(withPlan));
+            Assert.Equal(prompt, SystemPrompt.Build(withPlan, now: new DateTime(2026, 10, 4)));
             Assert.Contains("Run make test before finishing.", prompt);
             Assert.Contains("I prefer short answers.", prompt);
             Assert.Contains("Model: model-a", prompt);

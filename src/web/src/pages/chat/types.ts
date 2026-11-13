@@ -111,7 +111,7 @@ export interface Message {
   cost?: number | null
   thinkingMs: number | null
   durationMs: number | null
-  /** A person's question: their time before it (reading the answer it follows, writing it), at most 30 minutes. Null or missing: none counted. */
+  /** A person's question: their time before it (reading the answer it follows, writing it); after a break past 15 minutes, or first, a minute. Null or missing: nobody's (a task's, a note). */
   humanMs?: number | null
   createdAt: string
   noAccess: boolean
@@ -412,7 +412,7 @@ export interface Conversation extends ConversationSummary {
   time?: ChatTime
 }
 
-/** A chat's time: the model's (its answers), the tools' (their runs, sub-agents included), and the person's (reading and writing, at most 30 minutes a question). */
+/** A chat's time: the model's (its answers), the tools' (their runs, sub-agents included), and the person's (reading and writing; a break past 15 minutes, or a first question, a minute). */
 export interface ChatTime {
   modelMs: number
   toolMs: number

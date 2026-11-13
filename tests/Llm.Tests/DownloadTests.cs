@@ -75,6 +75,14 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Contains($"arena=\"https://{AppFixture.Domain}\"", sh, StringComparison.Ordinal);
             Assert.Contains($"  linux-x64) sum={sum} ;;", sh, StringComparison.Ordinal);
             Assert.DoesNotContain("def456", sh, StringComparison.Ordinal);
+            // Its icon on Linux and macOS: the desktop entry names the class the IDE's window is opened with (AppWindow's
+            // --class), so the dock shows Code Arena's icon on it; the icon at each size a desktop looks for; macOS's ready-made.
+            Assert.Contains("StartupWMClass=CodeArena", sh, StringComparison.Ordinal);
+            Assert.Contains("for size in 128 256 512; do", sh, StringComparison.Ordinal);
+            Assert.Contains("Icon=$share/icons/hicolor/512x512/apps/code-arena.png", sh, StringComparison.Ordinal);
+            Assert.Contains("\"$arena/icons/code-arena.icns\"", sh, StringComparison.Ordinal);
+            var window = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "CodeArena", "AppWindow.cs"));
+            Assert.Contains("\"--class=CodeArena\"", window, StringComparison.Ordinal);
             var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
             // Each Windows build's SHA-256, the one for the machine's own system chosen as it runs.
             Assert.Contains("$sums = @{ 'win-x64' = 'def456'; 'win-arm64' = '789abc' }", ps1, StringComparison.Ordinal);

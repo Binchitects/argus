@@ -81,9 +81,11 @@ internal sealed partial class Runtime
                 {
                     var lists = await ListAsync(url, key, ct);
                     await RefreshChecklistAsync(ct);
-                    var mine = lists.Count == 0
-                        ? "You have no checklists yet: make them in Arena (Workspace → Checklists)."
-                        : "Yours: " + string.Join(", ", lists.Select((c, i) => $"{i + 1}. {c.Str("name")}")) + " (/checklist N or NAME turns one on).";
+                    var repo = RepoChecklists();
+                    var mine = (lists.Count == 0
+                        ? "You have no checklists yet: /checklist new NAME: an item; another; a third (or Arena's Workspace → Checklists)."
+                        : "Yours: " + string.Join(", ", lists.Select((c, i) => $"{i + 1}. {c.Str("name")}")) + " (/checklist N or NAME turns one on; edit N: items; delete N).")
+                        + (repo.Count == 0 ? "" : "\nThe repository's (.arena/checklists): " + string.Join(", ", repo.Select(c => c.Name)) + " (/checklist NAME turns one on).");
                     return (Checklist is { } on ? SessionChecklist.Text(on) + "\n" : "No checklist is on in this session.\n") + mine;
                 }
                 case "off":
@@ -92,11 +94,32 @@ internal sealed partial class Runtime
                     return "The checklist is off.";
                 case "tick" or "untick" when words.Length == 2 && int.TryParse(words[1], out var number):
                     return SessionChecklist.Text(await TickAsync(number, words[0].Equals("tick", StringComparison.OrdinalIgnoreCase), null, "person", ct));
+                case "new" when words.Length == 2 && SplitList(words[1]) is ({ Length: > 0 } newName, { Count: > 0 } newItems):
+                    await SaveChecklistAsync(null, newName, newItems, ct);
+                    return $"Your checklist {newName} is kept in Arena ({newItems.Count} items): /checklist {newName} turns it on.";
+                case "edit" when words.Length == 2 && SplitList(words[1]) is ({ Length: > 0 } which, { Count: > 0 } items):
+                {
+                    var lists = await ListAsync(url, key, ct);
+                    var chosen = Pick(lists, which) ?? throw new ChecklistError($"You have no checklist {which}: /checklist lists yours.");
+                    await SaveChecklistAsync(chosen.Str("id"), chosen.Str("name")!, items, ct);
+                    return $"{chosen.Str("name")} has {items.Count} items now.";
+                }
+                case "delete" when words.Length == 2:
+                {
+                    var lists = await ListAsync(url, key, ct);
+                    var chosen = Pick(lists, words[1]) ?? throw new ChecklistError($"You have no checklist {words[1]}: /checklist lists yours.");
+                    await DeleteChecklistAsync(chosen.Str("id")!, ct);
+                    return $"{chosen.Str("name")} is deleted.";
+                }
                 default:
                 {
                     var lists = await ListAsync(url, key, ct);
-                    var chosen = int.TryParse(arg.Trim(), out var n) && n >= 1 && n <= lists.Count ? lists[n - 1]
-                        : lists.FirstOrDefault(c => string.Equals(c.Str("name"), arg.Trim(), StringComparison.OrdinalIgnoreCase));
+                    var chosen = Pick(lists, arg.Trim());
+                    if (chosen is null && RepoChecklists().FirstOrDefault(c => string.Equals(c.Name, arg.Trim(), StringComparison.OrdinalIgnoreCase)) is { } fromRepo)
+                    {
+                        // The repository's: kept as one of the person's (its items as the repository has them now), then on.
+                        chosen = await SaveChecklistAsync(lists.FirstOrDefault(c => string.Equals(c.Str("name"), fromRepo.Name, StringComparison.OrdinalIgnoreCase))?.Str("id"), fromRepo.Name, fromRepo.Items, ct);
+                    }
                     if (chosen is null)
                     {
                         return $"You have no checklist named {arg.Trim()}: /checklist lists yours.";
@@ -138,7 +161,8 @@ internal sealed partial class Runtime
             return new JsonObject
             {
                 ["on"] = Checklist?.DeepClone(),
-                ["mine"] = new JsonArray([.. lists.Select(c => (JsonNode)new JsonObject { ["id"] = c.Str("id"), ["name"] = c.Str("name") })]),
+                ["mine"] = new JsonArray([.. lists.Select(c => (JsonNode)new JsonObject { ["id"] = c.Str("id"), ["name"] = c.Str("name"), ["items"] = c["items"]?.DeepClone() })]),
+                ["repo"] = new JsonArray([.. RepoChecklists().Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["file"] = c.File, ["items"] = new JsonArray([.. c.Items.Select(i => (JsonNode)i)]) })]),
                 ["problem"] = Sync.Conversation is null ? "This session has no chat in Arena yet: say something first, then turn a checklist on." : null,
             };
         }
@@ -223,6 +247,83 @@ internal sealed partial class Runtime
             throw new ChecklistError(SessionChecklist.Why(answer.Status, answer.Body));
         }
         return answer.Body as JsonObject;
+    }
+
+    private static JsonObject? Pick(List<JsonObject> lists, string which) =>
+        int.TryParse(which, out var n) && n >= 1 && n <= lists.Count ? lists[n - 1]
+        : lists.FirstOrDefault(c => string.Equals(c.Str("name"), which, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>"Before a merge: the tests pass; the docs say what changed": its name, and its items (by ";" or new lines).</summary>
+    internal static (string Name, List<string> Items) SplitList(string text)
+    {
+        var at = text.IndexOf(':', StringComparison.Ordinal);
+        if (at <= 0)
+        {
+            return ("", []);
+        }
+        return (text[..at].Trim(), [.. text[(at + 1)..].Split([';', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(i => i.Length > 0)]);
+    }
+
+    /// <summary>A repository's own checklist (.arena/checklists/NAME.md): its name (its first heading, else the file's), its items (its "- " lines).</summary>
+    internal sealed record RepoChecklist(string Name, List<string> Items, string File);
+
+    /// <summary>The repository's checklists, for everyone who opens it: .arena/checklists/*.md, each "# Name" and "- item" lines.</summary>
+    public List<RepoChecklist> RepoChecklists() => ReadRepoChecklists(Workspace.Root);
+
+    internal static List<RepoChecklist> ReadRepoChecklists(string root)
+    {
+        var dir = Path.Combine(root, ".arena", "checklists");
+        if (!Directory.Exists(dir))
+        {
+            return [];
+        }
+        var found = new List<RepoChecklist>();
+        foreach (var file in Directory.EnumerateFiles(dir, "*.md").Order(StringComparer.Ordinal).Take(50))
+        {
+            try
+            {
+                var lines = File.ReadAllLines(file);
+                var name = lines.FirstOrDefault(l => l.StartsWith("# ", StringComparison.Ordinal))?[2..].Trim() is { Length: > 0 } heading ? heading : Path.GetFileNameWithoutExtension(file);
+                var items = lines.Select(l => l.TrimStart()).Where(l => l.StartsWith("- ", StringComparison.Ordinal) || l.StartsWith("* ", StringComparison.Ordinal))
+                    .Select(l => l[2..].Trim()).Select(l => l.StartsWith("[ ] ", StringComparison.Ordinal) || l.StartsWith("[x] ", StringComparison.OrdinalIgnoreCase) ? l[4..] : l)
+                    .Where(l => l.Length > 0).Take(50).ToList();
+                if (items.Count > 0)
+                {
+                    found.Add(new RepoChecklist(name.Length > 100 ? name[..100] : name, items, Path.GetRelativePath(root, file)));
+                }
+            }
+            catch (IOException)
+            {
+                // One being written: read at the next look.
+            }
+        }
+        return found;
+    }
+
+    /// <summary>One of the person's checklists made (no id) or changed in Arena: it as Arena keeps it.</summary>
+    public async Task<JsonObject> SaveChecklistAsync(string? id, string name, IReadOnlyList<string> items, CancellationToken ct)
+    {
+        var body = new JsonObject { ["name"] = name, ["items"] = new JsonArray([.. items.Select(i => (JsonNode)i)]) };
+        var (saved, problem) = await ArenaAsync(id is null ? HttpMethod.Post : HttpMethod.Put, id is null ? "/checklists" : $"/checklists/{Uri.EscapeDataString(id)}", body, ct);
+        return problem is null && saved is JsonObject o ? o : throw new ChecklistError(problem ?? "Arena did not keep it.");
+    }
+
+    public async Task DeleteChecklistAsync(string id, CancellationToken ct)
+    {
+        if ((await ArenaAsync(HttpMethod.Delete, $"/checklists/{Uri.EscapeDataString(id)}", null, ct)).Problem is { } problem)
+        {
+            throw new ChecklistError(problem);
+        }
+    }
+
+    /// <summary>A repository's checklist turned on: kept as the person's of that name, its items the repository's now, then on here.</summary>
+    public async Task<JsonObject?> UseRepoChecklistAsync(string name, CancellationToken ct)
+    {
+        var repo = RepoChecklists().FirstOrDefault(c => c.Name == name) ?? throw new ChecklistError($"The repository has no checklist {name}.");
+        var url = Config.Url ?? throw new ChecklistError("Checklists are kept in Arena: sign in to it first.");
+        var mine = await ListAsync(url, Config.ApiKey ?? "", ct);
+        var saved = await SaveChecklistAsync(mine.FirstOrDefault(c => string.Equals(c.Str("name"), repo.Name, StringComparison.OrdinalIgnoreCase))?.Str("id"), repo.Name, repo.Items, ct);
+        return await UseChecklistAsync(saved.Str("id"), ct);
     }
 
     private async Task<List<JsonObject>> ListAsync(string url, string key, CancellationToken ct)

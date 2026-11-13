@@ -9,7 +9,7 @@ import { codeIntelName } from '@/lib/brand'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'ports' | 'skills' | 'tasks' | 'projects'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'ports' | 'skills' | 'tasks' | 'projects' | 'automation'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -19,6 +19,11 @@ export interface PartHelp extends HelpPart {
 export const about = 'An editor around the coding agent, for this folder: its files, a terminal, and the agent\'s chat, which can read, change and run things here as the mode allows.'
 
 export const parts: Record<Part, PartHelp> = {
+  automation: {
+    name: 'Automation',
+    text: "What runs on its own. **Schedules here**: a prompt Code Arena runs in a folder every so often (every 30 minutes to every week, a day's at a time of day), as a session of its own in the mode chosen (**reads only** unless you let it edit), its sessions synced to Arena as any. They run while this IDE is open, and with it closed once `code-arena schedule install` has set up an OS timer (systemd, launchd or Task Scheduler); ▶ runs one now, the switch turns one off. **Agents in Arena**: your Agent Studio agents and those shared with you, each run here with a text, how it goes shown step by step. **Scheduled tasks in Arena**: yours, run now with ▶; their answers come to you in Arena. In the terminal: /schedule and /agents.",
+    manual: 'automation',
+  },
   projects: {
     name: 'Projects',
     text: "Arena's projects, as its Projects page has them: **Mine** (those you are in), **Global** (everyone's to add to) and **All I see**, found by their words. The one this session counts to is in bold, and the one this folder's repository is in says so. A click opens a project in a tab of its own, the same page as Arena's: **Overview** (its cost, tokens, requests, people's and the models' time and models over the time window, with its presets, and **Export** as PDF, Excel or CSV), **Goals and tasks** (add, change and tick off, as a contributor or owner), **In it** (its repositories, chats and sessions: a chat or session of yours continues in the chat; **This session** puts the session open now in it or takes it out), **People** (owners change their roles) and **Settings** for owners (its dates, budget, global, archive). **+** makes a project when Arena lets you (a global one too, when you may). Arena decides what you may do in each, as on its page; what a session uses shows there within seconds. The project in the status bar opens the session's; /project opens it from the chat's box, /projects shows this view and /project new NAME makes one.",
@@ -311,4 +316,8 @@ export const regions: Record<string, Part> = {
   Tasks: 'tasks',
   'New task': 'tasks',
   Projects: 'projects',
+  Automation: 'automation',
+  'Schedules here': 'automation',
+  'Agents in Arena': 'automation',
+  'Scheduled tasks in Arena': 'automation',
 }

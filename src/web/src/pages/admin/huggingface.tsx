@@ -14,7 +14,7 @@ import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { type ModelSource } from './model-dialog'
-import { bytes } from './model-profile'
+import { bytes, type ModelUse } from './model-profile'
 
 interface HfModel {
   id: string
@@ -24,6 +24,8 @@ interface HfModel {
   gated: boolean
   pipelineTag: string | null
   tags: string[]
+  /** What its models can be used for here, before a download. */
+  uses?: ModelUse[]
 }
 
 interface HfRepo {
@@ -173,6 +175,7 @@ export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
                       </span>
                       {m.lastModified && <span>updated {new Date(m.lastModified).toLocaleDateString()}</span>}
                     </span>
+                    {m.uses && m.uses.length > 0 && <UseBadges uses={m.uses} />}
                   </button>
                 </li>
               ))}
@@ -565,4 +568,17 @@ function formatEta(s: number): string {
   if (s < 60) return `${Math.ceil(s)} s`
   if (s < 3600) return `${Math.round(s / 60)} min`
   return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`
+}
+
+/** What a model can be used for here, each with where it is taken as that (on hover). */
+export function UseBadges({ uses }: { uses: ModelUse[] }) {
+  return (
+    <span className="flex flex-wrap gap-1" aria-label="Uses">
+      {uses.map((u) => (
+        <Badge key={u.id} variant="secondary" title={u.how} className="font-normal">
+          {u.label}
+        </Badge>
+      ))}
+    </span>
+  )
 }

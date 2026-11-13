@@ -48,6 +48,15 @@ export interface ProjectGoal {
   position: number
   /** The hours a person would take for it by hand; null: not estimated. */
   humanHours: number | null
+  /** The chat or Code Arena session that set it, linked when the person may open it; null: set on this page. */
+  from?: SetBy | null
+}
+
+/** Where a goal or a task was set: a chat or session (its id and title when the person may open it). */
+export interface SetBy {
+  id: string | null
+  title: string | null
+  kind: 'chat' | 'session' | 'room'
 }
 
 export interface ProjectTask {
@@ -61,6 +70,7 @@ export interface ProjectTask {
   /** The hours a person would take for it by hand; null: not estimated. */
   humanHours: number | null
   createdAt: string
+  from?: SetBy | null
 }
 
 export type ItemKind = 'assistant' | 'skill' | 'app'

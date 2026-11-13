@@ -86,7 +86,7 @@ public static class TaskEndpoints
         });
     }
 
-    private static object View(ScheduledTask t, ScheduledRun? last, bool running, DateTimeOffset now, string origin, string? secret = null) => new
+    internal static object View(ScheduledTask t, ScheduledRun? last, bool running, DateTimeOffset now, string origin, string? secret = null) => new
     {
         t.Id, t.Name, t.Prompt, t.Cron, t.TimeZone, t.Model, t.Thinking, t.Tools, t.SameChat, t.Email, webhookSet = t.WebhookEncrypted is not null,
         t.Enabled, t.NextRunAt, t.LastRunAt, running,
@@ -106,7 +106,7 @@ public static class TaskEndpoints
         return secret;
     }
 
-    private static object RunView(ScheduledRun r) => new { r.Id, r.StartedAt, r.FinishedAt, r.Status, r.ConversationId, r.Link, r.Error, r.Manual, r.Delivery };
+    internal static object RunView(ScheduledRun r) => new { r.Id, r.StartedAt, r.FinishedAt, r.Status, r.ConversationId, r.Link, r.Error, r.Manual, r.Delivery };
 
     private static async Task<IResult> AddAsync(TaskRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TaskContext context, Audit audit, CancellationToken ct)
     {

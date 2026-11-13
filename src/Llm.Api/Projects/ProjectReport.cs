@@ -65,7 +65,6 @@ public static class ProjectReport
             ["from"] = from.ToUniversalTime(),
             ["to"] = to.ToUniversalTime(),
             ["secs"] = interval.TotalSeconds,
-            ["idle"] = Idle.TotalSeconds,
         };
         const string Where = " from gateway.requests r where r.project_id = @p and r.started_at >= @from and r.started_at < @to and r.status <> 'refused' ";
         var totals = (await sql.QueryAsync($"""
@@ -96,24 +95,24 @@ public static class ProjectReport
         var busyAll = (await sql.QueryAsync(Busy("1"), p, ct)).Rows.Select(r => Dbl(r[1])).FirstOrDefault();
         // The people's own time and their waiting, from the project's chats (Code Arena's sessions are among them): each
         // question's time since the answer before it ended (reading, then writing; a break past the idle time is a minute),
-        // and from it to the end of its answer (waiting).
+        // as the time accounting counts it (gateway.chat_times, Chat.TimeSplit), and from it to the end of its answer
+        // (waiting). Code Arena's messages are put down as they end; the web's start then and run their time.
         var active = await sql.QueryAsync("""
             with ev as (
-              select c."Id" as conv, coalesce(m."AuthorId", c."UserId") as who, m."Role" as role, m."CreatedAt" as at,
-                     m."CreatedAt" + make_interval(secs => coalesce(m."DurationMs", 0) / 1000.0) as ends
+              select m."Id" as id, c."Id" as conv, coalesce(m."AuthorId", c."UserId") as who, m."Role" as role, m."CreatedAt" as at,
+                     m."CreatedAt" + make_interval(secs => case when m."SyncRef" is null then coalesce(m."DurationMs", 0) else 0 end / 1000.0) as ends
               from chat_messages m join conversations c on c."Id" = m."ConversationId"
               where c."WorkProjectId" = @p and c."DeletedAt" is null and m."Role" in ('user', 'assistant') and m."CreatedAt" >= @from and m."CreatedAt" < @to
             ), q as (
-              select u.who, u.at,
+              select u.id, u.who, u.at,
                      (select max(a.ends) from ev a where a.conv = u.conv and a.role = 'assistant' and a.at < u.at) as before_end,
                      (select max(a.ends) from ev a where a.conv = u.conv and a.role = 'assistant' and a.at >= u.at
                         and a.at < coalesce((select min(n.at) from ev n where n.conv = u.conv and n.role = 'user' and n.at > u.at), 'infinity'::timestamptz)) as answered
               from ev u where u.role = 'user'
             )
-            select who, count(*),
-                   coalesce(sum(case when before_end is null or at <= before_end or extract(epoch from at - before_end) > @idle then 60 else extract(epoch from at - before_end) end), 0),
-                   coalesce(sum(greatest(extract(epoch from answered - at), 0)), 0)
-            from q group by who
+            select q.who, count(*), coalesce(sum(t.ms), 0) / 1000.0, coalesce(sum(greatest(extract(epoch from q.answered - q.at), 0)), 0)
+            from q left join gateway.chat_times t on t.message = q.id
+            group by q.who
             """, p, ct);
 
         var seconds = active.Rows.Where(r => r[0] is string).ToDictionary(r => Guid.Parse((string)r[0]!), r => (Messages: (int)Num(r[1]), Seconds: Dbl(r[2]), Waiting: Dbl(r[3])));

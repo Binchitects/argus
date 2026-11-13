@@ -26,6 +26,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
 import { skillsQuery } from '@/lib/skills'
+import { liveFallback, useUsageLive } from '@/lib/usage-live'
 import { useTimeWindow, type TimeWindowState } from '@/lib/use-time-window'
 import { assistantsQuery } from '../chat/api'
 import { GroupChecklist, PeoplePicker, type Person } from '../chat/assistant-sharing'
@@ -33,7 +34,6 @@ import {
   goalLabels,
   hours,
   mayAdd,
-  liveEvery,
   progressOf,
   projectQuery,
   roleLabels,
@@ -44,6 +44,7 @@ import {
   type ProjectReport,
   type ProjectRole,
   type ProjectUse,
+  type SetBy,
 } from './api'
 
 const right = { className: 'text-right tabular-nums' }
@@ -203,12 +204,24 @@ export function ProjectView({ id, time, host }: { id: string; time: TimeWindowSt
   )
 }
 
+/** Where a goal or a task was set: the chat or session, a link when the person may open it. */
+function FromChat({ from }: { from: SetBy }) {
+  const what = from.kind === 'session' ? 'a Code Arena session' : from.kind === 'room' ? 'a room' : 'a chat'
+  if (!from.id) return <span>set by {what}</span>
+  return (
+    <Link to={`/chat/${from.id}`} className="underline-offset-2 hover:text-foreground hover:underline">
+      set by {from.kind === 'session' ? 'session' : from.kind} “{from.title}”
+    </Link>
+  )
+}
+
 /** The project's numbers over the window, as its report has them. */
 function Overview({ project: p, time }: { project: Project; time: TimeWindowState }) {
+  useUsageLive((projects) => (projects.includes(p.id) ? [['projects', p.id]] : []))
   const report = useQuery({
     queryKey: ['projects', p.id, 'report', time.key],
-    // What its chats and sessions use shows within seconds (the usage log takes it as each request ends).
-    refetchInterval: liveEvery,
+    // What its chats and sessions use shows within a second or two of each request (the usage stream).
+    refetchInterval: liveFallback,
     queryFn: async ({ signal }) => {
       const r = time.resolved()
       return { ...(await api<ProjectReport>(`/api/projects/${p.id}/report?${time.query()}`, { signal })), fromMs: r.from.getTime(), toMs: r.to.getTime() }
@@ -481,6 +494,12 @@ function Work({ project: p }: { project: Project }) {
                   <p className="text-xs text-muted-foreground">
                     {g.dueOn ? `Due ${new Date(`${g.dueOn}T00:00:00`).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : 'No due day'}
                     {g.doneAt ? ` · done ${new Date(g.doneAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : ''}
+                    {g.from && (
+                      <>
+                        {' · '}
+                        <FromChat from={g.from} />
+                      </>
+                    )}
                   </p>
                 </div>
                 <HoursByHand key={`${g.id}-${g.humanHours}`} value={g.humanHours} title={g.title} disabled={!may} onSave={(humanHours) => change.mutate({ path: `/goals/${g.id}`, method: 'PATCH', body: { humanHours } })} />
@@ -535,6 +554,11 @@ function Work({ project: p }: { project: Project }) {
                 <label htmlFor={`task-${t.id}`} className={t.done ? 'min-w-0 flex-1 text-sm text-muted-foreground line-through' : 'min-w-0 flex-1 text-sm'}>
                   <bdi>{t.title}</bdi>
                   {t.goalId && <span className="ms-2 text-xs text-muted-foreground">{p.goals.find((g) => g.id === t.goalId)?.title}</span>}
+                  {t.from && (
+                    <span className="ms-2 text-xs text-muted-foreground">
+                      <FromChat from={t.from} />
+                    </span>
+                  )}
                 </label>
                 <HoursByHand key={`${t.id}-${t.humanHours}`} value={t.humanHours} title={t.title} disabled={!may} onSave={(humanHours) => change.mutate({ path: `/tasks/${t.id}`, method: 'PATCH', body: { humanHours } })} />
                 <Select

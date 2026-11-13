@@ -20,7 +20,11 @@ public sealed class HuggingFaceException(string message, int status = 502) : Exc
 }
 
 /// <summary>A repository as a search lists it.</summary>
-public sealed record HfModel(string Id, long Downloads, long Likes, string? LastModified, bool Gated, string? PipelineTag, IReadOnlyList<string> Tags);
+public sealed record HfModel(string Id, long Downloads, long Likes, string? LastModified, bool Gated, string? PipelineTag, IReadOnlyList<string> Tags)
+{
+    /// <summary>What its models can be used for here (chat, a picture model's text encoder, embeddings...), before a download.</summary>
+    public IReadOnlyList<ModelUse> Uses => ModelUses.Of(Id, PipelineTag, Tags);
+}
 
 /// <summary>A file of a repository: its path, size and, for a file kept in LFS, its SHA-256.</summary>
 public sealed record HfFile(string Path, long Size, string? Sha256);

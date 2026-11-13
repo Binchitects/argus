@@ -566,6 +566,25 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/again"):
                 await AgainAsync(req, res, ct);
                 return;
+            case ("GET", "/api/automation"):
+                await res.JsonAsync(200, await _rt.AutomationAsync(ct), ct);
+                return;
+            case ("POST", "/api/automation"):
+                await AutomationAsync(req, res, ct);
+                return;
+            case ("GET", "/api/automation/agent-run"):
+            {
+                var (run, problem) = await _rt.ArenaAgentRunAsync(req.Query.GetValueOrDefault("id") ?? "", ct);
+                if (problem is not null)
+                {
+                    await res.ErrorAsync(409, "arena", problem, ct);
+                }
+                else
+                {
+                    await res.JsonAsync(200, run as JsonObject ?? new JsonObject(), ct);
+                }
+                return;
+            }
             case ("GET", "/api/checklist"):
                 await res.JsonAsync(200, await _rt.ChecklistStateAsync(ct), ct);
                 return;
@@ -575,8 +594,23 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 var body = req.Json() ?? new JsonObject();
                 try
                 {
+                    // {save: {id?, name, items}} makes or changes one of the person's; {delete: id}; {repo: NAME} turns the repository's on.
+                    if (body["save"] is JsonObject save)
+                    {
+                        var items = (save["items"] as JsonArray ?? []).Select(i => i?.ToString().Trim() ?? "").Where(i => i.Length > 0).ToList();
+                        await _rt.SaveChecklistAsync(save.Str("id"), save.Str("name")?.Trim() ?? "", items, ct);
+                        await res.JsonAsync(200, await _rt.ChecklistStateAsync(ct), ct);
+                        return;
+                    }
+                    if (body.Str("delete") is { } deleted)
+                    {
+                        await _rt.DeleteChecklistAsync(deleted, ct);
+                        await res.JsonAsync(200, await _rt.ChecklistStateAsync(ct), ct);
+                        return;
+                    }
                     JsonObject? run = body.Int("tick") is { } item
                         ? await _rt.TickByPersonAsync(item, body.Bool("done") != false, ct)
+                        : body.Str("repo") is { } repo ? await _rt.UseRepoChecklistAsync(repo, ct)
                         : await _rt.UseChecklistAsync(body.Bool("off") == true ? null : body.Str("id") ?? throw new ChecklistError("Say which checklist to turn on."), ct);
                     await res.JsonAsync(200, new JsonObject { ["on"] = run?.DeepClone() }, ct);
                 }
@@ -1428,6 +1462,80 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// answer, kept by Arena on the chat the session is kept with, as the web chat's are (the admins read them on Quality), and
     /// beside the answer here. An answer Arena has not been sent yet cannot be rated.
     /// </summary>
+    /// <summary>
+    /// The Automation view's actions: {schedule: {name, every, at, folder, mode, model, prompt}} adds one; {remove|on|off|run:
+    /// NAME} for Code Arena's own; {agent: id, text} runs one of Arena's (its run's id); {task: id} runs one of Arena's tasks.
+    /// </summary>
+    private async Task AutomationAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json() ?? new JsonObject();
+        if (body["schedule"] is JsonObject add)
+        {
+            var s = LocalSchedule.From(new JsonObject
+            {
+                ["name"] = add.Str("name")?.Trim(), ["prompt"] = add.Str("prompt")?.Trim(), ["folder"] = add.Str("folder") is { Length: > 0 } f ? f : _rt.Workspace.Root,
+                ["every"] = add.Str("every"), ["at"] = add.Str("at"), ["mode"] = add.Str("mode"), ["model"] = add.Str("model"),
+            });
+            if (s is null)
+            {
+                await res.ErrorAsync(400, "invalid", "A schedule needs a name, what to do, and how often (30m, 2h, 1d).", ct);
+                return;
+            }
+            if (Schedules.Add(_rt.Env.Paths, s) is { } wrong)
+            {
+                await res.ErrorAsync(409, "schedule", wrong, ct);
+                return;
+            }
+        }
+        else if ((body.Str("remove") ?? body.Str("on") ?? body.Str("off") ?? body.Str("run")) is { } name)
+        {
+            var paths = _rt.Env.Paths;
+            if (Schedules.Load(paths).FirstOrDefault(x => x.Name == name) is not { } s)
+            {
+                await res.ErrorAsync(404, "schedule", $"There is no schedule named {name}.", ct);
+                return;
+            }
+            if (body.Str("remove") is not null)
+            {
+                Schedules.Save(paths, Schedules.Load(paths).Where(x => x.Name != name).ToList());
+            }
+            else if (body.Str("run") is not null)
+            {
+                // It runs on its own: the view follows it by its status.
+                _ = Task.Run(() => Schedules.RunAsync(paths, s, _rt.Env.Exe ?? Environment.ProcessPath ?? "code-arena", CancellationToken.None), CancellationToken.None);
+            }
+            else
+            {
+                Schedules.Update(paths, name, x => x with { Enabled = body.Str("on") is not null });
+            }
+        }
+        else if (body.Str("agent") is { } agent)
+        {
+            var (run, problem) = await _rt.RunArenaAgentAsync(agent, body.Str("text") ?? "", ct);
+            if (problem is not null)
+            {
+                await res.ErrorAsync(409, "arena", problem, ct);
+                return;
+            }
+            await res.JsonAsync(200, new JsonObject { ["run"] = run }, ct);
+            return;
+        }
+        else if (body.Str("task") is { } task)
+        {
+            if (await _rt.RunArenaTaskAsync(task, ct) is { } problem)
+            {
+                await res.ErrorAsync(409, "arena", problem, ct);
+                return;
+            }
+        }
+        else
+        {
+            await res.ErrorAsync(400, "invalid", "Say what to do: schedule, remove, on, off, run, agent or task.", ct);
+            return;
+        }
+        await res.JsonAsync(200, await _rt.AutomationAsync(ct), ct);
+    }
+
     private async Task RateAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
     {
         var body = req.Json() ?? new JsonObject();

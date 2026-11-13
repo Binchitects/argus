@@ -353,7 +353,7 @@ export function ChatTimeButton({ time }: { time: ChatTime }) {
             </div>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">Yours is the time before each question: reading the answer, writing the next, at most 30 minutes a question.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Yours is the time before each question: reading the answer, writing the next. After a break past 15 minutes, or a chat's first question, it counts a minute.</p>
       </PopoverContent>
     </Popover>
   )

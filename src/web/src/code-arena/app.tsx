@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Ellipsis, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Blocks, Ellipsis, Brain, Bug, CalendarClock, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { BroadcastBanner, type ActiveBroadcast } from '@/components/app/broadcasts'
 import { confetti, useKonami } from '@/components/app/games-kit'
@@ -26,6 +26,7 @@ import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
 import { SkillsPanel } from './skills-panel'
 import { ProjectsView } from './projects-view'
+import { AutomationView } from './automation-view'
 import { ManageMenu } from './manage-menu'
 import { AccountsMenu } from './accounts-menu'
 import { PlanPanel } from './plan-panel'
@@ -279,6 +280,7 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'memory', label: 'Memory', icon: Brain, command: 'codeArena.view.memory' },
   { id: 'skills', label: 'Skills', icon: WandSparkles, command: 'codeArena.view.skills' },
   { id: 'projects', label: 'Projects', icon: FolderKanban, command: 'codeArena.view.projects' },
+  { id: 'automation', label: 'Automation', icon: CalendarClock, command: 'codeArena.view.automation' },
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
@@ -1447,6 +1449,7 @@ function Workbench({
     { id: 'codeArena.view.plan', category: 'View', title: "Show the Agent's Plan", run: () => show('plan') },
     { id: 'codeArena.view.skills', category: 'View', title: 'Show Skills', run: () => show('skills') },
     { id: 'codeArena.view.projects', category: 'View', title: 'Show Projects', run: () => show('projects') },
+    { id: 'codeArena.view.automation', category: 'View', title: 'Show Automation: Schedules and Agents', run: () => show('automation') },
     // A project of Arena's in a tab ({ id, name }); with none, the session's (the status bar's), else the Projects view.
     { id: 'codeArena.project.open', category: 'Projects', title: "Open the Session's Project", run: (args) => {
       const p = args && typeof args === 'object' && typeof (args as { id?: unknown }).id === 'string' ? (args as { id: string; name?: string }) : state.workProject
@@ -1571,6 +1574,8 @@ function Workbench({
         return shown && <SkillsPanel />
       case 'projects':
         return shown && <ProjectsView session={state.workProject} />
+      case 'automation':
+        return shown && <AutomationView />
       case 'chat':
         return <Sessions state={state} />
     }

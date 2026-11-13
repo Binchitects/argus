@@ -1310,7 +1310,7 @@
         "type": "postgres",
         "uid": "gateway-db"
       },
-      "description": "The people's time before each question: reading the answer, writing the next, at most 30 minutes a question.",
+      "description": "The people's time before each question: reading the answer, writing the next; a break past 15 minutes, or a chat's first question, a minute.",
       "gridPos": {
         "x": 12,
         "y": 79,
@@ -1424,7 +1424,7 @@
         "type": "postgres",
         "uid": "gateway-db"
       },
-      "description": "Hours a day, stacked: the model's (answers), the tools' (their runs), the people's (before each question, at most 30 minutes).",
+      "description": "Hours a day, stacked: the model's (answers), the tools' (their runs), the people's (before each question; a break past 15 minutes a minute).",
       "gridPos": {
         "x": 0,
         "y": 83,

@@ -245,7 +245,9 @@ interface ChecklistRun {
 
 interface ChecklistState {
   on: ChecklistRun | null
-  mine: { id: string; name: string }[]
+  mine: { id: string; name: string; items?: string[] }[]
+  /** The repository's own (.arena/checklists): turned on, each is kept as one of the person's of its name. */
+  repo?: { name: string; file: string; items: string[] }[]
   problem: string | null
 }
 
@@ -257,26 +259,36 @@ const checklistQuery = {
 }
 
 /**
- * The session's checklist, kept in Arena (Workspace → Checklists): one of the person's turned on here, the model goes through
- * it and ticks each item as it does it (the web chat shows the same ticks); the person ticks one too, or turns it off.
+ * The session's checklist, kept in Arena (Workspace → Checklists): one of the person's (or the repository's) turned on here,
+ * the model goes through it and ticks each item as it does it (the web chat shows the same ticks); the person ticks one
+ * too, or turns it off. The person's are made, changed and deleted here too.
  */
 function ChecklistCard() {
   const queryClient = useQueryClient()
   const state = useQuery(checklistQuery)
   const [busy, setBusy] = useState(false)
+  // A checklist being written: a new one (no id), or one of the person's.
+  const [editing, setEditing] = useState<{ id?: string; name: string; items: string } | null>(null)
   const act = async (body: Record<string, unknown>) => {
     setBusy(true)
     try {
-      const r = await api<{ on: ChecklistRun | null }>('/api/checklist', { body })
-      queryClient.setQueryData<ChecklistState>(checklistQuery.queryKey, (now) => (now ? { ...now, on: r.on } : now))
+      const r = await api<{ on: ChecklistRun | null } & Partial<ChecklistState>>('/api/checklist', { body })
+      if ('mine' in r && r.mine) queryClient.setQueryData<ChecklistState>(checklistQuery.queryKey, r as ChecklistState)
+      else queryClient.setQueryData<ChecklistState>(checklistQuery.queryKey, (now) => (now ? { ...now, on: r.on } : now))
+      return true
     } catch (e) {
       toast.error(errorMessage(e))
+      return false
     } finally {
       setBusy(false)
     }
   }
   const s = state.data
   const on = s?.on
+  const choice = (value: string) => {
+    if (value.startsWith('repo:')) void act({ repo: value.slice(5) })
+    else if (value) void act({ id: value })
+  }
   return (
     <section aria-label="Checklist" className="mx-3 mt-3 mb-3 grid shrink-0 gap-2 border-t pt-3 text-xs">
       <div className="flex items-center gap-2">
@@ -291,7 +303,34 @@ function ChecklistCard() {
             Turn off
           </button>
         )}
+        {!on && s && !s.problem && !editing && (
+          <button type="button" onClick={() => setEditing({ name: '', items: '' })} className="text-muted-foreground hover:text-foreground">
+            New
+          </button>
+        )}
       </div>
+      {editing && (
+        <form
+          aria-label={editing.id ? `Edit ${editing.name}` : 'New checklist'}
+          className="grid gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const items = editing.items.split('\n').map((i) => i.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean)
+            void act({ save: { id: editing.id, name: editing.name.trim(), items } }).then((ok) => ok && setEditing(null))
+          }}
+        >
+          <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Name: before a merge" aria-label="Checklist name" className="h-7 rounded border bg-background px-2" required />
+          <textarea value={editing.items} onChange={(e) => setEditing({ ...editing, items: e.target.value })} placeholder={'One item a line:\nThe tests pass\nThe docs say what changed'} aria-label="Its items, one a line" className="min-h-20 rounded border bg-background px-2 py-1" required />
+          <div className="flex justify-end gap-1.5">
+            <button type="button" onClick={() => setEditing(null)} className="h-7 rounded px-2 hover:bg-accent">
+              Cancel
+            </button>
+            <button type="submit" disabled={busy || !editing.name.trim() || !editing.items.trim()} className="h-7 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
+              Save
+            </button>
+          </div>
+        </form>
+      )}
       {!s ? null : on ? (
         <>
           <p className="font-medium">{on.name}</p>
@@ -317,26 +356,48 @@ function ChecklistCard() {
       ) : (
         <>
           {s.problem && <p className="text-muted-foreground">{s.problem}</p>}
-          {s.mine.length === 0 ? (
-            !s.problem && <p className="text-muted-foreground">You have no checklists yet: make them in Arena (Workspace → Checklists).</p>
+          {s.mine.length === 0 && (s.repo ?? []).length === 0 ? (
+            !s.problem && !editing && <p className="text-muted-foreground">You have no checklists yet: New makes one (they are kept in Arena, under Workspace → Checklists).</p>
           ) : (
             <label className="grid gap-1">
               <span className="text-muted-foreground">Turn one on: the model goes through it and ticks each item as it does it.</span>
-              <select
-                value=""
-                disabled={busy || !!s.problem}
-                onChange={(e) => e.target.value && void act({ id: e.target.value })}
-                aria-label="Turn a checklist on"
-                className="rounded border bg-background px-1.5 py-1"
-              >
+              <select value="" disabled={busy || !!s.problem} onChange={(e) => choice(e.target.value)} aria-label="Turn a checklist on" className="rounded border bg-background px-1.5 py-1">
                 <option value="">Choose a checklist…</option>
-                {s.mine.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {s.mine.length > 0 && (
+                  <optgroup label="Yours">
+                    {s.mine.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {(s.repo ?? []).length > 0 && (
+                  <optgroup label="The repository's">
+                    {(s.repo ?? []).map((c) => (
+                      <option key={c.file} value={`repo:${c.name}`}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </label>
+          )}
+          {s.mine.length > 0 && !editing && (
+            <ul aria-label="Your checklists" className="grid gap-0.5">
+              {s.mine.map((c) => (
+                <li key={c.id} className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                  <button type="button" className="text-muted-foreground hover:text-foreground" aria-label={`Edit ${c.name}`} onClick={() => setEditing({ id: c.id, name: c.name, items: (c.items ?? []).join('\n') })}>
+                    Edit
+                  </button>
+                  <button type="button" className="text-muted-foreground hover:text-destructive-ink" aria-label={`Delete ${c.name}`} disabled={busy} onClick={() => void act({ delete: c.id })}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}

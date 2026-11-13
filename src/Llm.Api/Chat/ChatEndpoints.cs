@@ -465,7 +465,7 @@ public static partial class ChatEndpoints
             m.CutShort, m.Pinned, m.LeftOut,
             status = m.Status.ToString().ToLowerInvariant(), error = quality is null ? m.Error : quality.Error(m), model = quality is null ? m.Model : quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
-            // A person's question: their time before it (reading the answer it follows, writing it), at most 30 minutes.
+            // A person's question: their time before it (reading the answer it follows, writing it); after a break past 15 minutes, or first, a minute.
             humanMs = TimeSplit.HumanMs(m, m.ParentId is { } parent ? byId.GetValueOrDefault(parent) : null),
             // An arena answer's cost waits for the vote, as its model does: prices would tell the two apart.
             cost = quality is not null && quality.Model(m) != m.Model ? null : m.Cost,

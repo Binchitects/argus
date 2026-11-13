@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Info, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, TriangleAlert, XCircle } from 'lucide-react'
+import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, FlaskConical, Info, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, TriangleAlert, XCircle } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -23,6 +23,7 @@ import { engineName } from './engine-choice'
 import { EngineProblems, MoveState } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
+import { ModelBenchDialog } from './model-bench'
 import { EngineActions } from './runtimes'
 import { OnDiskCard } from './model-disk'
 import { type SavedModel } from './model-form'
@@ -494,6 +495,7 @@ function ModelCard({
 }) {
   const confirm = useConfirm()
   const [detailsOpen, setDetails] = useState(false)
+  const [testing, setTesting] = useState(false)
   const keep = useMutation({
     mutationFn: (on: boolean) => api<{ warning: string | null }>(`/api/admin/models/${encodeURIComponent(m.name)}/keep`, { method: 'PUT', body: { keep: on } }),
     onSuccess: (r, on) => {
@@ -793,9 +795,15 @@ function ModelCard({
               <Trash2 /> Remove
             </Button>
           )}
+          {!media && mayEdit && (
+            <Button size="sm" variant="outline" onClick={() => setTesting(true)} aria-label={`Test ${m.name}`}>
+              <FlaskConical /> Test
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setDetails(true)} aria-label={`Details of ${m.name}`}>
             <Info /> Details
           </Button>
+          {testing && <ModelBenchDialog model={m.name} open={testing} onOpenChange={setTesting} />}
         </div>
       </CardContent>
       <Dialog open={detailsOpen} onOpenChange={setDetails}>

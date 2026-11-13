@@ -71,7 +71,7 @@ program, and Edge or Chrome 109.
 6. **Every kind of model**: a model that does more than chat (pictures from a text encoder's model, and the rest:
    pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF) is recognised for all it does, after research into the kinds.
 7. **The system's token capacity live**: the Stack Performance dashboard shows how many tokens a second the system
-   can make now and makes, in numbers that read right.
+   can make now and makes, in numbers that read right, a line per model and per GPU, not one line for all.
 8. **A test bench under Models**: a model's capability (what it answers well) and capacity (how much at once) tested.
 9. **Chat sync between Code Arena and the Arena that never misses**.
 10. **The sign-in's eyes, the logo and the pattern**: better eyes on the sign-in page, the logo more an owl (the eyes in
@@ -82,9 +82,10 @@ program, and Edge or Chrome 109.
 12. **Code Arena's UI tidied** (asked 2026-11-13): the chat's header holds only what is used often, the rest in a
     menu or where it belongs; no tool twice in its tools, and those of no use in Code Arena gone; the tools'
     customization simple; every pane resizable.
+13. **Checklists in Code Arena** (asked 2026-11-13): made, edited and deleted there too (the terminal and the IDE), and a
+    repository's own (.arena/checklists) for everyone who opens it.
 
-Done so far: 1 (YaRN on vLLM, SGLang, LMDeploy), 2 (time accounting), 5 (an answer cut at its longest carries on by
-itself), 10.
+Done (v8.1.0): every item above.
 
 ## Next
 

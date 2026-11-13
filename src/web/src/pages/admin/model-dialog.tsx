@@ -81,7 +81,9 @@ function choices(library: LibraryFile[], mediaFiles: LibraryRow[], speech: Speec
   const out: Choice[] = library.map((f) => {
     const k = f.profile.kind
     const kind: ModelDialogKind | null = k === 'language' ? 'chat' : k === 'image' || k === 'encoder' ? 'image_generation' : k === 'video' ? 'video_generation' : null
-    const label = k === 'language' ? [f.path, size(f.size, f.parts), summary(f.profile)].filter(Boolean).join(' · ') : `${f.path} · ${kindLabel[k]}`
+    // Its other uses beside its kind: a chat model that a picture model reads its prompt with says so.
+    const also = (f.profile.uses ?? []).filter((u) => u.id === 'text_encoder' && k === 'language').map((u) => `also ${u.label.charAt(0).toLowerCase()}${u.label.slice(1)}`)
+    const label = k === 'language' ? [f.path, size(f.size, f.parts), summary(f.profile), ...also].filter(Boolean).join(' · ') : `${f.path} · ${kindLabel[k]}`
     const role = k === 'image' || k === 'video' ? 'diffusion' : (roles.get(f.path) ?? (k === 'encoder' ? 't5xxl' : 'llm'))
     return {
       value: fileValue(f.path),

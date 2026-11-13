@@ -2,9 +2,9 @@
 // left or the right (the chat on the other side), the panel below the editor or beside it, the views in the order the
 // person dragged them, each in the side bar or in the panel. Kept by code-arena for every run (useLayout in app.tsx).
 
-export type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'review' | 'plan' | 'memory' | 'skills' | 'projects' | 'chat'
+export type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'review' | 'plan' | 'memory' | 'skills' | 'projects' | 'automation' | 'chat'
 
-export const allViews: readonly View[] = ['explorer', 'search', 'git', 'debug', 'extensions', 'changes', 'problems', 'review', 'plan', 'memory', 'skills', 'projects', 'chat']
+export const allViews: readonly View[] = ['explorer', 'search', 'git', 'debug', 'extensions', 'changes', 'problems', 'review', 'plan', 'memory', 'skills', 'projects', 'automation', 'chat']
 
 /** The panel's own tabs: the terminals, the Debug Console, the Output (the language servers'), the Ports (Code Studio's forwarded ports). */
 export type PanelPart = 'terminal' | 'console' | 'output' | 'ports'

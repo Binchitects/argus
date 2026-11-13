@@ -189,7 +189,7 @@ public sealed class ProjectTests(AppFixture app)
     public async Task A_persons_time_is_reading_and_writing_after_each_answer_and_their_waiting_is_until_the_answer_ends()
     {
         var admin = await AdminAsync();
-        var (_, ann, _, _) = await PersonAsync(admin);
+        var (annId, ann, _, _) = await PersonAsync(admin);
         var id = await ProjectAsync(ann, new { name = "Timing" });
         var chat = await ChatAsync(ann);
         await StatusAssert.Is(HttpStatusCode.OK, await PutAsync(ann, $"/api/chat/conversations/{chat}/project", new { projectId = id }));
@@ -203,7 +203,8 @@ public sealed class ProjectTests(AppFixture app)
             var n = 0;
             void Add(string role, DateTimeOffset at, int? ms = null)
             {
-                var m = new Llm.Core.Chat.ChatMessage { ConversationId = chat, ParentId = parent, Role = role, Content = role, Sequence = ++n, CreatedAt = at, DurationMs = ms };
+                // Her questions are hers (as the chat puts them down); a task's or a note would be nobody's time.
+                var m = new Llm.Core.Chat.ChatMessage { ConversationId = chat, ParentId = parent, Role = role, Content = role, Sequence = ++n, CreatedAt = at, DurationMs = ms, AuthorId = role == "user" ? annId : null };
                 db.ChatMessages.Add(m);
                 parent = m.Id;
             }
@@ -406,6 +407,53 @@ public sealed class ProjectTests(AppFixture app)
     }
 
     /// <summary>Code Arena: no cookies, the person's key.</summary>
+    [Fact]
+    public async Task A_chat_and_a_Code_Arena_session_in_a_project_set_its_goals_and_tasks_and_the_page_says_which_chat()
+    {
+        var admin = await AdminAsync();
+        var (_, ann, _, key) = await PersonAsync(admin);
+        var (benId, ben, _, _) = await PersonAsync(admin);
+        var id = await ProjectAsync(ann, new { name = "Shop" });
+        await StatusAssert.Is(HttpStatusCode.NoContent, await ann.PostAsync($"/api/projects/{id}/members", new { userIds = new[] { benId }, role = "viewer" }));
+        var chat = await ChatAsync(ann);
+        await StatusAssert.Is(HttpStatusCode.OK, await PutAsync(ann, $"/api/chat/conversations/{chat}/project", new { projectId = id }));
+
+        // The chat's answer adds a goal with the project's tool, which every answer of a chat in a project has.
+        var sent = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = """[call project_goal {"title":"Checkout works","status":"doing"}]""" });
+        await sent.Content.ReadAsStringAsync();
+        var shown = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}"));
+        var goal = Assert.Single(shown.GetProperty("goals").EnumerateArray());
+        Assert.Equal(("Checkout works", "doing"), (goal.GetProperty("title").GetString(), goal.GetProperty("status").GetString()));
+        Assert.Equal(chat, goal.GetProperty("from").GetProperty("id").GetGuid());
+        // Ben sees it was set by a chat, not which: the chat is Ann's.
+        var forBen = Assert.Single((await ben.JsonAsync(await ben.GetAsync($"/api/projects/{id}"))).GetProperty("goals").EnumerateArray()).GetProperty("from");
+        Assert.Equal((JsonValueKind.Null, "chat"), (forBen.GetProperty("id").ValueKind, forBen.GetProperty("kind").GetString()));
+
+        // Code Arena: the session in the project reads the plan as its model is told it, and adds a task under the goal.
+        var arena = CodeArena(key);
+        var session = JsonDocument.Parse(await (await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = "s-" + Guid.NewGuid().ToString("N")[..6], place = "/w/shop", projectId = id }))
+            .Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        var work = JsonDocument.Parse(await arena.GetStringAsync(new Uri($"/api/code-arena/chats/{session}/project-work", UriKind.Relative))).RootElement;
+        Assert.True(work.GetProperty("mayChange").GetBoolean());
+        Assert.Contains("Goal: Checkout works [doing]", work.GetProperty("instructions").GetString(), StringComparison.Ordinal);
+        var goalId = goal.GetProperty("id").GetGuid();
+        var added = JsonDocument.Parse(await (await arena.PostAsJsonAsync($"/api/code-arena/chats/{session}/project-work/project_task", new { title = "Pay by card", goal = goalId.ToString() }))
+            .Content.ReadAsStringAsync()).RootElement;
+        Assert.False(added.GetProperty("error").GetBoolean());
+        Assert.Contains("  - [ ] Pay by card", added.GetProperty("text").GetString(), StringComparison.Ordinal);
+        var wrong = JsonDocument.Parse(await (await arena.PostAsJsonAsync($"/api/code-arena/chats/{session}/project-work/project_goal", new { id = "not-an-id" })).Content.ReadAsStringAsync()).RootElement;
+        Assert.True(wrong.GetProperty("error").GetBoolean());
+
+        // Its goal (goal mode) is the project's too, done when it is met.
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.PutAsJsonAsync($"/api/code-arena/chats/{session}/goal", new { text = "The e2e tests pass\nall of them", status = "working" }));
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.PutAsJsonAsync($"/api/code-arena/chats/{session}/goal", new { text = "The e2e tests pass\nall of them", status = "met" }));
+        shown = await ann.JsonAsync(await ann.GetAsync($"/api/projects/{id}"));
+        var goals = shown.GetProperty("goals").EnumerateArray().ToDictionary(g => g.GetProperty("title").GetString()!, g => g.GetProperty("status").GetString());
+        Assert.Equal(new Dictionary<string, string?> { ["Checkout works"] = "doing", ["The e2e tests pass"] = "done" }, goals);
+        var task = Assert.Single(shown.GetProperty("tasks").EnumerateArray());
+        Assert.Equal(("session", session), (task.GetProperty("from").GetProperty("kind").GetString(), task.GetProperty("from").GetProperty("id").GetGuid()));
+    }
+
     private HttpClient CodeArena(string key)
     {
         var http = app.Factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false, HandleCookies = false });

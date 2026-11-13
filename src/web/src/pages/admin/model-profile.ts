@@ -3,8 +3,17 @@ import { formatValue } from '@/lib/format'
 export type ModelKind = 'language' | 'embedding' | 'reranker' | 'projector' | 'draft' | 'image' | 'video' | 'encoder' | 'adapter' | 'unknown'
 
 /** What a GGUF file is, read from its header and tensors by the API. */
+/** Something a model can be used for here: chat, a picture model's text encoder, embeddings… and where it is taken as that. */
+export interface ModelUse {
+  id: string
+  label: string
+  how: string
+}
+
 export interface ModelProfile {
   kind: ModelKind
+  /** Every use it has here, beside its kind (a chat model that is a picture model's text encoder too). */
+  uses?: ModelUse[]
   why: string | null
   note: string | null
   architecture: string | null

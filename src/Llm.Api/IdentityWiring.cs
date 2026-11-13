@@ -434,6 +434,12 @@ public static class IdentityWiring
         services.AddSingleton<Chat.ChatWatch>();
         services.AddSingleton<Chat.ChatChangesOnSave>();
         services.AddHostedService<Chat.ChatWatchStart>();
+        // Use as it is booked: Accounting, projects' metrics and Usage read their numbers again at once.
+        services.AddSingleton<Reports.UsageWatch>();
+        services.AddSingleton<Reports.UsageOnSave>();
+        services.AddHostedService<Reports.UsageWatchStart>();
+        // The model test bench (Admin → Models → Test): its runs go on in the background.
+        services.AddSingleton<Models.ModelBench>();
         services.Configure<Chat.RoomCallOptions>(config.GetSection("Rooms:Calls"));
         services.AddSingleton<Chat.RoomCaptions>();
         services.AddSingleton<Code.ReviewEngine>();
@@ -669,6 +675,7 @@ public static class IdentityWiring
         Chat.LineMetrics.MapLineMetrics(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Reports.Accounting.MapAccounting(app);
+        Reports.UsageWatch.MapUsageWatch(app);
         Dashboards.LogEndpoints.MapLogs(app);
         Dashboards.AlertEndpoints.MapAlerts(app);
         Operations.OperationsEndpoints.MapOperations(app);
@@ -694,6 +701,9 @@ public static class IdentityWiring
         Tags.TagEndpoints.MapTags(app);
         Quality.PromptLogReport.MapPromptLogReport(app);
         Chat.ChecklistEndpoints.MapChecklists(app);
+        Projects.ProjectWorkEndpoints.MapProjectWork(app);
+        Code.CodeArenaAutomation.MapCodeArenaAutomation(app);
+        Models.ModelBenchEndpoints.MapModelBench(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);

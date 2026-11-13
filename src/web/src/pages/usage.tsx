@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Me } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
 import { intervalFor } from '@/lib/time'
+import { liveFallback, useUsageLive } from '@/lib/usage-live'
 import { useTimeWindow } from '@/lib/use-time-window'
 import { PromptList } from './usage-prompts'
 
@@ -71,8 +72,10 @@ const modelColumns: ColumnDef<ModelUse>[] = [
 
 function MyUsage() {
   const time = useTimeWindow()
+  useUsageLive(() => [['usage', 'me']])
   const data = useQuery({
     queryKey: ['usage', 'me', time.key],
+    refetchInterval: liveFallback,
     queryFn: async ({ signal }) => {
       const { from: f, to: t } = time.resolved()
       const q = new URLSearchParams({ from: f.toISOString(), to: t.toISOString(), intervalMs: String(Math.max(intervalFor(f, t, 60), 3_600_000)) })

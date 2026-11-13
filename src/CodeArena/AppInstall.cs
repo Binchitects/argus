@@ -43,7 +43,10 @@ internal static class AppInstall
     /// <summary>Linux: its desktop entry and its icon, in the person's own share folder (XDG).</summary>
     public static string DesktopEntry(string share) => Path.Combine(share, "applications", "code-arena.desktop");
 
-    public static string Icon(string share) => Path.Combine(share, "icons", "hicolor", "512x512", "apps", "code-arena.png");
+    public static string Icon(string share, int size = 512) => Path.Combine(share, "icons", "hicolor", $"{size}x{size}", "apps", "code-arena.png");
+
+    /// <summary>The sizes install.sh puts its icon in (docks 128 and 256, menus and the switcher 512).</summary>
+    public static readonly int[] IconSizes = [128, 256, 512];
 
     /// <summary>macOS: the application in the person's Applications folder.</summary>
     public static string MacApp(string home) => Path.Combine(home, "Applications", Title + ".app");
@@ -109,7 +112,7 @@ internal static class AppInstall
         {
             var share = Share(env.Env, home);
             var config = ConfigHome(env.Env, home);
-            foreach (var file in new[] { DesktopEntry(share), Icon(share) }.Concat(FolderMenus(share, config)).Where(File.Exists))
+            foreach (var file in new[] { DesktopEntry(share) }.Concat(IconSizes.Select(size => Icon(share, size))).Concat(FolderMenus(share, config)).Where(File.Exists))
             {
                 File.Delete(file);
                 gone.Add(file);

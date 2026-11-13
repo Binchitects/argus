@@ -373,8 +373,30 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
                   - expr: {{Q("stack-performance", "Stack throughput (live)")}}
                     eval_time: 8m
                     exp_samples: [{ labels: '{}', value: 600 }]
-                  - expr: {{Q("stack-performance", "Tokens a second: the stack and a request", "the stack (5 min)")}}
+                  - expr: {{Q("stack-performance", "Tokens a second, by model (live and 5 min)", "{{model}} (5 min)")}}
                     eval_time: 8m
+                    exp_samples:
+                      - { labels: '{model="qwen"}', value: 400 }
+                      - { labels: '{model="flash"}', value: 150 }
+                      - { labels: '{model="swift"}', value: 50 }
+                  - expr: {{Q("stack-performance", "Each model: tokens a second now, and the most it made (7 days)", "{{model}} most (7 days)")}}
+                    eval_time: 8m
+                    exp_samples:
+                      - { labels: '{model="qwen"}', value: 400 }
+                      - { labels: '{model="flash"}', value: 150 }
+                      - { labels: '{model="swift"}', value: 50 }
+                  - expr: {{Q("stack-performance", "Capacity (tokens a second)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("stack-performance", "Making now (tokens a second)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("stack-performance", "Of capacity, now")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 100 }]
+                  # Idle now: nothing made, the capacity as it was measured, all of it room.
+                  - expr: {{Q("stack-performance", "Room now (tokens a second)")}}
+                    eval_time: 20m
                     exp_samples: [{ labels: '{}', value: 600 }]
                   - expr: {{Q("stack-performance", "Decode speed a request (5 min)")}}
                     eval_time: 8m

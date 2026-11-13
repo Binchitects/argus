@@ -43,6 +43,8 @@ builder.Services.AddDbContext<AppDbContext>((sp, o) =>
     o.AddInterceptors(sp.GetRequiredService<Llm.Api.Notifications.PushOnSave>());
     // A chat's changes reach its owner's pages and Code Arenas at once, whoever saves them.
     o.AddInterceptors(sp.GetRequiredService<Llm.Api.Chat.ChatChangesOnSave>());
+    // Use booked (the ledger, a message's time): the pages that add it up read it again at once.
+    o.AddInterceptors(sp.GetRequiredService<Llm.Api.Reports.UsageOnSave>());
 });
 builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 builder.Services.AddProblemDetails();

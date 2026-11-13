@@ -2425,6 +2425,25 @@ which are left. `/checklist tick 3` and `untick 3` tick by hand; `/checklist
 off` turns it off. The web chat of that session shows the same ticks, and a
 tick made there is read by the next turn here.
 
+They are made here too: `/checklist new Done means done: the tests pass;
+the docs say what changed` (items after the colon, by `;`), `/checklist edit
+2: new items; …` and `/checklist delete 2`; in the IDE, the Plan view's
+**Checklist** has **New**, and **Edit** and **Delete** beside each of yours.
+
+**A repository's own.** Markdown files in `.arena/checklists/` are the
+repository's checklists, for everyone who opens it: each named by its first
+`# ` heading (else its file's name), its items its `- ` lines (`- [ ]` too).
+`/checklist` lists them under the person's; turning one on keeps it as one
+of yours of that name, with the items the repository has now, then turns it
+on.
+
+```markdown
+# Before a merge
+- The tests pass
+- The changelog says what changed
+- No new warnings
+```
+
 ## The plan
 
 For work of several steps the agent keeps a plan with the `plan` tool: a
@@ -2634,6 +2653,47 @@ mode). `/loop` lists the loops (their runs, the last task, when the next
 is); `/loop stop N` stops one. At most 10 loops; they end with the session.
 For something to run when Code Arena is closed, use **Scheduled tasks** in
 Arena.
+
+## Automation
+
+What runs on its own, beside what you ask: the IDE's **Automation** view
+(the calendar in the activity bar), `/schedule` and `/agents` in the
+terminal.
+
+**Schedules here.** A prompt Code Arena runs in a folder every so often,
+each run a session of its own (synced to Arena as any session is, so its
+answer is in your chats there too):
+
+```bash
+code-arena schedule add nightly --every 1d --at 02:00 -C ~/src/shop --mode plan "Run the tests and say what fails"
+code-arena schedule list
+code-arena schedule run nightly
+code-arena schedule off nightly
+code-arena schedule remove nightly
+```
+
+- **How often**: `--every` 30m, 2h, 1d, 7d (at least a minute); a day or
+  more with `--at HH:MM` runs at that time of day, local time.
+- **Mode**: `plan` (the default) reads only; `auto-edit` may change files;
+  `yolo` may run anything; `ask` refuses what would ask, as nobody is there
+  to allow it. `-m` picks its model.
+- **When it runs**: while the IDE is open (it looks every minute), and with
+  Code Arena closed once `code-arena schedule install` has set up an OS
+  timer that runs `code-arena schedule due` every 5 minutes (a systemd user
+  timer, a launchd agent, or a Task Scheduler task). A run never overlaps
+  itself, whoever starts it.
+- Kept in `schedules.json` in the config folder; each run's output in a log
+  under the data folder's `schedules/`, named in `schedule list`.
+
+**Agents in Arena.** Your agents in Arena's Agent Studio, and those shared
+with you: `/agents` lists them, `/agents N TEXT` runs one with that text and
+says what each step gave when it ends; the view runs one and follows it.
+Arena's rules hold: Agent Studio is your role's, and an agent shared with you
+shows how it went, not what each step was given.
+
+**Scheduled tasks in Arena.** Yours, as Arena's Scheduled tasks lists them:
+`/schedule` shows them under Code Arena's own, `/schedule arena N` (or ▶ in
+the view) runs one now; its answer comes to you in Arena.
 
 ## Assistants
 
@@ -3311,6 +3371,13 @@ gateway names its chat and its project in its metadata
 (`metadata.tags: ["chat:<id>", "project:<id>"]`), which is how Arena's usage
 log knows them; a request counts where its chat is, so a chat moved to another
 project takes what it used along.
+
+A session in a project keeps the project's **goals and tasks** up to date,
+as a chat in it does: the model is told the plan at each turn (in its note),
+and `project_plan`, `project_goal` and `project_task` add a goal for an aim
+you set out, its steps as tasks, and tick them as the work is done. Its own
+goal (`/goal`) is one of the project's too, by its first line: doing while
+it works, done when it is met, dropped when it is cancelled.
 
 Which project:
 

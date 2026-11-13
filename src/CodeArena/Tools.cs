@@ -138,6 +138,9 @@ internal sealed class ToolContext
     public Action<string>? Progress { get; set; }
     /// <summary>Ticks an item of the checklist on in this session's chat (checklist_check); null where none can be (a sub-agent).</summary>
     public Func<JsonObject, CancellationToken, Task<ToolResult>>? Checklist { get; set; }
+
+    /// <summary>project_plan, project_goal and project_task: the session's Arena project's plan (ProjectPlan.cs).</summary>
+    public Func<string, JsonObject, CancellationToken, Task<ToolResult>>? ProjectPlan { get; set; }
     /// <summary>The folder's code index (code_search, code_symbol, code_outline); null when it is not on.</summary>
     public CodeIndexHost? Code { get; init; }
     /// <summary>How many characters a token is, as the agent has learnt it: a code answer's budget in characters.</summary>
@@ -366,7 +369,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
         }
     }
 
-    /// <summary>Tools left out while it says so (by name), whatever the settings: memory's, while Arena denies the person memory.</summary>
+    /// <summary>Tools left out while it says so (by name), whatever the settings: memory's while Arena denies the person memory, the project's plan while the session is in no project.</summary>
     public Func<string, bool>? Withheld { get; init; }
 
     private IReadOnlyList<ToolDef> Withhold(IReadOnlyList<ToolDef> tools) =>
@@ -429,6 +432,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
         (new("code-arena:skills", "Skills", "Use the skills there are, and save a new one.", "sparkles"), ["skill", "skill_save"], null),
         (new("code-arena:agents", "Sub-agents", "Hand a task to a sub-agent, ask another agent, and run steps one after another.", "network"), ["task", "ask_agent", "run_steps"], null),
         (new("code-arena:screen", "Screenshots", "Take a picture of the screen.", "image"), ["screenshot"], null),
+        (new("code-arena:project", "The project's plan", "Read the goals and tasks of the Arena project the session is in, and keep them up to date.", "list-checks"), SessionProjectPlan.Names, null),
     ];
 
     /// <summary>A family of Code Arena's own tools by its id; null: none.</summary>

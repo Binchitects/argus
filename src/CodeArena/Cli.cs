@@ -144,6 +144,7 @@ internal static partial class Cli
           code-arena index [--rebuild]      build or refresh this folder's code index and say what it holds
           code-arena search "question"      find code by what it does or by name, from the index, with no model
                                             (--symbol NAME, --outline [PATH], --json: code-arena search --help)
+          code-arena schedule list          prompts run on a schedule in a folder (schedule add, run, due, install: code-arena schedule help)
           code-arena vm list                the VMs here (VirtualBox, VMware, libvirt, Hyper-V) the agent's VM tools reach
           code-arena vm login VM            keep a VM's guest user and password in your keyring (vm forget VM drops it)
 
@@ -197,6 +198,10 @@ internal static partial class Cli
         {
             return await VmCommand.RunAsync(vmArgs, env, ct);
         }
+        if (args is ["schedule", .. var scheduleArgs])
+        {
+            return await Schedules.CommandAsync(scheduleArgs, env, ct);
+        }
         Options o;
         try
         {
@@ -243,7 +248,7 @@ internal static partial class Cli
     /// </summary>
     public static bool Ide(string[] args, bool built)
     {
-        if (args is ["sandbox" or "index" or "search" or "vm", ..])
+        if (args is ["sandbox" or "index" or "search" or "vm" or "schedule", ..])
         {
             return false;
         }
@@ -722,6 +727,11 @@ internal static partial class Cli
         try
         {
             o.Ide = true;
+            // The person's schedules run while the IDE is open (not for Code Studio's: its machine is the server's).
+            if (!o.Serve)
+            {
+                _ = Task.Run(() => Schedules.WatchAsync(env.Paths, env.Exe ?? Environment.ProcessPath ?? "code-arena", linked.Token), CancellationToken.None);
+            }
             string? served;
             try
             {

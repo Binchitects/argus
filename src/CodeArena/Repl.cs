@@ -39,11 +39,13 @@ internal sealed partial class Repl(Runtime rt)
         ("/tools set NAME off|on|ask|allow|default [--here]", "keep a tool's setting: off, asking before each call, never asking; for every project, or this one"),
         ("/tools enable NAME", "enable the project's own tool or MCP server (its tools/*.json, .mcp.json) here, as it is defined now"),
         ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
-        ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
+        ("/checklist", "the checklist on, yours (kept in Arena) and the repository's; N or NAME turns one on; off; tick N, untick N; new NAME: item; item; edit N: items; delete N"),
         ("/assistant [N|NAME|off]", "your assistants in Arena; N or NAME works as one (its instructions, model, tools and skills); off as none"),
         ("/tasks [N|stop N|new TASK]", "the sub-agents and background tasks: N shows one, stop N stops it, new [--edits] [--assistant NAME] TASK starts one"),
         ("/goal [TEXT|pause|resume|cancel|next|drop N]", "work until a goal is met, then the next: TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N] [--until-met]"),
         ("/loop [EVERY [--edits] PROMPT|stop N]", "a prompt run as a background agent every 30m, 2h or 1d while the session is open"),
+        ("/schedule [add NAME --every 1d [--at 09:00] PROMPT|run NAME|on|off|remove NAME|arena N]", "prompts run on a schedule in a folder, even with Code Arena closed, and your scheduled tasks in Arena"),
+        ("/agents [N TEXT]", "your agents in Arena (Agent Studio); N and a text runs one and says what it gave"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -378,6 +380,11 @@ internal sealed partial class Repl(Runtime rt)
             }
             await TurnAsync(input, ct);
         }
+        // The admins' messages still on their way: said before the end, if they come soon.
+        if (_lateBroadcasts is { IsCompleted: false } late)
+        {
+            await Task.WhenAny(late, Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None));
+        }
         if (rt.Agent.Messages.Count == 0)
         {
             // Nothing was said: no session worth keeping.
@@ -412,6 +419,25 @@ internal sealed partial class Repl(Runtime rt)
         }
     }
 
+    /// <summary>The admins' messages that came after the banner: said as they come; waited for a little at the end.</summary>
+    private Task? _lateBroadcasts;
+
+    private void SayBroadcasts(IEnumerable<(string Level, string Title, string? Body)> broadcasts)
+    {
+        foreach (var (level, title, body) in broadcasts)
+        {
+            var line = $"From the admins: {title}{(body is { Length: > 0 } b ? $" ({Fmt.OneLine(b, 200)})" : "")}";
+            if (level is "warning" or "critical")
+            {
+                Ui.Warn(line);
+            }
+            else
+            {
+                Ui.Info(line);
+            }
+        }
+    }
+
     private void Banner()
     {
         var local = rt.Tools.All.Count(t => t.Server is null);
@@ -432,22 +458,22 @@ internal sealed partial class Repl(Runtime rt)
         {
             Ui.Warn("yolo: edits and commands run without asking. Use it in a folder you can throw away.");
         }
-        // The admins' messages on now (the Arena's broadcasts), when they come in time.
+        // The admins' messages on now (the Arena's broadcasts): under the banner when they come in time, else said as they
+        // come (an Arena slow to answer does not hold the prompt), and waited for a little at the end.
         var said = rt.BroadcastsAsync();
         if (said.Wait(TimeSpan.FromSeconds(3)))
         {
-            foreach (var (level, title, body) in said.Result)
+            SayBroadcasts(said.Result);
+        }
+        else
+        {
+            _lateBroadcasts = said.ContinueWith(t =>
             {
-                var line = $"From the admins: {title}{(body is { Length: > 0 } b ? $" ({Fmt.OneLine(b, 200)})" : "")}";
-                if (level is "warning" or "critical")
+                if (t.IsCompletedSuccessfully)
                 {
-                    Ui.Warn(line);
+                    SayBroadcasts(t.Result);
                 }
-                else
-                {
-                    Ui.Info(line);
-                }
-            }
+            }, TaskScheduler.Default);
         }
         if (rt.PlanToResume() is { } left)
         {
@@ -1186,6 +1212,12 @@ internal sealed partial class Repl(Runtime rt)
                 break;
             case "/loop":
                 LoopCommand(arg);
+                break;
+            case "/schedule":
+                Ui.Line(await rt.ScheduleCommandAsync(arg, ct));
+                break;
+            case "/agents":
+                Ui.Line(await rt.AgentsCommandAsync(arg, ct));
                 break;
             // The project's or the person's own /review command, when there is one, goes first (default: below).
             case "/review" when rt.Extensions.Expand(input) is null:

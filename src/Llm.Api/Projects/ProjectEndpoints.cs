@@ -333,14 +333,19 @@ public static class ProjectEndpoints
         var tasks = await db.ProjectTasks.AsNoTracking().Where(x => x.ProjectId == id).OrderBy(x => x.Done).ThenBy(x => x.CreatedAt).Take(MostTasks).ToListAsync(ct);
         var assignees = tasks.Select(t => t.AssigneeId).OfType<Guid>().Distinct().ToList();
         var assigneeNames = (await db.Users.AsNoTracking().Where(u => assignees.Contains(u.Id)).ToListAsync(ct)).ToDictionary(u => u.Id, Name);
+        // The chat or session that set a goal or a task: named and linked when the person may open it, else only said.
+        var seen = shown.ToDictionary(c => c.Id);
+        object? From(Guid? chat) => chat is not { } c ? null
+            : seen.TryGetValue(c, out var it) ? new { id = (Guid?)it.Id, title = (string?)it.Title, it.kind }
+            : new { id = (Guid?)null, title = (string?)null, kind = chats.FirstOrDefault(x => x.Id == c)?.Origin == CodeArenaSync.Origin ? "session" : "chat" };
         return Results.Ok(new
         {
             p.Id, p.Name, p.Description, p.Global, p.Status, p.StartsOn, p.DueOn, p.MonthlyBudget, p.AlertPercent, p.StopAtBudget, p.Tags, p.Brief, p.CreatedAt, p.UpdatedAt,
             role, ownerId = p.OwnerId, owner = owner is null ? null : Name(owner), isOwner = p.OwnerId == me.Id,
             members, repositories, items = things, chats = shown,
             otherChats = otherOwners.Select(o => new { person = otherNames.GetValueOrDefault(o.Key) ?? "(a former person)", count = o.Count() }),
-            goals = goals.Select(x => new { x.Id, x.Title, x.Description, x.Status, x.DueOn, x.DoneAt, x.Position, x.HumanHours }),
-            tasks = tasks.Select(t => new { t.Id, t.Title, t.GoalId, t.AssigneeId, assignee = t.AssigneeId is { } a ? assigneeNames.GetValueOrDefault(a) : null, t.Done, t.DoneAt, t.HumanHours, t.CreatedAt }),
+            goals = goals.Select(x => new { x.Id, x.Title, x.Description, x.Status, x.DueOn, x.DoneAt, x.Position, x.HumanHours, from = From(x.ChatId) }),
+            tasks = tasks.Select(t => new { t.Id, t.Title, t.GoalId, t.AssigneeId, assignee = t.AssigneeId is { } a ? assigneeNames.GetValueOrDefault(a) : null, t.Done, t.DoneAt, t.HumanHours, t.CreatedAt, from = From(t.ChatId) }),
         });
     }
 
@@ -742,20 +747,25 @@ public static class ProjectEndpoints
         return Results.Created($"/api/projects/{id}/goals/{goal.Id}", new { id = goal.Id });
     }
 
-    private static IResult? GoalProblem(ProjectGoalRequest body) =>
-        body.Title is { } t && t.Trim().Length is 0 or > 200 ? AuthEndpoints.Problem(400, "title", "A goal's title has 1 to 200 characters.")
-        : body.Description is { Length: > 2000 } ? AuthEndpoints.Problem(400, "description", "A goal's description has at most 2,000 characters.")
-        : body.Status is { } s && !ProjectGoal.States.Contains(s) ? AuthEndpoints.Problem(400, "status", "A goal is planned, doing, done or dropped.")
-        : body.DueOn is { Length: > 0 } d && !DateOnly.TryParse(d, CultureInfo.InvariantCulture, out _) ? AuthEndpoints.Problem(400, "date", "Dates are written 2026-12-31.")
-        : HoursProblem(body.HumanHours);
+    internal static IResult? GoalProblem(ProjectGoalRequest body) => GoalFault(body) is { } f ? AuthEndpoints.Problem(400, f.Code, f.Message) : null;
+
+    /// <summary>What is wrong with a goal as asked (its code and words); null: nothing.</summary>
+    internal static (string Code, string Message)? GoalFault(ProjectGoalRequest body) =>
+        body.Title is { } t && t.Trim().Length is 0 or > 200 ? ("title", "A goal's title has 1 to 200 characters.")
+        : body.Description is { Length: > 2000 } ? ("description", "A goal's description has at most 2,000 characters.")
+        : body.Status is { } s && !ProjectGoal.States.Contains(s) ? ("status", "A goal is planned, doing, done or dropped.")
+        : body.DueOn is { Length: > 0 } d && !DateOnly.TryParse(d, CultureInfo.InvariantCulture, out _) ? ("date", "Dates are written 2026-12-31.")
+        : HoursFault(body.HumanHours);
 
     /// <summary>The hours by hand: 0 to 100,000 (0 takes the estimate away).</summary>
-    private static IResult? HoursProblem(decimal? hours) =>
-        hours is < 0 or > 100_000 ? AuthEndpoints.Problem(400, "hours", "The hours by hand are 0 to 100,000 (0 takes the estimate away).") : null;
+    private static IResult? HoursProblem(decimal? hours) => HoursFault(hours) is { } f ? AuthEndpoints.Problem(400, f.Code, f.Message) : null;
+
+    private static (string Code, string Message)? HoursFault(decimal? hours) =>
+        hours is < 0 or > 100_000 ? ("hours", "The hours by hand are 0 to 100,000 (0 takes the estimate away).") : null;
 
     private static decimal? Hours(decimal hours) => hours == 0 ? null : Math.Round(hours, 2);
 
-    private static void Apply(ProjectGoal goal, ProjectGoalRequest body)
+    internal static void Apply(ProjectGoal goal, ProjectGoalRequest body)
     {
         if (body.Title is { } title)
         {
@@ -819,24 +829,28 @@ public static class ProjectEndpoints
         return await db.ProjectGoals.Where(x => x.Id == goalId && x.ProjectId == id).ExecuteDeleteAsync(ct) > 0 ? Results.NoContent() : Results.NotFound();
     }
 
-    private static async Task<IResult?> TaskProblemAsync(AppDbContext db, Guid id, ProjectTaskRequest body, CancellationToken ct)
+    internal static async Task<IResult?> TaskProblemAsync(AppDbContext db, Guid id, ProjectTaskRequest body, CancellationToken ct) =>
+        await TaskFaultAsync(db, id, body, ct) is { } f ? AuthEndpoints.Problem(400, f.Code, f.Message) : null;
+
+    /// <summary>What is wrong with a task as asked (its code and words); null: nothing.</summary>
+    internal static async Task<(string Code, string Message)?> TaskFaultAsync(AppDbContext db, Guid id, ProjectTaskRequest body, CancellationToken ct)
     {
         if (body.Title is { } t && t.Trim().Length is 0 or > 300)
         {
-            return AuthEndpoints.Problem(400, "title", "A task's title has 1 to 300 characters.");
+            return ("title", "A task's title has 1 to 300 characters.");
         }
         if (body.GoalId is { } g && g != Guid.Empty && !await db.ProjectGoals.AnyAsync(x => x.Id == g && x.ProjectId == id, ct))
         {
-            return AuthEndpoints.Problem(400, "goal", "That goal is not this project's.");
+            return ("goal", "That goal is not this project's.");
         }
         if (body.AssigneeId is { } a && a != Guid.Empty && !await db.Users.AnyAsync(u => u.Id == a, ct))
         {
-            return AuthEndpoints.Problem(400, "assignee", "That person is not there.");
+            return ("assignee", "That person is not there.");
         }
-        return HoursProblem(body.HumanHours);
+        return HoursFault(body.HumanHours);
     }
 
-    private static void Apply(ProjectTask task, ProjectTaskRequest body)
+    internal static void Apply(ProjectTask task, ProjectTaskRequest body)
     {
         if (body.Title is { } title)
         {

@@ -42,6 +42,8 @@ public sealed record ProjectorInfo(bool Vision, bool Audio, int? ProjectionDim, 
 public sealed record ModelProfile
 {
     public required string Kind { get; init; }
+    /// <summary>Every use it has here, beside its kind: a language model that a picture model reads its prompt with is its text encoder too.</summary>
+    public IReadOnlyList<ModelUse> Uses => ModelUses.Of(this);
     /// <summary>Why it cannot be added as a model, when it is not a language model.</summary>
     public string? Why { get; init; }
     /// <summary>Something to know, e.g. that the image generator uses it too.</summary>

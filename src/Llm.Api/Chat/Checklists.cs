@@ -182,6 +182,9 @@ public static class ChecklistEndpoints
         chat.MapDelete("", StopAsync);
         var arena = app.MapGroup("/api/code-arena").AllowAnonymous("Code Arena: the person's API key is checked on each call.");
         arena.MapGet("/checklists", ArenaListAsync);
+        arena.MapPost("/checklists", ArenaCreateAsync);
+        arena.MapPut("/checklists/{id:guid}", ArenaUpdateAsync);
+        arena.MapDelete("/checklists/{id:guid}", ArenaDeleteAsync);
         arena.MapGet("/chats/{id:guid}/checklist", ArenaRunAsync);
         arena.MapPut("/chats/{id:guid}/checklist", ArenaStartAsync);
         arena.MapPost("/chats/{id:guid}/checklist/tick", ArenaTickAsync);
@@ -198,14 +201,16 @@ public static class ChecklistEndpoints
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
         Results.Ok(await MineAsync(db, (await Me(p, users)).Id, ct));
 
-    private static async Task<IResult> CreateAsync(ChecklistRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> CreateAsync(ChecklistRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await CreateForAsync(body, (await Me(p, users)).Id, db, ct);
+
+    private static async Task<IResult> CreateForAsync(ChecklistRequest body, Guid me, AppDbContext db, CancellationToken ct)
     {
-        var me = await Me(p, users);
-        if (await db.Checklists.CountAsync(c => c.UserId == me.Id, ct) >= Checklist.MostPerPerson)
+        if (await db.Checklists.CountAsync(c => c.UserId == me, ct) >= Checklist.MostPerPerson)
         {
             return AuthEndpoints.Problem(409, "checklist", $"You have {Checklist.MostPerPerson} checklists: delete one you no longer use.");
         }
-        var list = new Checklist { UserId = me.Id, Name = "" };
+        var list = new Checklist { UserId = me, Name = "" };
         try
         {
             ChecklistBook.Apply(list, body);
@@ -219,10 +224,12 @@ public static class ChecklistEndpoints
         return Results.Created($"/api/checklists/{list.Id}", ChecklistBook.Shape(list));
     }
 
-    private static async Task<IResult> UpdateAsync(Guid id, ChecklistRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> UpdateAsync(Guid id, ChecklistRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await UpdateForAsync(id, body, (await Me(p, users)).Id, db, ct);
+
+    private static async Task<IResult> UpdateForAsync(Guid id, ChecklistRequest body, Guid me, AppDbContext db, CancellationToken ct)
     {
-        var me = await Me(p, users);
-        if (await db.Checklists.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, ct) is not { } list)
+        if (await db.Checklists.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me, ct) is not { } list)
         {
             return Results.NotFound();
         }
@@ -238,10 +245,30 @@ public static class ChecklistEndpoints
         return Results.Ok(ChecklistBook.Shape(list));
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        await DeleteForAsync(id, (await Me(p, users)).Id, db, ct);
+
+    private static async Task<IResult> DeleteForAsync(Guid id, Guid me, AppDbContext db, CancellationToken ct) =>
+        await db.Checklists.Where(c => c.Id == id && c.UserId == me).ExecuteDeleteAsync(ct) == 0 ? Results.NotFound() : Results.NoContent();
+
+    // Code Arena makes, changes and deletes the person's checklists too (its /checklist new, the IDE's form).
+
+    private static async Task<IResult> ArenaCreateAsync(ChecklistRequest body, HttpContext http, McpPeople people, AppDbContext db)
     {
-        var me = await Me(p, users);
-        return await db.Checklists.Where(c => c.Id == id && c.UserId == me.Id).ExecuteDeleteAsync(ct) == 0 ? Results.NotFound() : Results.NoContent();
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        return me is null ? refusal! : await CreateForAsync(body, me.Id, db, http.RequestAborted);
+    }
+
+    private static async Task<IResult> ArenaUpdateAsync(Guid id, ChecklistRequest body, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        return me is null ? refusal! : await UpdateForAsync(id, body, me.Id, db, http.RequestAborted);
+    }
+
+    private static async Task<IResult> ArenaDeleteAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        return me is null ? refusal! : await DeleteForAsync(id, me.Id, db, http.RequestAborted);
     }
 
     private static Task<bool> OwnsAsync(AppDbContext db, Guid chat, Guid person, CancellationToken ct) =>

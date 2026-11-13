@@ -40,6 +40,8 @@ internal static class SystemPrompt
         public Func<IReadOnlyList<(string Name, string Description)>> Skills { get; init; } = () => [];
         /// <summary>The checklist on in the session's chat, as the model reads it (empty: none).</summary>
         public Func<string> Checklist { get; init; } = () => "";
+        /// <summary>What Arena tells the model of the session's project plan (empty: in no project).</summary>
+        public Func<string> ProjectPlan { get; init; } = () => "";
         /// <summary>The folder's code index is on: code is found with code_search first.</summary>
         public bool CodeIndex { get; init; }
         /// <summary>The Arena assistant the session works as (its instructions and skills go in the prompt); null: none.</summary>
@@ -211,8 +213,8 @@ internal static class SystemPrompt
             sb.Append($"- Git branch: {branch}\n");
         }
         sb.Append(x.HasArenaTools()
-            ? "- Arena's tools are connected: web search and pages, Python in Arena's sandbox, the company's code index, its knowledge and plugins, and making pictures, video and speech, as the person. " +
-              "The pictures, sound and video they make are saved under .code-arena/media/ in the working directory: give the person their paths.\n"
+            ? "- Arena's tools are connected: web search and pages, the company's code index, its knowledge and plugins, and making pictures, as the person. " +
+              "The pictures they make are saved under .code-arena/media/ in the working directory: give the person their paths.\n"
             : "- Arena's tools are not available in this session: work with the other tools you are given.\n");
         foreach (var (server, text) in x.ServerInstructions().Where(s => s.Text.Trim().Length > 0))
         {
@@ -229,6 +231,10 @@ internal static class SystemPrompt
         if (x.Checklist() is { Length: > 0 } checklist)
         {
             sb.Append("\n# Checklist\n\n").Append(SessionChecklist.Instructions).Append("\n\n").Append(checklist).Append('\n');
+        }
+        if (x.ProjectPlan() is { Length: > 0 } plan)
+        {
+            sb.Append("\n# The project's plan\n\n").Append(plan.TrimEnd()).Append('\n');
         }
         return sb.ToString().TrimEnd();
     }
