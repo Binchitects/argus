@@ -12,6 +12,7 @@ import re
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tarfile
 import time
@@ -102,7 +103,15 @@ class Release:
         s.write("docs/deployment.md", "# Deploying\n", base=self.repo)
         s.write("docs/plan.md", "# Plans\n", base=self.repo)
         s.write("dist/code-arena-9.9.9-linux-x64.tar.gz", "code arena\n", base=self.repo)
-        s.write("packs/python.kpack", "a pack\n", base=self.repo)
+        # Packs: the newest of each name goes in (an older week's and a file that is no pack stay out).
+        for name, version in (("python.kpack", "1.0"), ("python-2026.11.12.kpack", "2026.11.12")):
+            (self.repo / "packs").mkdir(exist_ok=True)
+            con = sqlite3.connect(self.repo / "packs" / name)
+            con.execute("create table pack_meta (key text primary key, value text)")
+            con.executemany("insert into pack_meta values (?, ?)", [("source_name", "python"), ("pack_version", version)])
+            con.commit()
+            con.close()
+        s.write("packs/notes.kpack", "not a pack\n", base=self.repo)
         git(self.repo, "add", "-A", ":!deploy/untracked.txt", ":!deploy/docker-compose.override.yml")
         git(self.repo, "commit", "-q", "-m", "9.9.9")
         self.state = s.dir / "engine.json"
@@ -214,7 +223,7 @@ class BundleTests(unittest.TestCase):
         self.assertTrue((b / "docs" / "deployment.md").is_file())
         self.assertFalse((b / "docs" / "plan.md").exists())
         self.assertTrue((b / "code-arena" / "code-arena-9.9.9-linux-x64.tar.gz").is_file())
-        self.assertTrue((b / "packs" / "python.kpack").is_file())
+        self.assertEqual(["python-2026.11.12.kpack"], sorted(p.name for p in (b / "packs").iterdir()))
         known = (b / "known" / "5.2.0.sha256").read_text()
         self.assertIn("  config/dropped.yml\n", known)
         self.assertIn("  docker-compose.yml\n", known)
