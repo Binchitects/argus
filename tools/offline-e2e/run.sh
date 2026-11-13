@@ -143,12 +143,12 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   if old_features="$(git -C "$here/../.." show "v$OLD_VERSION:deploy/features" 2>/dev/null)"; then
     old_names="$(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' <<< "$old_features")"
     grep -qx argus <<< "$old_names" && ! grep -qx code-intel <<< "$old_names" && OLD_CODE_INTEL=argus
-    OLD_WITH="$(tr ',' '\n' <<< "$WITH" | sed "s/^code-intel\$/${OLD_CODE_INTEL:-code-intel}/" | grep -xF -f <(printf '%s\n' "$old_names") | paste -sd, -)"
+    OLD_WITH="$(tr ',' '\n' <<< "$WITH" | sed "s/^code-intel\$/${OLD_CODE_INTEL:-code-intel}/" | { grep -xF -f <(printf '%s\n' "$old_names") || true; } | paste -sd, -)"
   else
     fail "--upgrade-from: no tag v$OLD_VERSION here to read its features from"
   fi
   # Features the old release cannot install (a bug of its own, fixed since): left out of it, turned on by the upgrade.
-  [[ -n "$OLD_WITHOUT" ]] && OLD_WITH="$(tr ',' '\n' <<< "$OLD_WITH" | grep -vxF -f <(tr ',' '\n' <<< "$OLD_WITHOUT") | paste -sd, -)"
+  [[ -n "$OLD_WITHOUT" ]] && OLD_WITH="$(tr ',' '\n' <<< "$OLD_WITH" | { grep -vxF -f <(tr ',' '\n' <<< "$OLD_WITHOUT") || true; } | paste -sd, -)"
 fi
 NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^arena-\(.*\)-offline\.run$/\1/p')"
 
