@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Factory, FileUp, Plus, Trash2 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -17,7 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { areaTree, limits, plantAssetQuery, shown, plantQuery, plantSiteQuery, type PlantAsset, type PlantImported, type PlantKinds } from './plant-api'
+import { TimeChart } from '@/components/charts/time-chart'
+import { TimeWindow } from '@/components/app/time-window'
+import { resolveRange, type TimeRange } from '@/lib/time'
+import { areaTree, chartUnit, limits, plantAssetQuery, plantSeriesQuery, shown, trendSeries, type PlantPoint, plantQuery, plantSiteQuery, type PlantAsset, type PlantImported, type PlantKinds } from './plant-api'
 
 const POINTS_SHEET = 'area,asset,kind,point,unit,type,source,address,low,high\nLine 1,Pump 1,machine,Outlet temperature,°C,number,opcua,ns=2;s=P1.T,10,80'
 
@@ -413,6 +416,7 @@ function AssetList({ assets, chosen, onChoose }: { assets: PlantAsset[]; chosen:
 
 function AssetPanel({ id, may, onAddPoint, onDelete }: { id: string; may: boolean; onAddPoint: () => void; onDelete: (title: string, description: string, path: string) => void }) {
   const q = useQuery(plantAssetQuery(id))
+  const [trend, setTrend] = useState<string | null>(null)
   if (q.error) return <QueryError error={q.error} retry={() => q.refetch()} />
   if (!q.data) return <Skeleton className="h-40" />
   const { asset, points } = q.data
@@ -456,7 +460,9 @@ function AssetPanel({ id, may, onAddPoint, onDelete }: { id: string; may: boolea
                 {points.map((p) => (
                   <tr key={p.id} className="border-t">
                     <td className="py-1.5 pe-3">
-                      {p.name}
+                      <button type="button" aria-pressed={trend === p.id} className="text-start underline-offset-2 hover:underline aria-pressed:font-medium" onClick={() => setTrend(trend === p.id ? null : p.id)}>
+                        {p.name}
+                      </button>
                       {p.unit && <span className="text-muted-foreground"> ({p.unit})</span>}
                     </td>
                     <td className="py-1.5 pe-3 tabular-nums">
@@ -485,7 +491,54 @@ function AssetPanel({ id, may, onAddPoint, onDelete }: { id: string; may: boolea
             </table>
           </div>
         )}
+        {points.some((p) => p.id === trend) && <PointTrend point={points.find((p) => p.id === trend)!} />}
       </CardContent>
     </Card>
+  )
+}
+
+/** A point's values over a range: its average a bucket and the band from its lowest to its highest; a text point's last texts. */
+function PointTrend({ point }: { point: PlantPoint }) {
+  const [range, setRange] = useState<TimeRange>({ from: 'now-24h', to: 'now' })
+  // A range up to now moves on every 30 seconds; resolved once a move, so the query's key holds still between them.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (range.to !== 'now') return
+    const t = setInterval(() => setTick((n) => n + 1), 30_000)
+    return () => clearInterval(t)
+  }, [range.to])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tick moves "now" on
+  const { from, to } = useMemo(() => resolveRange(range), [range, tick])
+  const q = useQuery({ ...plantSeriesQuery(point.id, from, to), placeholderData: keepPreviousData })
+  const unit = chartUnit(point.unit)
+  const title = point.unit && !unit ? `${point.name} (${point.unit})` : point.name
+  return (
+    <section aria-label={`${point.name} over time`} className="mt-4 grid gap-2 border-t pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
+        <TimeWindow value={range} onChange={setRange} />
+      </div>
+      {q.error && <QueryError error={q.error} retry={() => q.refetch()} />}
+      {!q.data && !q.error && <Skeleton className="h-52" />}
+      {q.data?.texts &&
+        (q.data.texts.length ? (
+          <ol className="grid gap-1 text-sm">
+            {q.data.texts.map((t) => (
+              <li key={t.at} className="flex gap-3">
+                <time className="shrink-0 text-muted-foreground tabular-nums">{new Date(t.at).toLocaleString()}</time>
+                <span>{t.text}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing in this range.</p>
+        ))}
+      {q.data?.buckets &&
+        (q.data.buckets.length ? (
+          <TimeChart series={trendSeries(point.name, q.data)} unit={unit} height={220} label={`${title} over time`} from={from.getTime()} to={to.getTime()} />
+        ) : (
+          <p className="text-sm text-muted-foreground">No values in this range.</p>
+        ))}
+    </section>
   )
 }

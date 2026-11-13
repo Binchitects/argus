@@ -49,6 +49,9 @@ describe('plant', () => {
       'GET /api/plant': () => ({ json: { sites: [site], mayManage: false, kinds } }),
       'GET /api/plant/sites/s1': () => ({ json: { site, areas: [area('l1', 'Line 1')], assets: [asset('a1', 'Pump 1', 'l1'), asset('a2', 'Spare pump', null)] } }),
       'GET /api/plant/assets/a1': () => ({ json: { asset: asset('a1', 'Pump 1', 'l1'), points: [point] } }),
+      'GET /api/plant/points/p1/series': () => ({
+        json: { point: 'p1', from: '2026-11-12T10:00:00Z', to: '2026-11-13T10:00:00Z', bucketSeconds: 288, buckets: [{ at: '2026-11-13T09:00:00Z', avg: 21, min: 20, max: 22, last: 21.5, n: 4 }] },
+      }),
     })
     renderApp('/plant/s1')
     const nav = await screen.findByRole('navigation', { name: 'Areas and assets' })
@@ -58,6 +61,10 @@ describe('plant', () => {
     expect(await screen.findByText('Outlet temperature')).toBeInTheDocument()
     expect(screen.getByText('low 10 · high 80 °C')).toBeInTheDocument()
     expect(screen.getByText('21.4568 °C')).toBeInTheDocument()
+    // A point's name opens its trend: the last day, its values a bucket.
+    await userEvent.click(screen.getByRole('button', { name: 'Outlet temperature' }))
+    expect(await screen.findByRole('region', { name: 'Outlet temperature over time' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Outlet temperature over time' })).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /Import a sheet/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete Pump 1' })).not.toBeInTheDocument()
   })

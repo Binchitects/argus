@@ -144,3 +144,56 @@ export function shown(p: PlantPoint): string {
   }
   return `${Number(l.value.toPrecision(6))}${p.unit ? ` ${p.unit}` : ''}`
 }
+
+export interface PlantBucket {
+  at: string
+  avg: number | null
+  min: number | null
+  max: number | null
+  last: number | null
+  n: number
+}
+
+export interface PlantSeries {
+  point: string
+  from: string
+  to: string
+  bucketSeconds: number
+  buckets?: PlantBucket[]
+  texts?: { at: string; text: string | null }[]
+}
+
+export const plantSeriesQuery = (id: string, from: Date, to: Date, buckets = 300) => ({
+  queryKey: ['plant', 'series', id, from.toISOString(), to.toISOString(), buckets] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    api<PlantSeries>(`/api/plant/points/${id}/series?${new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), buckets: String(buckets) })}`, { signal }),
+})
+
+/** The chart's unit for a point's own (°C, W, kWh, %), or none: the unit is said in the chart's title then. */
+export function chartUnit(unit: string | null): string | undefined {
+  switch (unit?.trim()) {
+    case '°C':
+    case 'C':
+      return 'celsius'
+    case 'W':
+      return 'watt'
+    case 'kWh':
+      return 'kwatth'
+    case '%':
+      return 'percent'
+    default:
+      return undefined
+  }
+}
+
+/** A series as the time chart draws it: the average a bucket, with its lowest and highest as a band. */
+export function trendSeries(name: string, s: PlantSeries): { name: string; points: (number | null)[][]; range: number[][] }[] {
+  const b = s.buckets ?? []
+  return [
+    {
+      name,
+      points: b.map((x) => [Date.parse(x.at), x.avg]),
+      range: b.filter((x) => x.min != null && x.max != null).map((x) => [Date.parse(x.at), x.min!, x.max!]),
+    },
+  ]
+}
