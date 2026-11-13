@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <title>Arena</title>
-  <!-- The app's own icon for a phone's home screen: the owl in the form of an A within the safe circle, the background to the edges. -->
+  <!-- The app's own icon for a phone's home screen: the mark within the safe circle, the background to the edges. -->
   <defs>
     <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
       <stop offset="0" stop-color="#12304a"/>
@@ -10,10 +10,6 @@
       <stop offset="0" stop-color="#5eead4"/>
       <stop offset="0.55" stop-color="#14b8a6"/>
       <stop offset="1" stop-color="#0d8075"/>
-    </linearGradient>
-    <linearGradient id="wing" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0f766e"/>
-      <stop offset="1" stop-color="#0b5d56"/>
     </linearGradient>
     <linearGradient id="white" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
@@ -26,24 +22,18 @@
     </radialGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  <g transform="translate(512 512) scale(0.72) translate(-512 -520)">
-  <!-- The owl as the A: ear tufts at its top, its body widening to its feet, the opening between its legs. -->
-  <path d="M168 800 L428 196 Q436 176 452 190 L512 246 L572 190 Q588 176 596 196 L856 800 Q862 816 844 816 L716 816 Q700 816 692 802 L590 642 Q582 630 568 630 L456 630 Q442 630 434 642 L332 802 Q324 816 308 816 L180 816 Q162 816 168 800 Z" fill="url(#a)"/>
-  <!-- Its wings, folded down the A's legs. -->
-  <path d="M330 470 Q300 640 230 800 L300 800 Q372 660 392 520 Z" fill="url(#wing)" opacity="0.75"/>
-  <path d="M694 470 Q724 640 794 800 L724 800 Q652 660 632 520 Z" fill="url(#wing)" opacity="0.75"/>
-  <!-- Its face: two eyes side by side, the beak between them. -->
-  <circle cx="436" cy="388" r="84" fill="url(#white)"/>
-  <circle cx="588" cy="388" r="84" fill="url(#white)"/>
-  <circle cx="442" cy="392" r="50" fill="url(#iris)"/>
-  <circle cx="582" cy="392" r="50" fill="url(#iris)"/>
-  <circle cx="445" cy="394" r="24" fill="#0b1720"/>
-  <circle cx="579" cy="394" r="24" fill="#0b1720"/>
-  <circle cx="460" cy="376" r="10" fill="#ffffff"/>
-  <circle cx="594" cy="376" r="10" fill="#ffffff"/>
-  <path d="M512 470 L486 438 Q512 426 538 438 Z" fill="#f59e0b"/>
-  <!-- Its feet, at the foot of each leg. -->
-  <path d="M236 812 q-6 30 -22 40 M262 812 q0 32 0 44 M288 812 q6 30 22 40" fill="none" stroke="#f59e0b" stroke-width="22" stroke-linecap="round"/>
-  <path d="M736 812 q-6 30 -22 40 M762 812 q0 32 0 44 M788 812 q6 30 22 40" fill="none" stroke="#f59e0b" stroke-width="22" stroke-linecap="round"/>
+  <g transform="translate(512 512) scale(0.72) translate(-512 -497)">
+  <!-- The A. -->
+  <path d="M160 790 L428 238 Q446 204 482 204 L542 204 Q578 204 596 238 L864 790 L748 790 Q724 790 710 764 L512 352 L314 764 Q300 790 276 790 Z" fill="url(#a)"/>
+  <!-- Its eyes, side by side, the beak between them. -->
+  <circle cx="392" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="632" cy="556" r="132" fill="url(#white)"/>
+  <circle cx="400" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="624" cy="560" r="76" fill="url(#iris)"/>
+  <circle cx="404" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="620" cy="562" r="36" fill="#0b1720"/>
+  <circle cx="426" cy="534" r="15" fill="#ffffff"/>
+  <circle cx="642" cy="534" r="15" fill="#ffffff"/>
+  <path d="M512 640 L476 600 Q512 584 548 600 Z" fill="#f59e0b"/>
   </g>
 </svg>
