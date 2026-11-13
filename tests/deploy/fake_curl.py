@@ -47,7 +47,7 @@ def main() -> int:
         v = running("app")
         if v is None:
             return 7
-        print(json.dumps({"name": "Arena", "version": v}))
+        print(json.dumps({"name": "Arena", "version": v, "notice": {"title": "Before you use this service", "version": "1"}}))
         return 0
     if url.endswith("/admin/metrics"):
         v = running("code-intel")

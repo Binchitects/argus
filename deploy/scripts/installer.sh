@@ -689,7 +689,9 @@ ask_service() {   # ask_service TRAEFIK_HOST SERVICE_URL PATH [TOKEN] -> the ans
       python3 -c "$ASK_PY" "$inside$path" 2>/dev/null
   fi
 }
-app_version() { ask_service "$DOMAIN" http://app:8080 /api/info | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1; }
+# The app's own version: the top level's "version", never a nested object's (the sign-in notice has a version of its own).
+app_version() { ask_service "$DOMAIN" http://app:8080 /api/info | top_version; }
+top_version() { tr -d '\n' | sed -E ':a; s/:[[:space:]]*\{[^{}]*\}/:null/; ta' | sed -n -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' | head -n1; }
 # The code-intelligence service's address under DOMAIN: CODE_INTEL_HOST (an installation from before 8.0 keeps argus).
 code_intel_host() { local h; h="$(env_get CODE_INTEL_HOST)"; echo "${h:-code-intel}"; }
 code_intel_version() {
@@ -2764,13 +2766,20 @@ RB_FINISHED=0
 RECORD_FILES="deploy.sha256 MANIFEST kept"
 # The images the stack runs now, tagged so that a rollback finds them after the new ones load.
 keep_old_images() {
-  local ref id slug n=0
+  local ref id slug n=0 cref cid
   : > "$SNAP/IMAGES"
+  # The image each container runs, by the reference compose gave it: a tag may have moved since (a build of the next
+  # release on this host), and the rollback must bring back what ran, not what the tag names now.
+  local -A running=()
+  while IFS=$'\t' read -r cref cid; do [[ -n "$cref" && -n "$cid" ]] && running["$cref"]="${cid#sha256:}"; done < <(
+    E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | xargs -r "$ENGINE" inspect --format '{{.Config.Image}}{{"\t"}}{{.Image}}' 2>/dev/null)
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
-    id="$(image_id "$ref")"; [[ -n "$id" ]] || continue
+    # A reference with no tag is :latest: either spelling may be the one compose gave the container.
+    id="${running[$ref]:-${running[$ref:latest]:-${running[${ref%:latest}]:-}}}"
+    [[ -n "$id" ]] || id="$(image_id "$ref")"; [[ -n "$id" ]] || continue
     slug="$(printf '%s' "$FROM-$ref" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9._\n-' '-' | cut -c1-120)"
-    E tag "$ref" "$PROJECT-rollback:$slug" >/dev/null 2>&1 || die "tagging $ref for the rollback failed"
+    E tag "$id" "$PROJECT-rollback:$slug" >/dev/null 2>&1 || die "tagging $ref for the rollback failed"
     printf '%s\t%s\t%s\n' "$ref" "$id" "$PROJECT-rollback:$slug" >> "$SNAP/IMAGES"
     n=$((n + 1))
   done < <(dc config --images 2>/dev/null | sort -u)

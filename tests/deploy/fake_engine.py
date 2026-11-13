@@ -151,7 +151,9 @@ class Store:
         ref = norm(ref)
         if ref.startswith("sha256:") or len(ref.split(":")[0]) == 64:
             want = ref.split(":")[-1] if ref.startswith("sha256:") else ref.split(":")[0]
-            return want if want in self.s["images"].values() else None
+            # An image no tag names any more is still there while a container runs it, as the engine keeps it.
+            running = {c["image_id"] for c in self.s.get("containers", [])}
+            return want if want in self.s["images"].values() or want in running else None
         return None
 
     def origin(self, image_id: str) -> str:
@@ -297,6 +299,8 @@ def stateful(args: list[str]) -> int | None:
                 print(c.get("anon", ""))
             elif "com.docker.compose.service" in fmt:
                 print(f'{c["service"]}|/{c["name"]}|{c["state"]}|{health(c)}|sha256:{c["image_id"]}|{c["image_ref"]}')
+            elif "Config.Image" in fmt:
+                print(f'{c["image_ref"]}\tsha256:{c["image_id"]}')
             elif "working_dir" in fmt:
                 print(c["workdir"])
             else:
@@ -318,7 +322,8 @@ def stateful(args: list[str]) -> int | None:
             v = running_version(s, "app" if url.endswith("/api/info") else "code-intel")
             if v is None:
                 return 1
-            print(json.dumps({"name": "Arena", "version": v}) if url.endswith("/api/info") else f'code_intel_index_build_info{{version="{v}"}} 1')
+            # As the app: a sign-in notice of its own version beside the app's.
+            print(json.dumps({"name": "Arena", "version": v, "notice": {"title": "Before you use this service", "version": "1"}}) if url.endswith("/api/info") else f'code_intel_index_build_info{{version="{v}"}} 1')
             return 0
         if "stat -c %u:%g" in joined:
             vol = (mount(args, "/v") or "").split("_", 1)[-1]
@@ -527,6 +532,10 @@ def main() -> int:
     args = sys.argv[1:]
     with open(os.environ["FAKE_LOG"], "a") as log:
         log.write(json.dumps([os.path.basename(sys.argv[0])] + args) + "\n")
+    # The compose files each compose call read (COMPOSE_FILE as given, else .env's), for the tests that ask (FAKE_COMPOSE_LOG).
+    if args[:1] == ["compose"] and os.environ.get("FAKE_COMPOSE_LOG"):
+        with open(os.environ["FAKE_COMPOSE_LOG"], "a") as clog:
+            clog.write(json.dumps({"args": args, "files": os.environ.get("COMPOSE_FILE") or env_compose_file()}) + "\n")
     if not args:
         return 0
     # A load that takes FAKE_LOAD_SECONDS, as a big image's does (a run stopped while it loads), beside the others.

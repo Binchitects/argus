@@ -17,6 +17,40 @@ from datetime import datetime, timedelta
 from support import REPO, Sandbox
 
 
+class PitrRestoreTests(unittest.TestCase):
+    """A restore on a host with pitr.yml: Postgres restored without its WAL archiving, then pgBackRest's archive of the
+    cluster before kept beside and a stanza made for the new cluster."""
+
+    def setUp(self):
+        self.s = Sandbox()
+
+    def tearDown(self):
+        self.s.cleanup()
+
+    def test_The_restore_runs_without_pitr_and_pgBackRest_starts_again_on_a_new_stanza(self):
+        import gzip
+        s = self.s
+        s.write("pitr.yml", "services: {}\n")
+        s.write(".env", "DB_PASSWORD=x\nCOMPOSE_FILE=docker-compose.yml:pitr.yml\n")
+        s.write("backups/pgbackrest/archive/arena/16-1/x.zst", "the old cluster's WAL\n")
+        b = s.deploy / "backups" / "2026-11-13_000000"
+        b.mkdir(parents=True)
+        (b / "postgres.sql.gz").write_bytes(gzip.compress(b"-- a dump\n--\n-- PostgreSQL database cluster dump complete\n--\n"))
+        (b / "RESULT").write_text("ok\n")
+        import hashlib
+        (b / "SHA256SUMS").write_text(f"{hashlib.sha256((b / 'postgres.sql.gz').read_bytes()).hexdigest()}  postgres.sql.gz\n")
+        log = s.dir / "compose.jsonl"
+        r = s.run("backup.sh", "--restore", "--from", str(b), "--yes", extra={"FAKE_COMPOSE_LOG": str(log)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("restored without its WAL archiving", r.stdout)
+        ups = [json.loads(line)["files"] for line in log.read_text().splitlines() if '"up"' in line and '"postgres"' in line]
+        self.assertEqual(["docker-compose.yml", "docker-compose.yml:pitr.yml"], ups)
+        aside = [p.name for p in (s.deploy / "backups").iterdir() if p.name.startswith("pgbackrest-before-")]
+        self.assertEqual(1, len(aside))
+        self.assertTrue((s.deploy / "backups" / aside[0] / "archive" / "arena" / "16-1" / "x.zst").exists())
+        self.assertTrue(any("stanza-create" in c for c in s.calls()))
+
+
 class PruneTests(unittest.TestCase):
     def setUp(self):
         self.s = Sandbox()

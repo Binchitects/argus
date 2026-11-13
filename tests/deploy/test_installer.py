@@ -1039,6 +1039,21 @@ class InstallerTests(unittest.TestCase):
         recreated = [c for c in self.r.calls() if c[1:2] == ["compose"] and "--force-recreate" in c]
         self.assertEqual([c[-1] for c in recreated], ["web"])
 
+    def test_A_rollback_brings_back_the_image_each_container_ran_though_its_tag_moved_and_the_notice_is_no_version(self):
+        self.old_install()
+        old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
+        # The next release built on this host: arena-app names its image now, while the container still runs the old one.
+        store = self.r.store()
+        app_ref = next(k for k in store["images"] if k.split(":")[0].endswith("arena-app") and store["images"][k] == old_app)
+        store["images"][app_ref] = next(c for c in store["containers"] if c["service"] == "web")["image_id"]
+        self.r.state.write_text(json.dumps(store))
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_UNHEALTHY": "arena-app:9.9.9"})
+        self.assertEqual(r.returncode, 4, self.output(r))
+        self.assertIn("Rolled back: 5.2.0 runs again", r.stdout)
+        self.assertEqual(old_app, next(c for c in self.containers() if c["service"] == "app")["image_id"])
+        # The app's answer carries a sign-in notice with "version": "1": the app's own version is read, not the notice's.
+        self.assertNotIn("it says 1", r.stdout)
+
     def test_A_failed_upgrade_rolls_back_files_images_and_data(self):
         deploy = self.old_install()
         old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]

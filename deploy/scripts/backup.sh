@@ -392,6 +392,15 @@ if [[ $ACTION == restore ]]; then
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
     say "==> the databases"
     "$ENGINE" run --rm --pull never --network none --label arena.helper=1 -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
+    # With pitr.yml, Postgres archives its WAL through pgBackRest, whose stanza is the old cluster's: a restore makes a new
+    # one, pgBackRest refuses its WAL, and its archiver brought Postgres down half way through. Restored without pitr.yml
+    # (the same Postgres and data; no archiving), then pgBackRest starts again with a stanza of the new cluster's.
+    CF_NOW="${COMPOSE_FILE:-$(env_get COMPOSE_FILE)}"
+    PITR=0; [[ ":$CF_NOW:" == *":pitr.yml:"* ]] && PITR=1
+    if [[ $PITR -eq 1 ]]; then
+      COMPOSE_FILE="$(tr ':' '\n' <<<"$CF_NOW" | grep -vx 'pitr.yml' | paste -sd: -)"; export COMPOSE_FILE
+      say "  pitr.yml: restored without its WAL archiving, which starts again afterwards"
+    fi
     "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
     for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d postgres >/dev/null 2>&1 && break; sleep 2; done
@@ -400,6 +409,24 @@ if [[ $ACTION == restore ]]; then
       || say "  psql reported errors; see $FROM/.restore-psql.log"
     "$ENGINE" compose stop postgres >/dev/null 2>&1
     say "  restored  postgres (people, chats, keys, credit, the ledger)"
+    if [[ $PITR -eq 1 ]]; then
+      # The archive of the cluster before is kept beside, never removed: its backups restore that cluster.
+      repo="$BACKUP_DIR/pgbackrest"
+      if [[ -d "$repo" ]] && [[ -n "$(ls -A "$repo" 2>/dev/null)" ]]; then
+        aside="$repo-before-$(date +%Y%m%d-%H%M%S)"
+        mv "$repo" "$aside" && mkdir -p "$repo" && say "  pgBackRest's archive of the cluster before: $aside"
+      fi
+      COMPOSE_FILE="$CF_NOW"; export COMPOSE_FILE
+      "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start with pitr.yml"
+      for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d postgres >/dev/null 2>&1 && break; sleep 2; done
+      "$ENGINE" compose exec -T -u root postgres chown postgres:postgres /pgbackrest >/dev/null 2>&1
+      if "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena stanza-create >/dev/null 2>&1; then
+        say "  pgBackRest: a new stanza for the restored cluster (take a full backup: backup.sh --pitr full)"
+      else
+        say "  pgBackRest: the stanza could not be made; run backup.sh --pitr full once the stack runs"
+      fi
+      "$ENGINE" compose stop postgres >/dev/null 2>&1
+    fi
   fi
   say ""; say "Done. Start the stack: $ENGINE compose up -d"
   exit 0
