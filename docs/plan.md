@@ -58,6 +58,23 @@ pypi.org through an HTTP proxy (`arenactl --proxy`).
 Code Arena on a real Windows machine: no console window, the log beside the
 program, and Edge or Chrome 109.
 
+## v8.1 (asked 2026-11-13)
+
+1. **Context stretch on every engine**: RoPE scaling (YaRN and the rest) on vLLM, SGLang, LMDeploy and Strata, as
+   llama.cpp has it.
+2. **Where the time goes**: how long the model took, the tools, and the person, on each message, each session, in
+   total, in Accounting and on the dashboards.
+3. **Accounting and project metrics live**: both update as requests are booked, not on a refresh.
+4. **Goals and tasks from the sessions**: a session sets its project's goals and tasks and keeps them up to date.
+5. **Runs until the goal**: in Code Arena and the chat, an answer cut at its longest length is continued by itself,
+   until the goal is met, without the person having to ask.
+6. **Every kind of model**: a model that does more than chat (pictures from a text encoder's model, and the rest:
+   pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF) is recognised for all it does, after research into the kinds.
+7. **The system's token capacity live**: the Stack Performance dashboard shows how many tokens a second the system
+   can make now and makes, in numbers that read right.
+8. **A test bench under Models**: a model's capability (what it answers well) and capacity (how much at once) tested.
+9. **Chat sync between Code Arena and the Arena that never misses**.
+
 ## Next
 
 1. **Farzan Graph's code graphs.** Who calls a method, what implements an interface,

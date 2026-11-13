@@ -126,6 +126,12 @@ owl for the wise one, and Code Arena installed as an application everywhere.
 
 ### :bug: Bugs fixed
 
+- Upgrades, from what upgrading this release's own host from 7.10.1 showed: the app's version is read from its answer's
+  top level (a sign-in notice has a version of its own, and an upgrade that had worked was rolled back); a rollback
+  brings back the image each container ran, not the one its tag names after a build on the host; a 7.x
+  `COMPOSE_FILE` naming `ha.yml` no longer stops the preflight or compose; the stack's data kept inside `deploy/` is
+  never walked or copied as deploy's files; and a restore on a host with `pitr.yml` runs without WAL archiving, then
+  makes pgBackRest a stanza for the new cluster (its archiver had brought Postgres down mid-restore).
 - The security pack read no weakness of CWE 5.0 (MITRE's new schema): the
   parser takes the namespace the file names, and stops on a catalog read as
   empty.
