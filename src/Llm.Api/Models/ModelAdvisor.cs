@@ -291,7 +291,6 @@ public static class ModelAdvisor
             No(m.Placement == "manual", "placement", "placement by hand (it holds every layer on its GPUs)");
             No(m.CpuMoe > 0, "cpuMoe", "experts in RAM");
             No(m.Ubatch is not null, "ubatch", "prompt step to set");
-            No(m.Yarn, "yarn", "YaRN switch here (its config says how far it stretches)");
             No(m.ExtraPreset is not null, "extra", "llama.cpp preset lines");
             No(m.Projector is not null, "projector", "projector file (a model that sees has it in its folder)");
             No(m.Mtp, "mtp", "llama.cpp's MTP switch: choose speculative decoding (mtp or eagle3) instead");

@@ -14,10 +14,13 @@ namespace Llm.Api.Models;
 /// <param name="Approximate">An attention vLLM sizes in its own way (compressed, sparse): read vLLM's reported capacity once it runs.</param>
 /// <param name="GgufParts">A GGUF file's parts (1: one file); 0: a snapshot.</param>
 /// <param name="Checkpoint">The precision a snapshot's weights are stored at (NVFP4, MXFP4, FP8, BF16...); null for a GGUF file.</param>
+/// <param name="CanStretch">Its context can be stretched past the one it was trained for with YaRN: it has rotary positions,
+/// full attention, and no scaling of its own already (rope_scaling, rope_parameters).</param>
 public sealed record VllmProfile(
     string? Architecture, string? ModelType, int Layers, int FullLayers, int SlidingLayers, int LinearLayers, int CompressedLayers,
     int AttentionHeads, int KvHeads, int HeadDim, int? SlidingWindow, int TrainedContext, long WeightBytes, long KvPerToken, long StatePerSequence,
-    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0, CheckpointPrecision? Checkpoint = null);
+    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0, CheckpointPrecision? Checkpoint = null,
+    bool CanStretch = false);
 
 /// <summary>
 /// The vLLM counterpart of <see cref="ModelAdvisor"/>: which GPUs and tensor parallel size a model takes on this machine
@@ -128,7 +131,7 @@ public static class VllmAdvisor
         var windowed = ModelProfiler.KvElementsPerToken(w.KvHeads, w.Sliding, w.KeyLength, w.ValueLength, w.MlaWidth, fullOnly: false) - perToken;
         return new VllmProfile(p.Architecture, p.Architecture, p.Layers ?? w.KvHeads.Length, full, sliding, w.KvHeads.Count(k => k == 0), 0,
             Math.Max(1, w.Heads), Math.Max(1, w.MaxKvHeads), w.KeyLength, p.SlidingWindow, p.TrainedContext ?? 4096, p.WeightBytes, perToken,
-            (windowed * (p.SlidingWindow ?? 0)) + p.RecurrentBytesPerSlot, p.Experts?.Count, 0, false, p.Quant, p.Approximate, Math.Max(1, parts));
+            (windowed * (p.SlidingWindow ?? 0)) + p.RecurrentBytesPerSlot, p.Experts?.Count, 0, false, p.Quant, p.Approximate, Math.Max(1, parts), CanStretch: p.CanStretch);
     }
 
     /// <summary>A vLLM or SGLang model's weights in bytes: its snapshot's, or its GGUF file's; 0 when it is neither.</summary>
@@ -224,9 +227,16 @@ public static class VllmAdvisor
         var experts = Int(t["num_experts"] ?? t["num_local_experts"] ?? t["n_routed_experts"] ?? config["num_experts"]);
         var mtp = Get("mtp_num_hidden_layers", Get("num_nextn_predict_layers"));
         var q = (config["quantization_config"] ?? t["quantization_config"])?["quant_method"]?.GetValue<string>();
+        // Stretched already: its config scales its positions itself (transformers' rope_scaling, or rope_parameters from v5),
+        // with anything but the plain ("default") kind. With rotary positions (rope_theta, or the parameters) and full attention, YaRN can.
+        static string? Kind(JsonNode? n) => n is JsonObject o ? (o["rope_type"] ?? o["type"])?.GetValue<string>() : null;
+        var scaled = Kind(t["rope_scaling"] ?? config["rope_scaling"]) is { } st && st != "default"
+            || Kind(t["rope_parameters"] ?? config["rope_parameters"]) is { } pt && pt != "default";
+        var rotary = (t["rope_theta"] ?? config["rope_theta"] ?? t["rope_parameters"] ?? config["rope_parameters"]) is not null;
         return new VllmProfile((config["architectures"] as JsonArray)?.FirstOrDefault()?.GetValue<string>(), (t["model_type"] ?? config["model_type"])?.GetValue<string>(),
             layers, full, sliding, linear, compressed, heads, kvHeads, headDim, window > 0 ? window : null, Get("max_position_embeddings", 32768),
-            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate, Checkpoint: Precision.Of(config));
+            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate, Checkpoint: Precision.Of(config),
+            CanStretch: rotary && !scaled && full + compressed > 0);
     }
 
     /// <summary>Bytes an element of the cache takes for vLLM's --kv-cache-dtype.</summary>
@@ -331,7 +341,10 @@ public static class VllmAdvisor
     }
 
     /// <summary>The token cache one person's whole context takes, and the state their answer keeps.</summary>
-    public static long PersonCache(VllmProfile p, int context, string kvType) => ((long)Math.Min(context, p.TrainedContext) * PerToken(p, kvType)) + p.StatePerSequence;
+    public static long PersonCache(VllmProfile p, int context, string kvType) => ((long)Math.Min(context, p.TrainedContext * ModelAdvisor.StretchFactor) * PerToken(p, kvType)) + p.StatePerSequence;
+
+    /// <summary>The longest context a model may have here: the one it was trained for, or with YaRN on (one that can stretch) four times it.</summary>
+    public static int MostContext(VllmProfile p, LocalModel m) => m.Yarn && p.CanStretch ? p.TrainedContext * ModelAdvisor.StretchFactor : p.TrainedContext;
 
     /// <summary>
     /// The tokens a conversation usually holds (its prompt, files and answers so far), which people at once are counted at:
@@ -440,8 +453,9 @@ public static class VllmAdvisor
         var utilization = m.GpuMemoryUtilization ?? DefaultUtilization;
         var replicas = Math.Max(1, m.Replicas);
         var trained = p.TrainedContext;
+        var most = MostContext(p, m);
         var ctxMin = Math.Min(4096, trained);
-        var context = Math.Clamp(m.Context, ctxMin, trained);
+        var context = Math.Clamp(m.Context, ctxMin, most);
         var profile = new ModelProfile
         {
             Kind = ModelKind.Language, Architecture = p.Architecture, Name = Path.GetFileName(m.File), Quant = p.Quantization, Structure = p.Experts is > 0 ? "moe" : "dense",
@@ -451,11 +465,20 @@ public static class VllmAdvisor
             Approximate = p.Approximate, Thinking = true, Tools = true,
         };
         // Each request may hold the whole context (--max-model-len), its answer included: the answers at once share the cache, not the window.
-        var limits = new ModelLimits(new Bounds(ctxMin, trained), ModelAdvisor.OutputBounds(context),
-            new Bounds(1, 1024), new Bounds(0, 0), null, new Bounds(1, 8), ModelAdvisor.VllmCacheTypes, [], p.MtpLayers > 0, false, [], []);
+        // YaRN where its engine takes it (vLLM, SGLang, LMDeploy; not Strata) and the model can stretch.
+        var stretches = kind.Kind != EngineKinds.Strata && p.CanStretch;
+        var limits = new ModelLimits(new Bounds(ctxMin, most), ModelAdvisor.OutputBounds(context),
+            new Bounds(1, 1024), new Bounds(0, 0), null, new Bounds(1, 8), ModelAdvisor.VllmCacheTypes, [], p.MtpLayers > 0, stretches, [], []);
         if (m.Context < limits.Context.Min || m.Context > limits.Context.Max)
         {
-            problems.Add(new("context", string.Create(inv, $"The context is {limits.Context.Min:N0} to {limits.Context.Max:N0} tokens for this model (its config's longest)."), true));
+            problems.Add(new("context", m.Context > trained && !m.Yarn && stretches
+                ? string.Create(inv, $"It was trained for {trained:N0} tokens of context. Stretch it with YaRN (up to {trained * ModelAdvisor.StretchFactor:N0}), or choose at most {trained:N0}.")
+                : string.Create(inv, $"The context is {limits.Context.Min:N0} to {limits.Context.Max:N0} tokens for this model (its config's longest{(m.Yarn ? ", stretched four times with YaRN" : "")})."), true));
+        }
+        if (m.Yarn && !stretches)
+        {
+            problems.Add(new("yarn", kind.Kind == EngineKinds.Strata ? "Strata cannot stretch a context with YaRN: choose at most the trained one."
+                : "This model's context cannot be stretched with YaRN (its config scales its positions already, or it has no rotary positions).", true));
         }
         if (m.MaxOutput is { } o && (o < limits.MaxOutput.Min || o > limits.MaxOutput.Max))
         {

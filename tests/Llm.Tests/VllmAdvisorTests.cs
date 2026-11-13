@@ -22,6 +22,52 @@ public sealed class VllmAdvisorTests
         new() { Name = name, File = "hf/x/" + name + "@r", EngineKind = EngineKinds.Vllm, KvType = "fp8", Context = context, Devices = devices, Replicas = replicas, Parallel = parallel };
 
     [Fact]
+    public void A_context_past_the_trained_one_is_stretched_with_YaRN_on_vLLM_SGLang_and_LMDeploy_never_Strata_nor_a_model_scaled_already()
+    {
+        // A config with rotary positions, full attention and no scaling of its own: it can stretch, up to four times.
+        var plain = VllmAdvisor.Profile(JsonNode.Parse("""{"num_hidden_layers":4,"num_attention_heads":8,"num_key_value_heads":2,"head_dim":64,"max_position_embeddings":32768,"rope_theta":1000000}""")!.AsObject(), GiB);
+        Assert.True(plain.CanStretch);
+        // One that scales its positions itself already (YaRN in rope_scaling, or transformers 5's rope_parameters) cannot.
+        Assert.False(VllmAdvisor.Profile(JsonNode.Parse("""{"num_hidden_layers":4,"num_attention_heads":8,"head_dim":64,"max_position_embeddings":131072,"rope_theta":1e6,"rope_scaling":{"rope_type":"yarn","factor":4.0}}""")!.AsObject(), GiB).CanStretch);
+        Assert.False(VllmAdvisor.Profile(JsonNode.Parse("""{"num_hidden_layers":4,"num_attention_heads":8,"head_dim":64,"max_position_embeddings":32768,"rope_parameters":{"rope_type":"yarn","rope_theta":1e6}}""")!.AsObject(), GiB).CanStretch);
+        Assert.True(VllmAdvisor.Profile(JsonNode.Parse("""{"num_hidden_layers":4,"num_attention_heads":8,"head_dim":64,"max_position_embeddings":32768,"rope_parameters":{"rope_type":"default","rope_theta":1e6}}""")!.AsObject(), GiB).CanStretch);
+
+        var hw = FakeHardware.Four96();
+        LocalModel At(string kind, int context, bool yarn)
+        {
+            var m = Model("m", context, "0", parallel: 1);
+            (m.EngineKind, m.Yarn) = (kind, yarn);
+            return m;
+        }
+        // Past its training without YaRN: refused, saying how far YaRN takes it; with it, up to four times.
+        var refused = Assert.Single(VllmAdvisor.Advise(At(EngineKinds.Vllm, 65536, false), plain, hw).Problems, p => p.Field == "context");
+        Assert.Contains("Stretch it with YaRN (up to 131,072)", refused.Message, StringComparison.Ordinal);
+        var stretched = VllmAdvisor.Advise(At(EngineKinds.Vllm, 131072, true), plain, hw);
+        Assert.DoesNotContain(stretched.Problems, p => p.Field is "context" or "yarn");
+        Assert.True(stretched.Limits!.Yarn);
+        Assert.Equal(131072, stretched.Limits.Context.Max);
+        Assert.Contains(VllmAdvisor.Advise(At(EngineKinds.Vllm, 262144, true), plain, hw).Problems, p => p.Field == "context");
+        // Strata takes no rope settings.
+        var strata = VllmAdvisor.Advise(At(EngineKinds.Strata, 32768, true), plain, hw);
+        Assert.Contains(strata.Problems, p => p.Field == "yarn" && p.Message.StartsWith("Strata cannot stretch", StringComparison.Ordinal));
+
+        // The engines' own ways: vLLM's --hf-overrides, SGLang's --json-model-override-args, LMDeploy's --rope-scaling-factor;
+        // the factor the context over the trained one, rounded up.
+        var vllm = ModelCatalog.ServerArgs(At(EngineKinds.Vllm, 100000, true), "/library", 1, trained: 32768);
+        var over = JsonNode.Parse(vllm[vllm.ToList().IndexOf("--hf-overrides") + 1])!;
+        Assert.Equal(("yarn", 3.06, 32768, 100000), (over["rope_scaling"]!["rope_type"]!.GetValue<string>(), over["rope_scaling"]!["factor"]!.GetValue<double>(),
+            over["rope_scaling"]!["original_max_position_embeddings"]!.GetValue<int>(), over["max_position_embeddings"]!.GetValue<int>()));
+        var sglang = ModelCatalog.ServerArgs(At(EngineKinds.Sglang, 100000, true), "/library", 1, trained: 32768);
+        Assert.Equal("yarn", JsonNode.Parse(sglang[sglang.ToList().IndexOf("--json-model-override-args") + 1])!["rope_scaling"]!["rope_type"]!.GetValue<string>());
+        var lmdeploy = ModelCatalog.ServerArgs(At(EngineKinds.Lmdeploy, 100000, true), "/library", 1, trained: 32768);
+        Assert.Equal("3.06", lmdeploy[lmdeploy.ToList().IndexOf("--rope-scaling-factor") + 1]);
+        // Within its training, or YaRN off: nothing.
+        Assert.DoesNotContain("--hf-overrides", ModelCatalog.ServerArgs(At(EngineKinds.Vllm, 32768, true), "/library", 1, trained: 32768));
+        Assert.DoesNotContain("--hf-overrides", ModelCatalog.ServerArgs(At(EngineKinds.Vllm, 100000, false), "/library", 1, trained: 32768));
+        Assert.DoesNotContain("--rope-scaling-factor", ModelCatalog.ServerArgs(At(EngineKinds.Strata, 100000, true), "/library", 1, trained: 32768));
+    }
+
+    [Fact]
     public void Each_config_says_its_layers_heads_and_cache_per_token()
     {
         var flash = Load("Qwen3.8-Flash-Next-FP8");

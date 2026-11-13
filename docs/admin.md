@@ -817,7 +817,7 @@ full the models kept loaded would make it.
     loaded again if it was, and its card says why (`model.move_failed`); **Dismiss**
     puts that away, and **Edit** tries again.
   What only its old engine has is not carried over: from llama.cpp, layers by hand,
-  experts in RAM, its prompt step, YaRN, preset lines, its MTP and draft (the cache
+  experts in RAM, its prompt step, preset lines, its MTP and draft (the cache
   type becomes fp8 and people at once 16, on the GPUs proposed for this machine,
   unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
   quantisation, speculative decoding and the cache's tiers (the cache type becomes
@@ -931,7 +931,11 @@ full the models kept loaded would make it.
   incomplete. A saved model keeps its kind when edited.
 - **The form asks what that kind of model has, within its limits**, and shows
   them: the context from 4,096 to what it was trained for (up to 4× with YaRN,
-  when its file does not stretch it already); the longest answer, at most three
+  when its file or config does not stretch it already: on llama.cpp by its
+  presets, on vLLM by `--hf-overrides`, on SGLang by
+  `--json-model-override-args`, both a YaRN `rope_scaling` from the trained
+  context, on LMDeploy by `--rope-scaling-factor`; Strata takes no rope
+  settings, so there it stays at the trained context); the longest answer, at most three
   quarters of what one conversation holds (the context per person, below), so a client that keeps the whole longest answer free (Claude Code,
   opencode) still has a quarter for its prompt (1,024 tokens at least), and half
   of it when left empty; the cache types its attention heads can take (a

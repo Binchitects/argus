@@ -920,7 +920,7 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
     /// choice, else its family's (<paramref name="family"/>, else from its name; <see cref="EngineParsers"/>): with a tool-call parser,
     /// its calls come back as tool_calls (--enable-auto-tool-choice), and with a reasoning parser its thinking as the answer's reasoning.
     /// </summary>
-    public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
+    public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp, ParserFamily? family = null, int? trained = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var root = library.TrimEnd('/');
@@ -940,6 +940,10 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
         if (m.Sleep)
         {
             args.Add("--enable-sleep-mode");
+        }
+        if (Stretch(m, trained) is { } stretch)
+        {
+            args.AddRange(["--hf-overrides", stretch.Config.ToJsonString()]);
         }
         var (tool, reasoning) = EngineParsers.For(m, family ?? EngineParsers.FamilyOf(m, null));
         if (tool is not null)
@@ -994,7 +998,7 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
     /// process (<see cref="VllmEntries"/>). Its tool-call and reasoning parsers as vLLM's, by SGLang's names. Never a key, a host
     /// or a port: the supervisor owns those.
     /// </summary>
-    public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
+    public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp, ParserFamily? family = null, int? trained = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var root = library.TrimEnd('/');
@@ -1016,6 +1020,11 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
         if (m.Sleep)
         {
             args.Add("--enable-memory-saver");
+        }
+        // Its launcher adds what a GGUF file needs to the same overrides (services/sglang/serve.py).
+        if (Stretch(m, trained) is { } stretch)
+        {
+            args.AddRange(["--json-model-override-args", stretch.Config.ToJsonString()]);
         }
         Parsers(args, m, family);
         if (m.SpecDecode is "mtp" or "eagle3")
@@ -1053,7 +1062,7 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
     /// tool-call and reasoning parsers as vLLM's, by LMDeploy's names (gpt-oss it reads by its architecture, with no flag).
     /// Its launcher (services/lmdeploy/serve.py) names the model, host, port and key.
     /// </summary>
-    public static IReadOnlyList<string> LmdeployArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
+    public static IReadOnlyList<string> LmdeployArgs(LocalModel m, string library, int tp, ParserFamily? family = null, int? trained = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var args = new List<string>
@@ -1066,6 +1075,10 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
         if (m.KvType.StartsWith("fp8", StringComparison.Ordinal))
         {
             args.AddRange(["--quant-policy", "8"]);
+        }
+        if (Stretch(m, trained) is { } stretch)
+        {
+            args.AddRange(["--rope-scaling-factor", stretch.Factor.ToString("0.##", inv)]);
         }
         Parsers(args, m, family);
         return args;
@@ -1097,14 +1110,35 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
         "--parallel", Math.Clamp(m.Parallel, 1, 8).ToString(CultureInfo.InvariantCulture), "--kv", m.KvType.StartsWith("fp8", StringComparison.Ordinal) ? "int8" : "fp16",
     ];
 
-    /// <summary>A model's server's arguments, by its kind: vLLM's, SGLang's, LMDeploy's or Strata's; its parsers by its family.</summary>
-    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp, ParserFamily? family = null) => m.EngineKind switch
+    /// <summary>A model's server's arguments, by its kind: vLLM's, SGLang's, LMDeploy's or Strata's; its parsers by its family.
+    /// <paramref name="trained"/>: the context it was trained for, when YaRN stretches it past that (<see cref="Stretch"/>).</summary>
+    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp, ParserFamily? family = null, int? trained = null) => m.EngineKind switch
     {
-        EngineKinds.Sglang => SglangArgs(m, library, tp, family),
-        EngineKinds.Lmdeploy => LmdeployArgs(m, library, tp, family),
+        EngineKinds.Sglang => SglangArgs(m, library, tp, family, trained),
+        EngineKinds.Lmdeploy => LmdeployArgs(m, library, tp, family, trained),
         EngineKinds.Strata => StrataArgs(m, library),
-        _ => VllmArgs(m, library, tp, family),
+        _ => VllmArgs(m, library, tp, family, trained),
     };
+
+    /// <summary>
+    /// The context stretched past the one it was trained for (<paramref name="trained"/>), with YaRN: its factor (the context
+    /// over the trained one, rounded up to two places) and the model config's override, as vLLM (--hf-overrides) and SGLang
+    /// (--json-model-override-args) take it: rope_scaling of type yarn and the longer max_position_embeddings. Null when
+    /// YaRN is off, or the context is not past the trained one.
+    /// </summary>
+    public static (double Factor, JsonObject Config)? Stretch(LocalModel m, int? trained)
+    {
+        if (!m.Yarn || trained is not > 0 || m.Context <= trained)
+        {
+            return null;
+        }
+        var factor = Math.Ceiling(m.Context * 100.0 / trained.Value) / 100;
+        return (factor, new JsonObject
+        {
+            ["rope_scaling"] = new JsonObject { ["rope_type"] = "yarn", ["factor"] = factor, ["original_max_position_embeddings"] = trained.Value },
+            ["max_position_embeddings"] = m.Context,
+        });
+    }
 
     /// <summary>
     /// LMCache's configuration for a model's copy (LMCACHE_CONFIG_FILE): its RAM tier, its disk tier under /kvcache (the
@@ -1128,7 +1162,7 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
     }
 
     public static IReadOnlyList<VllmEntry> VllmEntries(LocalModel m, string library, IReadOnlyDictionary<string, int> ports, ISet<int> taken, int firstPort,
-        string? presets = null, ParserFamily? family = null)
+        string? presets = null, ParserFamily? family = null, int? trained = null)
     {
         var replicas = Math.Max(1, m.Replicas);
         var gpus = Hardware.ParseDevices(m.Devices) ?? [];
@@ -1156,7 +1190,7 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
             {
                 env["SGLANG_MAX_NEW_TOKENS_LIMIT"] = OutputLimit(m).ToString(CultureInfo.InvariantCulture);
             }
-            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count), family), Math.Max(1, m.Parallel),
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count), family, trained), Math.Max(1, m.Parallel),
                 env.Count > 0 ? env : null));
         }
         return entries;
@@ -1190,9 +1224,10 @@ public sealed partial class ModelCatalog(AppDbContext db, IOptions<EngineOptions
             var entries = new List<VllmEntry>();
             foreach (var m in mine.OrderBy(m => ports.ContainsKey(m.Replicas > 1 ? m.Name + "@0" : m.Name) ? 0 : 1))
             {
-                // Its parsers by its family: its config's architecture and model type, and its name.
+                // Its parsers by its family: its config's architecture and model type, and its name; its trained context, which YaRN stretches.
+                var profile = VllmAdvisor.Of(library, m.File);
                 var made = VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort, $"/presets/{backend.Name}",
-                    EngineParsers.FamilyOf(m, EngineParsers.Sets(m.EngineKind) ? VllmAdvisor.Of(library, m.File) : null));
+                    EngineParsers.FamilyOf(m, EngineParsers.Sets(m.EngineKind) ? profile : null), profile is { CanStretch: true } ? profile.TrainedContext : null);
                 entries.AddRange(made);
                 if (m.KvTier == "lmcache")
                 {
