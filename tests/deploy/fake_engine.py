@@ -352,11 +352,22 @@ def merge_profiles(have: list[str], text: str) -> list[str]:
     return new if "!override" in text.split("profiles:", 1)[1] else have + [p for p in new if p not in have]
 
 
+def env_compose_file() -> str:
+    """COMPOSE_FILE as compose takes it from the .env beside the compose files (its last line)."""
+    try:
+        lines = [ln for ln in open(".env").read().splitlines() if ln.startswith("COMPOSE_FILE=")]
+    except OSError:
+        return ""
+    return lines[-1].split("=", 1)[1].strip() if lines else ""
+
+
 def compose_model(args: list[str], project: str, everything: bool = False) -> dict[str, dict]:
     """service -> {image, build, profiles} of the active services in the compose files compose would read."""
     files = [args[i + 1] for i, a in enumerate(args) if a == "-f"]
     if not files and os.environ.get("COMPOSE_FILE"):
         files = os.environ["COMPOSE_FILE"].split(":")
+    if not files and (named := env_compose_file()):
+        files = named.split(":")
     if not files:
         files = ["docker-compose.yml"] + (["docker-compose.override.yml"] if os.path.isfile("docker-compose.override.yml") else [])
     model: dict[str, dict] = {}
@@ -409,6 +420,12 @@ def service_image(model: dict[str, dict], svc: str, project: str) -> str:
 
 def compose(st: Store, args: list[str], project: str) -> int:
     s = st.s
+    # As compose: a file COMPOSE_FILE names that is not there stops every command.
+    if not any(a == "-f" for a in args) and (named := os.environ.get("COMPOSE_FILE") or env_compose_file()):
+        for f in named.split(":"):
+            if not os.path.isfile(f):
+                print(f'compose file "{f}" set by COMPOSE_FILE environment variable is invalid: stat {os.path.abspath(f)}: no such file or directory', file=sys.stderr)
+                return 1
     if "exec" in args and "drop-litellm-database" in args:
         # The app's command after an upgrade from before 8.0 (FAKE_DROP_RC 3: the import not done yet).
         rc = int(os.environ.get("FAKE_DROP_RC", "0"))

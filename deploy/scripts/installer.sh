@@ -553,6 +553,7 @@ OLD_NAMES_BEFORE=8.0.0
 from_old_names() { [[ -n "${FROM:-}" && "$(vercmp "$FROM" "$OLD_NAMES_BEFORE")" == -1 ]]; }
 # A feature id as this release names it.
 feature_now_named() { case "$1" in argus) echo code-intel ;; ha) echo valkey ;; *) echo "$1" ;; esac; }
+without_ha() { tr ':' '\n' <<<"$1" | grep -vx 'ha.yml' | paste -sd: -; }   # a COMPOSE_FILE without 7.x's ha.yml
 carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their new names (before merge_env adds them anew)
   local env="$DEPLOY/.env" old new val
   from_old_names || return 0
@@ -571,7 +572,7 @@ carry_env() {   # carry_env plan|do: .env's keys from before 8.0, under their ne
   # set, so a rollback (whose deploy/ has ha.yml again) puts FROM's back.
   local cf; cf="$(env_get COMPOSE_FILE)"
   if [[ ":$cf:" == *":ha.yml:"* ]]; then
-    new="$(tr ':' '\n' <<<"$cf" | grep -vx 'ha.yml' | paste -sd: -)"
+    new="$(without_ha "$cf")"
     if [[ $1 == plan ]]; then would ".env: COMPOSE_FILE without ha.yml (LiteLLM's replicas; 8.0 has none)${new:+: $new}"
     else
       if [[ -n "$new" ]]; then env_edit "$env" COMPOSE_FILE "COMPOSE_FILE=$new" || die "writing $env failed"
@@ -1336,6 +1337,11 @@ check_compose_files() {   # check_compose_files fresh|upgrade
   cp -a "$BUNDLE/deploy/." "$tmp/" || { rm -rf "$tmp"; die "cannot copy the bundle's deploy/ to $tmp"; }
   if [[ -f "$DEPLOY/.env" ]]; then
     cp -p "$DEPLOY/.env" "$tmp/.env"
+    # As carry_env leaves it: a COMPOSE_FILE from before 8.0 without ha.yml, which 8.0 does not ship.
+    if [[ ":$(env_get COMPOSE_FILE "$tmp/.env"):" == *":ha.yml:"* ]]; then
+      local cfv; cfv="$(without_ha "$(env_get COMPOSE_FILE "$tmp/.env")")"
+      if [[ -n "$cfv" ]]; then env_edit "$tmp/.env" COMPOSE_FILE "COMPOSE_FILE=$cfv"; else env_edit "$tmp/.env" COMPOSE_FILE; fi
+    fi
     # What merge_env would add: each key the release's compose file cannot start without.
     for key in $(required_keys "$tmp"); do grep -q "^$key=." "$tmp/.env" || printf '%s=preflight\n' "$key" >> "$tmp/.env"; done
   else

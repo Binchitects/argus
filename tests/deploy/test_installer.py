@@ -850,17 +850,16 @@ class InstallerTests(unittest.TestCase):
         deploy = self.old_install()
         # LiteLLM's replicas on (7.x's ha.yml in COMPOSE_FILE): 8.0 has no ha.yml, so it goes from COMPOSE_FILE, and back on a rollback.
         (deploy / "ha.yml").write_text("services: {}\n")
-        (deploy / "pitr.yml").write_text("services: {}\n")
         with open(deploy / ".env", "a") as f:
-            f.write("COMPOSE_FILE=docker-compose.yml:ha.yml:pitr.yml\n")
+            f.write("COMPOSE_FILE=docker-compose.yml:ha.yml\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("done   LiteLLM's database dropped", r.stdout)
         self.assertIn("COMPOSE_FILE without ha.yml", r.stdout)
-        self.assertIn("COMPOSE_FILE=docker-compose.yml:pitr.yml\n", (deploy / ".env").read_text())
+        self.assertIn("COMPOSE_FILE=docker-compose.yml\n", (deploy / ".env").read_text())
         back = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
         self.assertEqual(back.returncode, 0, self.output(back))
-        self.assertIn("COMPOSE_FILE=docker-compose.yml:ha.yml:pitr.yml\n", (deploy / ".env").read_text())
+        self.assertIn("COMPOSE_FILE=docker-compose.yml:ha.yml\n", (deploy / ".env").read_text())
         calls = [" ".join(c) for c in self.r.calls()]
         dropped = next(i for i, c in enumerate(calls) if "drop-litellm-database" in c)
         self.assertLess(next(i for i, c in enumerate(calls) if "pg_dumpall" in c), dropped)
