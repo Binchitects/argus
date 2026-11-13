@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <title>Arena</title>
-  <!-- The wise one: an owl's face in the Arena's A, its eyes open; no name in it (the names are the build's). -->
+  <!-- The wise one: an owl in the Arena's A (its ear tufts, facial disc, brow and chest), its eyes open; no name in it (the names are the build's). -->
   <defs>
     <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
       <stop offset="0" stop-color="#12304a"/>
@@ -22,8 +22,13 @@
     </radialGradient>
   </defs>
   <rect x="72" y="72" width="880" height="880" rx="230" fill="url(#bg)"/>
+  <!-- The owl around the A: its ear tufts rising from the A's shoulders, and the facial disc the eyes sit in. -->
+  <path d="M440 226 C424 184 398 146 352 104 C420 122 466 160 488 204 Z" fill="url(#a)"/>
+  <path d="M584 226 C600 184 626 146 672 104 C604 122 558 160 536 204 Z" fill="url(#a)"/>
   <!-- The A: its peak the owl's crown, its legs the wings. -->
   <path d="M160 790 L428 238 Q446 204 482 204 L542 204 Q578 204 596 238 L864 790 L748 790 Q724 790 710 764 L512 352 L314 764 Q300 790 276 790 Z" fill="url(#a)"/>
+  <!-- The facial disc: a heart of darker feathers behind the eyes, its rim the A's light. -->
+  <path d="M512 468 C468 396 232 388 234 556 C236 702 404 742 512 690 C620 742 788 702 790 556 C792 388 556 396 512 468 Z" fill="#0b4f4a" stroke="#5eead4" stroke-opacity="0.55" stroke-width="10"/>
   <!-- The face: two eyes side by side, the beak between them. -->
   <circle cx="392" cy="556" r="132" fill="url(#white)"/>
   <circle cx="632" cy="556" r="132" fill="url(#white)"/>
@@ -34,4 +39,7 @@
   <circle cx="426" cy="534" r="15" fill="#ffffff"/>
   <circle cx="642" cy="534" r="15" fill="#ffffff"/>
   <path d="M512 640 L476 600 Q512 584 548 600 Z" fill="#f59e0b"/>
+  <!-- A wise owl's brow over the eyes, and its chest feathers between the A's legs. -->
+  <path d="M268 446 Q392 424 512 508 Q632 424 756 446" fill="none" stroke="#99f6e4" stroke-width="16" stroke-linecap="round"/>
+  <path d="M470 724 l20 20 l20 -20 M514 724 l20 20 l20 -20 M492 760 l20 20 l20 -20" fill="none" stroke="#5eead4" stroke-opacity="0.8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
