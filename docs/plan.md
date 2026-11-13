@@ -74,6 +74,13 @@ program, and Edge or Chrome 109.
    can make now and makes, in numbers that read right.
 8. **A test bench under Models**: a model's capability (what it answers well) and capacity (how much at once) tested.
 9. **Chat sync between Code Arena and the Arena that never misses**.
+10. **The sign-in's eyes, the logo and the pattern**: better eyes on the sign-in page, the logo more an owl (the eyes in
+    the A kept), and the brand's symbol as a pattern everywhere.
+11. **Agents and scheduled tasks in Code Arena** (asked 2026-11-13): Arena's agents (Agent Studio) and scheduled tasks
+    made, run and followed from Code Arena too, the IDE and the terminal.
+
+Done so far: 1 (YaRN on vLLM, SGLang, LMDeploy), 2 (time accounting), 5 (an answer cut at its longest carries on by
+itself), 10.
 
 ## Next
 
