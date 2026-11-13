@@ -2437,7 +2437,8 @@ function Welcome() {
     [useKeyFor('workbench.action.openSettings'), 'Settings'],
   ]
   return (
-    <div className="@container absolute inset-0 grid place-items-center overflow-auto p-6">
+    // The owl's pattern behind the welcome, as behind every page of the Arena.
+    <div className="owl-pattern @container absolute inset-0 grid place-items-center overflow-auto p-6">
       <div className="grid w-full max-w-sm min-w-0 animate-enter justify-items-center gap-4 text-center">
         <div className="grid size-14 place-items-center rounded-2xl border bg-card shadow-sm">
           <FileDiff className="size-6 text-primary" aria-hidden="true" />
