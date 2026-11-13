@@ -458,6 +458,37 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
+    public async Task An_answer_cut_again_and_again_carries_on_until_it_ends_without_a_word_to_the_person()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var asked = 0;
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY.") : ++asked < 9
+            ? Reply.Say($"part {asked} ") with { Finish = "length", Completion = 500 }
+            : Reply.Say("the end.");
+        await using var rt = await StartAsync(h);
+        var heard = new Heard();
+        rt.Agent.Events = heard;
+        await rt.Agent.RunAsync("write a very long answer", new Spend(), CancellationToken.None);
+        // Far past the three carry-ons of before: every cut is carried on, and the person is not told of any.
+        Assert.Equal(9, asked);
+        Assert.DoesNotContain(heard.Notices, n => n.Contains("output limit", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_answer_cut_with_the_same_words_each_time_stops()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var asked = 0;
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY.") : (++asked < 50 ? Reply.Say("the same words") with { Finish = "length", Completion = 500 } : Reply.Say("end"));
+        await using var rt = await StartAsync(h);
+        var heard = new Heard();
+        rt.Agent.Events = heard;
+        await rt.Agent.RunAsync("write", new Spend(), CancellationToken.None);
+        Assert.Equal(1 + Agent.MaxStuckCuts, asked);
+        Assert.Contains(heard.Notices, n => n.EndsWith("stopping here.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_summary_asks_for_no_more_than_the_models_longest_answer()
     {
         _gateway.MaxOutput = 1_000;

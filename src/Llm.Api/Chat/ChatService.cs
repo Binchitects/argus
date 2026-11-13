@@ -76,6 +76,18 @@ public sealed partial class ChatService(
     private const int ResearchRounds = 16;
 
     /// <summary>
+    /// The most times one answer carries on after a cut at the output limit (each carry-on writes up to the longest answer
+    /// again): a bound against a model that never ends, far past any answer a person reads.
+    /// </summary>
+    internal const int MaxCarryOns = 64;
+
+    public const string CarryOnNote = "(Your answer was cut by the output limit: it is above. Carry on exactly where it stopped, mid-sentence if it stopped there, without repeating any of it.)";
+
+    internal const string CutCallNote = "(Your tool call was cut by the output limit before it ended, so it did not run. Make it again in smaller parts.)";
+
+    internal const string ThoughtOutNote = "(Your thinking used the whole output limit. Answer now, from what you have thought.)";
+
+    /// <summary>
     /// Deep research with sub-agents: in how many rounds the answer may delegate (the research, then
     /// its gaps) before it writes the report. The delegate calls of one round are one step, and a call
     /// whose parts never ran (refused for its arguments, or declined) is none. Measured: the answer's
@@ -654,6 +666,12 @@ public sealed partial class ChatService(
             }
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
+            // An answer cut at the output limit carries on in the same message (CarryOn): how many times, what had come by the
+            // last cut (a carry-on that brings nothing ends it), and the messages the carry-on put at the request's end.
+            var carriedOn = 0;
+            var streamed = 0L;
+            var streamedAtCut = -1L;
+            var carryMessages = 0;
             var clock = Stopwatch.StartNew();
             var timing = _answerClock.Round(msg);
             TimeSpan? thoughtFrom = null;
@@ -697,6 +715,7 @@ public sealed partial class ChatService(
                             cut = true;
                             break;
                         case ReasoningDelta r:
+                            streamed += r.Text.Length;
                             thoughtFrom ??= clock.Elapsed;
                             reasoning.Append(r.Text);
                             await emit(new { type = "reasoning", text = r.Text, at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
@@ -721,6 +740,7 @@ public sealed partial class ChatService(
                                 await emit(new { type = "thought", ms = msg.ThinkingMs });
                             }
                             content.Append(c.Text);
+                            streamed += c.Text.Length;
                             await emit(new { type = "content", text = c.Text });
                             if (loopedAnswer.Add(c.Text))
                             {
@@ -738,6 +758,13 @@ public sealed partial class ChatService(
                             EndThinking();
                             var slot = calls.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
                             calls[t.Index] = (t.Id ?? slot.Id, t.Name ?? slot.Name, slot.Args.Append(t.Arguments));
+                            streamed += (t.Name?.Length ?? 0) + (t.Arguments?.Length ?? 0);
+                            break;
+                        case UsageReport u when carriedOn > 0:
+                            // A carry-on: the context is the last request's, what was written and its cost all of them together.
+                            (msg.PromptTokens, msg.CachedTokens) = (u.Prompt, u.Cached);
+                            msg.CompletionTokens = (msg.CompletionTokens ?? 0) + u.Completion;
+                            msg.Cost = (msg.Cost ?? 0) + price.Cost(u.Prompt, u.Cached, u.Completion);
                             break;
                         case UsageReport u:
                             (msg.PromptTokens, msg.CachedTokens, msg.CompletionTokens) = (u.Prompt, u.Cached, u.Completion);
@@ -764,9 +791,40 @@ public sealed partial class ChatService(
                 await emit(new { type = "thought", ms = msg.ThinkingMs, cutShort = true });
                 request["chat_template_kwargs"] = ThinkingPresets.TemplateKwargs("off");
                 }
+                if (finish == "length" && !withheld && streamed > streamedAtCut && carriedOn < MaxCarryOns)
+                {
+                    // Cut at the output limit (the chat's longest answer, the model's, or the end of its context): the model
+                    // carries on where it stopped, in this same message, as many times as the answer needs, the person not told.
+                    // A tool call cut half-way cannot run: it is dropped, and the model asked to make it again in smaller parts.
+                    streamedAtCut = streamed;
+                    carriedOn++;
+                    var cutCall = calls.Count > 0;
+                    calls.Clear();
+                    messages.RemoveRange(messages.Count - carryMessages, carryMessages);
+                    carryMessages = 0;
+                    if (content.Length > 0)
+                    {
+                        messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = content.ToString() });
+                        carryMessages++;
+                    }
+                    messages.Add(new JsonObject { ["role"] = "user", ["content"] = cutCall ? CutCallNote : content.Length > 0 ? CarryOnNote : ThoughtOutNote });
+                    carryMessages++;
+                    if (content.Length == 0 && request["chat_template_kwargs"] is not null)
+                    {
+                        // Its thinking took the whole limit: it answers now, without thinking more.
+                        request["chat_template_kwargs"] = ThinkingPresets.TemplateKwargs("off");
+                    }
+                    request["messages"] = messages.DeepClone();
+                    if (!budget.Fits(budget.Tokens(request, ImageWeight)))
+                    {
+                        await MakeRoomAsync(request, null);
+                    }
+                    finish = null;
+                    continue;
+                }
                 break;
                 }
-                catch (ChatGatewayException ex) when (ex.ContextOverflow && !retried && content.Length == 0 && reasoning.Length == 0 && calls.Count == 0)
+                catch (ChatGatewayException ex) when (ex.ContextOverflow && !retried && (carriedOn > 0 ? streamed == streamedAtCut : content.Length == 0 && reasoning.Length == 0 && calls.Count == 0))
                 {
                     // Refused as too long before a word of it came: room is made (or, the engine's shared cache being full, a moment
                     // passes), and the same round is asked once more. A second refusal ends the answer.
@@ -814,21 +872,17 @@ public sealed partial class ChatService(
                 return;
             }
 
-            var own = request["max_tokens"] is JsonValue asked && asked.TryGetValue<int>(out var most) ? most : (int?)null;
-            if (finish == "length" && msg.PromptTokens is { } read && msg.CompletionTokens is { } written && read + written >= budget.Context * 0.95
-                && !(own is { } longest && written >= longest))
+            // The carry-on's messages were for the model only: the answer is this message, whole.
+            messages.RemoveRange(messages.Count - carryMessages, carryMessages);
+            if (finish == "length" && !withheld)
             {
-                // Not the answer's own limit: the context ran out while it wrote. The next message compacts by the usual rules.
-                await emit(new { type = "notice", kind = "cut_at_context", text = "The answer reached the end of the model's context. The chat is compacted before your next message." });
-            }
-            else if (finish == "length")
-            {
-                // Its own limit: the chat's Longest answer, else the model's (the engine's n-predict, or the gateway's cap).
-                var stopped = msg.CompletionTokens is { } n ? $"{n:N0} tokens, " : "";
+                // Still cut after carrying on: the model wrote nothing new when asked to go on, or went on far past any answer.
                 await emit(new
                 {
                     type = "notice", kind = "cut_at_longest",
-                    text = $"The answer stopped at its longest ({stopped}{(own is null ? "the model's longest answer" : "this chat's Longest answer")}): ask it to go on.",
+                    text = carriedOn >= MaxCarryOns
+                        ? $"The answer went on past its output limit {carriedOn} times and stopped there: ask it to go on."
+                        : "The answer stopped at its output limit, the model adding nothing when asked to go on: ask it again.",
                 });
             }
             // The whole answer through the answer rules, the model's checks too; withheld, it ends here, its tool calls not run.

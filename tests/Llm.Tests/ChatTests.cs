@@ -901,18 +901,39 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
-    public async Task An_answer_that_stops_at_its_longest_says_so()
+    public async Task An_answer_cut_at_its_longest_carries_on_in_the_same_message_until_it_ends()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useCodeIntel = false });
+        // Cut five times at its longest: carried on each time, the person told of none, the answer one message.
+        var events = await SendAsync(b, id, "[cut 5] write it all");
+        Assert.DoesNotContain(events, e => e.GetProperty("type").GetString() == "notice");
+        Assert.Single(events, e => e.GetProperty("type").GetString() == "assistant");
+        Assert.Equal(6, AnswersOf(email).Count());
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var answer = Assert.Single(await scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatMessages.Where(m => m.ConversationId == id && m.Role == "assistant").ToListAsync());
+            Assert.Equal("part0 part1 part2 part3 part4 the end.", answer.Content);
+            Assert.Equal(600, answer.CompletionTokens);
+        }
+        // Each carry-on asked with the answer so far and the note; the chat keeps neither.
+        var last = RequestsOf(email, summaries: false).Last()["messages"]!.AsArray();
+        Assert.Equal("part0 part1 part2 part3 part4 ", last[^2]!["content"]!.ToString());
+        Assert.Equal(ChatService.CarryOnNote, last[^1]!["content"]!.ToString());
+        await SendAsync(b, id, "and now?");
+        var history = RequestsOf(email, summaries: false).Last()["messages"]!.AsArray();
+        Assert.DoesNotContain(history, m => m!["content"]?.ToString() == ChatService.CarryOnNote);
+        Assert.Contains(history, m => m!["content"]?.ToString() == "part0 part1 part2 part3 part4 the end.");
+    }
+
+    [Fact]
+    public async Task An_answer_that_adds_nothing_when_asked_to_go_on_stops_and_says_so()
     {
         var (b, _) = await PersonAsync();
         var id = await NewChatAsync(b, new { useCodeIntel = false });
-        // The model's longest answer (8,192: the engine's n-predict, or the gateway's cap) reached: said, with what to do.
-        var notice = Assert.Single(await SendAsync(b, id, "[length 8192] write it all"), e => e.GetProperty("type").GetString() == "notice");
-        Assert.Equal(("cut_at_longest", "The answer stopped at its longest (8,192 tokens, the model's longest answer): ask it to go on."),
+        var notice = Assert.Single(await SendAsync(b, id, "[cut stuck] write it all"), e => e.GetProperty("type").GetString() == "notice");
+        Assert.Equal(("cut_at_longest", "The answer stopped at its output limit, the model adding nothing when asked to go on: ask it again."),
             (notice.GetProperty("kind").GetString(), notice.GetProperty("text").GetString()));
-        // The chat's own.
-        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { maxTokens = 500 }));
-        notice = Assert.Single(await SendAsync(b, id, "[length 500] write it all"), e => e.GetProperty("type").GetString() == "notice");
-        Assert.Equal("The answer stopped at its longest (500 tokens, this chat's Longest answer): ask it to go on.", notice.GetProperty("text").GetString());
     }
 
     [Fact]

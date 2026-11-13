@@ -294,10 +294,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     with room for what came after it: a 2,048-token model's chat compacts as
     often as it must. An earlier summary that leaves no room (one written
     before, when summaries could be half the context) is summarized again
-    first. An answer cut at the
-    end of the context says so, and the next message compacts. One that stops
-    at its longest (the chat's **Longest answer**, else the model's, which the
-    engine holds every answer to) says so too: ask it to go on. vLLM and SGLang
+    first. An answer cut at its longest (the chat's **Longest answer**, else
+    the model's, which the engine holds every answer to) or at the end of the
+    context carries on by itself, in the same message, as many times as it
+    needs (compacting first when the context is why); a tool call cut half-way
+    is made again in smaller parts. Only an answer that adds nothing when asked
+    to go on, or goes on 64 times, stops and says so. vLLM and SGLang
     refuse a prompt that leaves too little for the answer asked: the chat reads
     their count, compacts and asks again, as for any refusal. When the chat
     still does not fit (its summary failed, or what is kept is too big), its

@@ -34,6 +34,8 @@ namespace Llm.Tests;
 ///   [context overflow once]  refused so until the chat was compacted (a summary in the system message)
 ///   [summary limit N]  a summary asked of more than N characters that holds it is refused as too long
 ///   [length N]  stops at its longest, as an engine does at max_tokens or its n-predict: N tokens written, finish_reason length
+///   [cut K]     a long answer: cut at its longest (finish_reason length) K times, each part "partI ", then "the end."
+///   [cut stuck] cut at its longest, then (asked to go on) adds nothing and is cut again
 /// A model with a window of its own (<see cref="Windows"/>) refuses a prompt (3 characters a token) and its max_tokens together
 /// longer than it, as vLLM does, and its summaries are as long as asked (max_tokens), up to half what they read, as a small model writes them.
 /// Its /v1/images/generations answers with a small PNG.
@@ -606,6 +608,24 @@ public sealed class FakeModel : HttpMessageHandler
         {
             // Summarize and tag: a summary, a known tag and one not known (which is dropped).
             chunks = [Delta(new JsonObject { ["content"] = "Summary: Asks which port Postgres uses.\n" }), Delta(new JsonObject { ["content"] = "Tags: security, made-up" }), Finish("stop")];
+        }
+        else if (lastUser.StartsWith("(Your answer was cut", StringComparison.Ordinal)
+            && messages.LastOrDefault(m => m!["role"]!.GetValue<string>() == "user" && !m["content"]!.ToString().StartsWith("(Your", StringComparison.Ordinal))?["content"]?.ToString() is { } cutQuestion
+            && System.Text.RegularExpressions.Regex.Match(cutQuestion, @"\[cut (\d+|stuck)\]") is { Success: true } cuts)
+        {
+            // Carrying on: the answer so far is the assistant message before the note.
+            var sofar = messages[^2]!["role"]!.GetValue<string>() == "assistant" ? messages[^2]!["content"]!.ToString() : "";
+            var done = System.Text.RegularExpressions.Regex.Count(sofar, "part");
+            written = 100;
+            chunks = cuts.Groups[1].Value == "stuck" ? [Finish("length")]
+                : done < int.Parse(cuts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)
+                    ? [Delta(new JsonObject { ["content"] = $"part{done} " }), Finish("length")]
+                    : [Delta(new JsonObject { ["content"] = "the end." }), Finish("stop")];
+        }
+        else if (System.Text.RegularExpressions.Regex.Match(lastUser, @"\[cut (\d+|stuck)\]") is { Success: true })
+        {
+            written = 100;
+            chunks = [Delta(new JsonObject { ["content"] = "part0 " }), Finish("length")];
         }
         else if (System.Text.RegularExpressions.Regex.Match(lastUser, @"\[length (\d+)\]") is { Success: true } longest)
         {

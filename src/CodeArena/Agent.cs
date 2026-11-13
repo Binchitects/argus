@@ -680,7 +680,7 @@ internal sealed partial class Agent
         }
         var last = "";
         var interrupted = 0;
-        var cut = 0;
+        var stuck = 0;
         var overflowed = false;
         var waitedForCache = false;
         for (var step = 0; step < MaxSteps; step++)
@@ -768,12 +768,17 @@ internal sealed partial class Agent
                 Warn($"The engine holds {Fmt.Tokens(held)} tokens, not the {Fmt.Tokens(Model.Context)} the gateway says: Code Arena compacts for {Fmt.Tokens(held)} from now on.");
                 Model.EngineWindow = (int)held;
             }
-            if (answer.FinishReason == "length" && cut < MaxCuts && (answer.Text.Length > 0 || answer.ToolCalls.Count > 0))
+            if (answer.FinishReason == "length" && (answer.Text.Length > 0 || answer.ToolCalls.Count > 0) && !(answer.ToolCalls.Count == 0 && answer.Text == last && ++stuck >= MaxStuckCuts))
             {
                 // Cut at the output limit (the window filled, or the model's longest answer): what came is kept, the
-                // conversation compacted when the window is why, and the model carries on where it stopped. A tool
-                // call cut half-way cannot run: it is dropped, and the model asked to do it in smaller parts.
-                cut++;
+                // conversation compacted when the window is why, and the model carries on where it stopped, as many times as
+                // the answer needs (within the turn's steps), the person not bothered with it. A tool call cut half-way cannot
+                // run: it is dropped, and the model asked to do it in smaller parts. Only a cut that brings nothing new, again
+                // and again, ends the turn (below).
+                if (answer.Text != last || answer.ToolCalls.Count > 0)
+                {
+                    stuck = 0;
+                }
                 var calls = answer.ToolCalls.Count > 0;
                 var kept = (JsonObject)answer.Message.DeepClone();
                 kept.Remove("tool_calls");
@@ -782,9 +787,6 @@ internal sealed partial class Agent
                     Add(kept, answer.Usage);
                 }
                 var windowFull = answer.Usage is { } u && u.Prompt + u.Completion >= Model.Context * 0.9;
-                Warn(calls
-                    ? "The model's tool call was cut at its output limit: it does it again in smaller parts."
-                    : windowFull ? "The answer reached the end of the model's window: compacting, then the model carries on." : "The answer reached the model's output limit: the model carries on.");
                 Add(new JsonObject
                 {
                     ["role"] = "user",
@@ -840,7 +842,7 @@ internal sealed partial class Agent
             {
                 if (answer.FinishReason == "length" && answer.Text.Length > 0)
                 {
-                    Warn("The answer was cut at the model's output limit.");
+                    Warn("The model wrote the same words again each time its answer was cut at its output limit: stopping here.");
                 }
                 // A command still running goes on without the turn: the model hears how it ended next time, and a
                 // command that ends while nobody asks starts a turn of its own (ContinueAsync).
@@ -1604,8 +1606,8 @@ internal sealed partial class Agent
     /// <summary>The longest answer of this session, in tokens.</summary>
     private long _longestAnswer;
 
-    /// <summary>The most times one turn carries on after an answer was cut.</summary>
-    public const int MaxCuts = 3;
+    /// <summary>How many cuts in a row that bring nothing new (the same words again) end the turn: the model is stuck, not long.</summary>
+    public const int MaxStuckCuts = 3;
 
     private const int DefaultReserve = 4_096;
 

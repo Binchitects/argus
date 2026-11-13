@@ -234,8 +234,9 @@ window is (`context 18.2k / 131k (14%), compacts at 80%`). The session keeps roo
 window for the answer: the model's longest answer (at most an eighth of the window), or the
 longest answer of this session and a fifth more (at most a third), so it compacts before a
 long answer would be cut. An answer cut anyway at the output limit is kept and the model
-carries on where it stopped (compacting first when the window was why); a tool call cut
-half-way is done again in smaller parts. **Ctrl+C** stops the turn and
+carries on where it stopped, without a word to you, as many times as the turn needs
+(compacting first when the window was why); a tool call cut half-way is done again in
+smaller parts. Only cuts that bring the same words again and again end the turn. **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
 prompt twice leaves. What is typed while a turn runs does not stop it, as in
 Claude Code: a line ended with Enter is read by the model at the turn's next
